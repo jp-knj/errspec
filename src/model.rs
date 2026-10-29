@@ -77,9 +77,11 @@ pub struct Finding {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scenario_id: Option<Box<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
+    pub file: Option<Box<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub byte_offset: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
 }
 
 impl Finding {
@@ -92,6 +94,7 @@ impl Finding {
             scenario_id: None,
             file: None,
             byte_offset: None,
+            line: None,
         }
     }
     pub fn for_case(mut self, id: &str, tag: &str) -> Self {

@@ -88,8 +88,9 @@ fn inspect_call(
     let at = |code: &str, message: String| {
         let location = scan::location(root, call);
         let mut finding = Finding::new(code, message);
-        finding.file = Some(location.file);
+        finding.file = Some(location.file.into());
         finding.byte_offset = Some(location.byte_offset);
+        finding.line = Some(location.line as u32);
         finding
     };
     if inside_describe(checker, call) {
