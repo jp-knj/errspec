@@ -86,6 +86,24 @@ fn refuses_either_existing_output_without_leaving_the_other() {
     }
 }
 #[test]
+fn missing_discriminant_points_to_the_option() {
+    let dir = fixture();
+    fs::write(
+        dir.path().join("errors.ts"),
+        "export type Failure={type:'Offline'}|{type:'Denied'};",
+    )
+    .unwrap();
+    let (status, report) = init(&dir, "bun");
+    assert_eq!(status, 2);
+    let error = report["error"].as_str().unwrap();
+    assert!(
+        error.starts_with("Missing discriminant \"_tag\""),
+        "{error}"
+    );
+    assert!(error.ends_with("--discriminant"), "{error}");
+    assert!(!dir.path().join("errspec.json").exists());
+}
+#[test]
 fn unsupported_type_creates_nothing() {
     let dir = fixture();
     fs::write(
