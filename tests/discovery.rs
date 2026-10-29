@@ -283,3 +283,51 @@ fn reexported_declarations_are_one_candidate_and_distinct_declarations_stay_apar
         "{r}"
     );
 }
+
+#[test]
+fn candidates_built_only_from_dependency_declarations_are_external() {
+    let dir = project(&[(
+        "errors.ts",
+        "import type { SdkIssue } from 'sdk';
+export type Issue = Omit<SdkIssue, 'at'>;
+export type Passed = SdkIssue;
+export type Mixed = SdkIssue | { code: 'local' };
+export type Local = { code: 'local' } | { code: 'other' };",
+    )]);
+    let sdk = dir.path().join("node_modules/sdk");
+    fs::create_dir_all(&sdk).unwrap();
+    fs::write(
+        sdk.join("package.json"),
+        r#"{"name":"sdk","types":"index.d.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        sdk.join("index.d.ts"),
+        "export type SdkIssue = { code: 'unknown_page'; at: number } | { code: 'invalid_url'; at: number };",
+    )
+    .unwrap();
+    let (status, r) = scan(&dir, &["--discriminant", "code"]);
+    assert_eq!(status, 0, "{r}");
+    let external: Vec<_> = r["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["source"]["file"] == "errors.ts")
+        .map(|c| {
+            (
+                c["source"]["export"].as_str().unwrap(),
+                c.get("external").is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        external,
+        [
+            ("Issue", true),
+            ("Local", false),
+            ("Mixed", false),
+            ("Passed", true)
+        ],
+        "{r}"
+    );
+}

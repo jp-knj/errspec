@@ -232,7 +232,7 @@ import、再export、paths、具体化したgeneric、union/intersectionをtsrs�
 `unknowns`は動的なsignature、外部実装、解決できないPromise使用などを示します。`--fail-on-unknown`で未解決箇所を終了コード1にできます。
 `scanComplete`は解析処理の完了であり、`allRuntimeErrorsKnown`は常にfalseです。getter/proxy、eval、任意callback、暗黙の例外、厳密な条件分岐やfinallyの上書きは完全にはモデル化しません。
 依存の型情報は使いますが、node_modulesとプロジェクトディレクトリ外の実装を走査対象に含めません。
-候補は宣言ごとに1件で、barrelなどからの再exportは`reexports`に併記します。候補の既定識別子は`_tag,kind,type,code`です。`--discriminant code`などで変更できます。タグ型が業務上のエラーかはレビューしてください。
+候補は宣言ごとに1件で、barrelなどからの再exportは`reexports`に併記します。識別プロパティがすべて依存パッケージやプロジェクト外で宣言された型には`external: true`を付け、テキスト出力では後ろにまとめます。候補の既定識別子は`_tag,kind,type,code`です。`--discriminant code`などで変更できます。タグ型が業務上のエラーかはレビューしてください。
 
 | コマンド／オプション | 用途 |
 |---|---|

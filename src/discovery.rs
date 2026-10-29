@@ -17,6 +17,9 @@ pub struct Candidate {
     /// Other public paths to the same declaration. `source` names the declaring file when it exports the type.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reexports: Vec<Export>,
+    /// Every discriminant property is declared outside the project directory or in node_modules.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub external: bool,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
