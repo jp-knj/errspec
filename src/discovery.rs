@@ -111,6 +111,7 @@ impl Default for ScanReport {
                 "Implicit exceptions, getters/proxies, eval and arbitrary callback execution are not modeled.",
                 "Return error properties and finite discriminants are candidates; their domain meaning requires review.",
                 "Conditional catches/rethrows and finally overrides are conservatively approximated.",
+                "Static calls assume function declarations and built-in globals are not reassigned or monkey-patched; mutable aliases and callbacks are unresolved.",
             ],
             diagnostics: vec![],
         }

@@ -22,6 +22,6 @@ The managed type is `StringIssue` in `library/src/schemas/string/string.ts`, usi
 | Remove both the comparison and its requirement | Default verification passes; strict baseline reports EC014 |
 | Restore the scenario | Strict verification passes |
 
-The experiment adds six setup files including package manifests and a baseline, with zero upstream source edits. The initial debug-build run found 1,080 tagged-type candidates across 572 source files, with 518 unresolved call/use sites. Many candidates are schemas or re-exports, not distinct error types. This is a concrete limit of automatic discovery: candidate review and explicit type selection remain necessary, and an unresolved call is not evidence that it cannot fail.
+The experiment adds six setup files including package manifests and a baseline, with zero upstream source edits. The release-build run found 1,080 tagged-type candidates across 572 source files, with 527 unresolved call/use sites. Many candidates are schemas or re-exports, not distinct error types. This is a concrete limit of automatic discovery: candidate review and explicit type selection remain necessary, and an unresolved call is not evidence that it cannot fail.
 
 The script records individual command durations and tool versions. These are execution times on one machine, not measured human onboarding time, comparative performance benchmarks, or evidence of long-term adoption. It verifies one schema and one scenario; it does not establish coverage of all Valibot failures.

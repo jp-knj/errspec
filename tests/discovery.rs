@@ -184,6 +184,53 @@ export function caller() { overload(''); }
 }
 
 #[test]
+fn matching_signatures_do_not_prove_runtime_call_targets() {
+    let dir = project(&[(
+        "bindings.ts",
+        r#"
+function leaf(): void { throw new Error('leaf'); }
+function safe(): void {}
+const typedAlias: typeof leaf = safe;
+let mutable = leaf;
+export function typed() { typedAlias(); }
+export function callback(f: typeof leaf) { f(); }
+export function reassigned() { mutable(); }
+export function member(obj: { f: typeof leaf }) { obj.f(); }
+export function customPromise(P: PromiseConstructor) { return P.reject('x'); }
+const NativePromise = Promise;
+export function nativeAlias() { return NativePromise.reject('x'); }
+const arrow = () => { throw new Error('arrow'); };
+export function directArrow() { arrow(); }
+export async function mutablePromise() { let p = nativeAlias(); try { await p; } catch {} }
+"#,
+    )]);
+    let (status, r) = scan(&dir, &[]);
+    assert_eq!(status, 0, "{r}");
+    for name in [
+        "callback",
+        "reassigned",
+        "member",
+        "customPromise",
+        "mutablePromise",
+    ] {
+        assert_eq!(function(&r, name)["hasUnknown"], true, "{name}: {r}");
+    }
+    for name in ["typed", "callback", "reassigned", "customPromise"] {
+        assert!(
+            function(&r, name)["effects"].as_array().unwrap().is_empty(),
+            "{name}: {r}"
+        );
+    }
+    for name in ["nativeAlias", "directArrow"] {
+        assert_eq!(function(&r, name)["hasUnknown"], false, "{name}: {r}");
+        assert!(
+            !function(&r, name)["effects"].as_array().unwrap().is_empty(),
+            "{name}: {r}"
+        );
+    }
+}
+
+#[test]
 fn invalid_types_fail_without_claiming_a_complete_scan() {
     let dir = project(&[("bad.ts", "export const value: number = 'wrong';")]);
     let (status, r) = scan(&dir, &[]);

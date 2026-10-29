@@ -19,7 +19,7 @@
     "files": 572,
     "candidates": 1080,
     "origins": 9,
-    "unknowns": 518
+    "unknowns": 527
   },
   "checks": [
     {
@@ -62,7 +62,7 @@
         "--no-fund",
         "file:<local-testkit>"
       ],
-      "milliseconds": 457
+      "milliseconds": 1107
     },
     {
       "command": "errspec",
@@ -75,7 +75,7 @@
         "--format",
         "json"
       ],
-      "milliseconds": 552
+      "milliseconds": 1002
     },
     {
       "command": "errspec",
@@ -96,7 +96,7 @@
         "--format",
         "json"
       ],
-      "milliseconds": 704
+      "milliseconds": 513
     },
     {
       "command": "errspec",
@@ -108,7 +108,7 @@
         "--format",
         "json"
       ],
-      "milliseconds": 648
+      "milliseconds": 496
     },
     {
       "command": "errspec",
@@ -120,7 +120,7 @@
         "--format",
         "json"
       ],
-      "milliseconds": 902
+      "milliseconds": 523
     },
     {
       "command": "errspec",
@@ -131,7 +131,7 @@
         "--format",
         "json"
       ],
-      "milliseconds": 855
+      "milliseconds": 637
     },
     {
       "command": "errspec",
@@ -146,7 +146,7 @@
         "--format",
         "json"
       ],
-      "milliseconds": 648
+      "milliseconds": 1006
     },
     {
       "command": "errspec",
@@ -155,7 +155,7 @@
         "--format",
         "json"
       ],
-      "milliseconds": 442
+      "milliseconds": 565
     },
     {
       "command": "bun",
@@ -163,7 +163,7 @@
         "test",
         "./errspec.generated.test.ts"
       ],
-      "milliseconds": 25
+      "milliseconds": 42
     },
     {
       "command": "errspec",
@@ -175,7 +175,7 @@
         "--format",
         "json"
       ],
-      "milliseconds": 452
+      "milliseconds": 600
     },
     {
       "command": "errspec",
@@ -187,22 +187,7 @@
         "--format",
         "json"
       ],
-      "milliseconds": 441
-    },
-    {
-      "command": "errspec",
-      "args": [
-        "verify",
-        "--runner",
-        "bun",
-        "--only-contract-tests",
-        "--baseline",
-        "baseline.json",
-        "--strict-baseline",
-        "--format",
-        "json"
-      ],
-      "milliseconds": 510
+      "milliseconds": 493
     },
     {
       "command": "errspec",
@@ -217,7 +202,22 @@
         "--format",
         "json"
       ],
-      "milliseconds": 486
+      "milliseconds": 465
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--baseline",
+        "baseline.json",
+        "--strict-baseline",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 451
     },
     {
       "command": "bun",
