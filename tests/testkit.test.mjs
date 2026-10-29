@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { scenarioTest, scenarioTestName } from "../packages/testkit/index.mjs";
 
 function register(body, id = "one") {
@@ -10,6 +11,35 @@ function register(body, id = "one") {
   scenarioTest((_name, run) => { callback = run; }, import.meta.url, { contract: "x", id, tag: "A" }, body);
   return callback;
 }
+
+test("SDK output matches the observation fixture consumed by Rust", async () => {
+  const expected = JSON.parse(readFileSync(new URL("./fixtures/observation-v1.json", import.meta.url), "utf8"));
+  const directory = mkdtempSync(join(tmpdir(), "errspec-protocol-"));
+  const previous = [process.env.ERRSPEC_OBSERVATIONS, process.env.ERRSPEC_RUN_ID];
+  process.env.ERRSPEC_OBSERVATIONS = directory;
+  process.env.ERRSPEC_RUN_ID = expected.runId;
+  try {
+    let callback;
+    scenarioTest((_name, run) => { callback = run; }, import.meta.url, {
+      contract: expected.contractId, id: expected.scenarioId, tag: expected.tag,
+    }, async s => {
+      const request = s.fault("gateway", async () => ({ status: 429 }));
+      await request();
+      s.check("status", (await request()).status, 429);
+    });
+    await callback();
+    const files = readdirSync(directory);
+    assert.equal(files.length, 1);
+    const actual = JSON.parse(readFileSync(join(directory, files[0]), "utf8"));
+    assert.equal(actual.file, fileURLToPath(import.meta.url));
+    assert.deepEqual({ ...actual, file: "scenario.test.ts" }, expected);
+  } finally {
+    ["ERRSPEC_OBSERVATIONS", "ERRSPEC_RUN_ID"].forEach((key, i) => {
+      if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i];
+    });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("fault observes asynchronous invocations and equality checks", async () => {
   await register(async s => {

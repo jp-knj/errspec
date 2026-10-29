@@ -1,5 +1,5 @@
 use crate::{Runner, tsrs_adapter::TsrsAdapter};
-use errspec::model::{Config, Source};
+use errspec::model::Source;
 use serde_json::{Value, json};
 use std::{
     fs::{self, OpenOptions},
@@ -74,12 +74,7 @@ pub(crate) fn run(request: InitRequest) -> Result<Value, String> {
         export: request.export,
         discriminant: request.discriminant,
     };
-    let input = Config {
-        schema_version: 2,
-        project: project.to_string_lossy().into_owned(),
-        contracts: vec![],
-    };
-    let adapter = TsrsAdapter::open(root, &input).map_err(|errors| {
+    let adapter = TsrsAdapter::open(root, &project.to_string_lossy()).map_err(|errors| {
         errors
             .iter()
             .map(|d| format!("{} {}", d.code, d.message))

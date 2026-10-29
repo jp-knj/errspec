@@ -1,5 +1,5 @@
 use crate::{Action, Cli, input::read_json, runner, tsrs_adapter};
-use errspec::{contract, model::*};
+use errspec::{config::ValidatedConfig, contract, model::*};
 use std::{
     fs,
     io::{self, Write},
@@ -20,14 +20,14 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
         .parent()
         .ok_or_else(|| Finding::new("EC_CONFIG", "Config has no parent directory"))?;
     let config: Config = read_json(&path, "EC_CONFIG")?;
-    contract::validate(&config)?;
-    if cli.strict_baseline && config.schema_version != 2 {
+    let config = ValidatedConfig::try_from(config)?;
+    if cli.strict_baseline && config.schema_version() != 2 {
         return Err(Finding::new(
             "EC_CONFIG",
             "--strict-baseline requires schemaVersion: 2 configuration",
         ));
     }
-    let adapter = match tsrs_adapter::TsrsAdapter::open(root, &config) {
+    let adapter = match tsrs_adapter::TsrsAdapter::open(root, config.project()) {
         Ok(adapter) => adapter,
         Err(errors) => {
             report.diagnostics.extend(errors);
@@ -35,8 +35,8 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
         }
     };
     report.analysis_complete = true;
-    for c in &config.contracts {
-        match adapter.tags(root, &c.source) {
+    for c in config.contracts() {
+        match adapter.tags(root, c.source()) {
             Ok(tags) => {
                 let (result, findings) = contract::compare(root, c, tags);
                 report.contracts.push(result);
@@ -45,8 +45,8 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
             Err(error) => {
                 report.analysis_complete = false;
                 let mut f = Finding::new("EC002", error);
-                f.contract_id = Some(c.id.as_str().into());
-                f.file = Some(c.source.file.clone());
+                f.contract_id = Some(c.id().into());
+                f.file = Some(c.source().file.clone());
                 report.diagnostics.push(f);
             }
         }
@@ -109,10 +109,10 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
         } => {
             let files = if *only_contract_tests {
                 config
-                    .contracts
+                    .contracts()
                     .iter()
-                    .flat_map(|c| &c.cases)
-                    .map(|c| root.join(&c.test.file))
+                    .flat_map(|c| c.cases())
+                    .map(|c| root.join(&c.test().file))
                     .collect::<std::collections::BTreeSet<_>>()
                     .into_iter()
                     .collect::<Vec<_>>()

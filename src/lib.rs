@@ -1,5 +1,6 @@
 //! Framework-independent contract comparison. The tsrs adapter is isolated in the CLI.
 pub mod bun;
+pub mod config;
 pub mod contract;
 pub mod discovery;
 pub mod evidence;
