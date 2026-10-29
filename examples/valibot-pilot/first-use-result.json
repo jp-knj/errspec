@@ -1,0 +1,91 @@
+{
+  "project": "https://github.com/open-circle/valibot",
+  "revision": "d72f76fcf70ccfa0a5ca341b80da1d440ac60b11",
+  "errspecRevision": "08b184ed7baa27a329abe6e3e952b493413a78e1",
+  "context": "Pinned library source with only the three errspec tarballs installed; upstream dev dependencies were not installed.",
+  "probes": [
+    {
+      "label": "unchanged-library-config",
+      "command": [
+        "errspec",
+        "init",
+        "--project",
+        "library/tsconfig.json",
+        "--source",
+        "src/schemas/string/string.ts",
+        "--export",
+        "StringIssue",
+        "--discriminant",
+        "type",
+        "--runner",
+        "bun",
+        "--format",
+        "json"
+      ],
+      "exitCode": 2,
+      "generatedFiles": [],
+      "diagnosticLineCount": 563,
+      "firstDiagnosticLines": [
+        "TS5108 Option 'moduleResolution=node10' has been removed. Please remove it from your configuration.",
+        "TS2307 Cannot find module 'vitest' or its corresponding type declarations.",
+        "TS2307 Cannot find module 'vitest' or its corresponding type declarations."
+      ],
+      "tags": null
+    },
+    {
+      "label": "focused-original-options",
+      "command": [
+        "errspec",
+        "init",
+        "--project",
+        "probe.tsconfig.json",
+        "--source",
+        "library/src/schemas/string/string.ts",
+        "--export",
+        "StringIssue",
+        "--discriminant",
+        "type",
+        "--runner",
+        "bun",
+        "--format",
+        "json"
+      ],
+      "exitCode": 2,
+      "generatedFiles": [],
+      "diagnosticLineCount": 1,
+      "firstDiagnosticLines": [
+        "TS5108 Option 'moduleResolution=node10' has been removed. Please remove it from your configuration."
+      ],
+      "tags": null
+    },
+    {
+      "label": "focused-bundler-options",
+      "command": [
+        "errspec",
+        "init",
+        "--project",
+        "probe.tsconfig.json",
+        "--source",
+        "library/src/schemas/string/string.ts",
+        "--export",
+        "StringIssue",
+        "--discriminant",
+        "type",
+        "--runner",
+        "bun",
+        "--format",
+        "json"
+      ],
+      "exitCode": 0,
+      "generatedFiles": [
+        "errspec.json",
+        "errspec.generated.test.ts"
+      ],
+      "diagnosticLineCount": 0,
+      "firstDiagnosticLines": [],
+      "tags": [
+        "string"
+      ]
+    }
+  ]
+}
