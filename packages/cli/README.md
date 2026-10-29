@@ -14,6 +14,6 @@ errspec init --project tsconfig.json --source src/errors.ts --export Failure --r
 errspec verify --runner bun --only-contract-tests
 ```
 
-Install `@errspec/testkit` at the same version and your chosen runner before executing the generated tests. Generated tests deliberately fail until the expected application behavior is implemented. `scan` reports possible propagation and unresolved calls; it never claims to find every runtime exception.
+Install `@errspec/testkit` at the same version and your chosen runner before executing the generated tests. Bun 1.2.19 or later is required because earlier versions omit test files from their JUnit reports; `test.concurrent` needs Bun 1.3 or later. Generated tests deliberately fail until the expected application behavior is implemented. `scan` reports possible propagation and unresolved calls; it never claims to find every runtime exception.
 
 Use `errspec --help` for commands and options. `verify` uses all runner-discovered tests by default; `--only-contract-tests` selects the registered files for gradual adoption. A reviewed baseline plus `--strict-baseline` detects removal of required checks from both the configuration and tests.

@@ -31,6 +31,43 @@ impl ObservationSession {
     }
 }
 
+/// Bun before 1.2.19 omits the file attribute from JUnit suites, so no case could match.
+const MINIMUM_BUN: (u64, u64, u64) = (1, 2, 19);
+
+/// Fail before running tests when the version is known to be too old.
+/// An unknown version still runs; the report parser rejects unusable output.
+fn reject_unsupported_bun(executable: &Path, root: &Path) -> Result<(), Finding> {
+    let Ok(output) = Command::new(executable)
+        .arg("--version")
+        .current_dir(root)
+        .output()
+    else {
+        return Ok(());
+    };
+    let reported = String::from_utf8_lossy(&output.stdout);
+    let reported = reported.trim();
+    let Some(version) = parse_version(reported).filter(|_| output.status.success()) else {
+        return Ok(());
+    };
+    if version >= MINIMUM_BUN {
+        return Ok(());
+    }
+    let (major, minor, patch) = MINIMUM_BUN;
+    Err(Finding::new(
+        "EC_RUNNER",
+        format!(
+            "Bun {reported} does not report test files in JUnit; errspec requires Bun {major}.{minor}.{patch} or later"
+        ),
+    ))
+}
+
+fn parse_version(value: &str) -> Option<(u64, u64, u64)> {
+    let core = value.split(['-', '+']).next()?;
+    let mut parts = core.split('.').map(|part| part.parse().ok());
+    let version = (parts.next()??, parts.next()??, parts.next()??);
+    parts.next().is_none().then_some(version)
+}
+
 pub(crate) fn run(
     root: &Path,
     runner: Runner,
@@ -64,6 +101,9 @@ pub(crate) fn run(
     } else {
         PathBuf::from("bun")
     };
+    if matches!(runner, Runner::Bun) {
+        reject_unsupported_bun(&executable, root)?;
+    }
     let temp = tempfile::tempdir().map_err(|e| Finding::new("EC_RUNNER", e.to_string()))?;
     let output_file = temp.path().join(match runner {
         Runner::Vitest => "vitest.json",
