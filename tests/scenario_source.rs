@@ -387,23 +387,36 @@ fn every_scenario_of_a_shared_body_reports_an_undeclared_id() {
     assert_eq!(scenarios, vec!["limit-first", "limit-retries"]);
 }
 
+fn nested(wrapper: &str, source: &str) -> String {
+    source
+        .replacen("import { test }", "import { describe, test }", 1)
+        .replacen(
+            "scenarioTest(test, 'file:///x', { contract: CONTRACT, id: 'invalid'",
+            &format!("{wrapper}() => scenarioTest(test, 'file:///x', {{ contract: CONTRACT, id: 'invalid'"),
+            1,
+        )
+        .replacen("s.check('status', 400, 400);\n});", "s.check('status', 400, 400);\n}));", 1)
+}
+
 #[test]
-fn describe_nesting_is_reported_for_each_describe_form() {
+fn scenarios_inside_describe_are_matched_like_top_level_ones() {
     for wrapper in [
         "describe('group', ",
         "describe.only('group', ",
         "describe.each([1])('group', ",
     ] {
-        let nested = GOOD
-            .replacen("import { test }", "import { describe, test }", 1)
-            .replacen(
-                "scenarioTest(test, 'file:///x', { contract: CONTRACT, id: 'invalid'",
-                &format!("{wrapper}() => scenarioTest(test, 'file:///x', {{ contract: CONTRACT, id: 'invalid'"),
-                1,
-            )
-            .replacen("s.check('status', 400, 400);\n});", "s.check('status', 400, 400);\n}));", 1);
-        let outcome = check_source(&nested);
-        assert_reports(&outcome, "EC017", "inside describe", wrapper);
+        assert_clean(&check_source(&nested(wrapper, GOOD)), wrapper);
+        let broken = nested(wrapper, GOOD).replacen(
+            "s.check('status', 400, 400)",
+            "s.check('code', 400, 400)",
+            1,
+        );
+        assert_reports(
+            &check_source(&broken),
+            "EC016",
+            "check id \"code\"",
+            wrapper,
+        );
     }
 }
 

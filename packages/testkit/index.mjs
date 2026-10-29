@@ -11,7 +11,7 @@ export function scenarioTestName(contract, id) {
   return `errspec ${JSON.stringify([contract, id])}`;
 }
 
-/** Register at the top level. Each invocation owns its observations, including in concurrent tests. */
+/** Register at the top level or inside describe. Each invocation owns its observations, including in concurrent tests. */
 export function scenarioTest(test, file, definition, body) {
   const { contract, id, tag, withoutFaults = false, description } = definition;
   if (description !== undefined && (!nonempty(description) || /[\r\n]/.test(description))) {

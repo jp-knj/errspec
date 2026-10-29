@@ -93,12 +93,6 @@ fn inspect_call(
         finding.line = Some(location.line as u32);
         finding
     };
-    if inside_describe(checker, call) {
-        findings.push(at(
-            "EC017",
-            "scenarioTest is registered inside describe; its full test name cannot match".into(),
-        ));
-    }
     let arguments = call.arguments();
     let Some(definition) = arguments
         .get(2)
@@ -204,35 +198,6 @@ fn is_sdk(checker: &mut Checker, call: P<Node>, name: &str, owner: Option<&str>)
             })
         }),
     }
-}
-
-fn inside_describe(checker: &mut Checker, call: P<Node>) -> bool {
-    let mut node = call.parent();
-    while let Some(current) = node {
-        if current.kind() == Kind::CallExpression
-            && let Some(callee) = current.expression()
-        {
-            let mut root = callee;
-            while matches!(
-                root.kind(),
-                Kind::PropertyAccessExpression | Kind::CallExpression
-            ) {
-                let Some(inner) = root.expression() else {
-                    break;
-                };
-                root = inner;
-            }
-            if root.kind() == Kind::Identifier
-                && checker
-                    .get_symbol_at_location_exported(root)
-                    .is_some_and(|s| s.name() == "describe")
-            {
-                return true;
-            }
-        }
-        node = current.parent();
-    }
-    false
 }
 
 fn property(checker: &mut Checker, object: P<Node>, key: &str) -> Value {
