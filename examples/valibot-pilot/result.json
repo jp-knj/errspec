@@ -1,0 +1,237 @@
+{
+  "project": "https://github.com/open-circle/valibot",
+  "revision": "d72f76fcf70ccfa0a5ca341b80da1d440ac60b11",
+  "node": "v24.22.1",
+  "bun": "1.4.4",
+  "source": "library/src/schemas/string/string.ts",
+  "export": "StringIssue",
+  "discriminant": "type",
+  "sourceFilesModified": 0,
+  "setupFiles": [
+    "package.json",
+    "package-lock.json",
+    "errspec.tsconfig.json",
+    "errspec.json",
+    "errspec.generated.test.ts",
+    "baseline.json"
+  ],
+  "scan": {
+    "files": 572,
+    "candidates": 1080,
+    "origins": 9,
+    "unknowns": 518
+  },
+  "checks": [
+    {
+      "name": "discover actual StringIssue",
+      "passed": true
+    },
+    {
+      "name": "generated TODO fails",
+      "passed": true
+    },
+    {
+      "name": "real Valibot failure behavior passes",
+      "passed": true
+    },
+    {
+      "name": "missing registration detected: EC001",
+      "passed": true
+    },
+    {
+      "name": "ordinary test passes but missing comparison fails: EC010",
+      "passed": true
+    },
+    {
+      "name": "removing comparison and requirement fails strict baseline: EC014",
+      "passed": true
+    },
+    {
+      "name": "restored behavior and reviewed baseline pass",
+      "passed": true
+    }
+  ],
+  "timings": [
+    {
+      "command": "npm",
+      "args": [
+        "install",
+        "--offline",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        "file:<local-testkit>"
+      ],
+      "milliseconds": 457
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "scan",
+        "--project",
+        "errspec.tsconfig.json",
+        "--discriminant",
+        "type",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 552
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "init",
+        "--project",
+        "errspec.tsconfig.json",
+        "--source",
+        "library/src/schemas/string/string.ts",
+        "--export",
+        "StringIssue",
+        "--discriminant",
+        "type",
+        "--runner",
+        "bun",
+        "--contract",
+        "valibot.string",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 704
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 648
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 902
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "snapshot",
+        "--out",
+        "baseline.json",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 855
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--baseline",
+        "baseline.json",
+        "--strict-baseline",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 648
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "check",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 442
+    },
+    {
+      "command": "bun",
+      "args": [
+        "test",
+        "./errspec.generated.test.ts"
+      ],
+      "milliseconds": 25
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 452
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 441
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--baseline",
+        "baseline.json",
+        "--strict-baseline",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 510
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--baseline",
+        "baseline.json",
+        "--strict-baseline",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 486
+    },
+    {
+      "command": "bun",
+      "args": [
+        "--version"
+      ],
+      "milliseconds": 3
+    }
+  ],
+  "limits": [
+    "One schema and one scenario; not a benchmark of all Valibot behavior.",
+    "No claim about human setup time or long-term maintenance.",
+    "The test tsconfig focuses on source; runner type dependencies are not analyzed."
+  ],
+  "buildProfile": "release",
+  "host": "Linux x64"
+}

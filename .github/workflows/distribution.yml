@@ -1,0 +1,39 @@
+name: Distribution
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  packages:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux-x64
+          - os: macos-14
+            target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: cargo build --release --locked
+      - run: node --test tests/package.test.mjs
+      - run: node scripts/pack.mjs ${{ matrix.target }} target/release/errspec
+      - run: node scripts/package-smoke.mjs artifacts/npm/manifest-${{ matrix.target }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: errspec-${{ matrix.target }}
+          path: artifacts/npm/
+          if-no-files-found: error
+          retention-days: 30

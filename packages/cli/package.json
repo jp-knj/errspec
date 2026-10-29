@@ -1,0 +1,40 @@
+{
+  "name": "@errspec/cli",
+  "version": "0.1.0",
+  "description": "Discover TypeScript errors and verify explicit failure scenarios with Bun or Vitest",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jp-knj/errspec.git",
+    "directory": "packages/cli"
+  },
+  "bin": {
+    "errspec": "bin/errspec.mjs"
+  },
+  "files": [
+    "bin",
+    "platforms.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@errspec/cli-linux-x64": "0.1.0",
+    "@errspec/cli-darwin-arm64": "0.1.0",
+    "@errspec/cli-darwin-x64": "0.1.0"
+  },
+  "keywords": [
+    "typescript",
+    "error-handling",
+    "testing",
+    "bun",
+    "vitest",
+    "static-analysis"
+  ]
+}

@@ -25,4 +25,17 @@ jobs:
       - run: node scripts/demo.mjs
       - run: node scripts/demo-bun.mjs
       - run: node --test tests/testkit.test.mjs
+      - run: node --test tests/package.test.mjs
       - run: node scripts/demo-scenarios.mjs
+      - uses: actions/checkout@v4
+        with:
+          repository: open-circle/valibot
+          ref: d72f76fcf70ccfa0a5ca341b80da1d440ac60b11
+          path: .valibot-source
+          persist-credentials: false
+      - run: node scripts/pilot-valibot.mjs .valibot-source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: valibot-pilot
+          path: artifacts/valibot-pilot.json
+          if-no-files-found: error
