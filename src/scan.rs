@@ -8,7 +8,7 @@ use std::{
     path::Path,
 };
 use tsrs_ast::{
-    FunctionFlags, Kind, Node, SourceFile, SymbolFlags, get_function_flags,
+    FunctionFlags, Kind, Node, NodeFlags, SourceFile, SymbolFlags, get_function_flags,
     get_source_file_of_node, is_function_like_declaration,
 };
 use tsrs_checker::{Checker, Type, TypeFlags};
@@ -67,6 +67,66 @@ fn walk_body(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
         walk_body(child, callback);
         false
     });
+}
+
+fn is_const(decl: P<Node>) -> bool {
+    decl.parent().is_some_and(|p| {
+        p.kind() == Kind::VariableDeclarationList && p.flags().contains(NodeFlags::Const)
+    })
+}
+
+fn is_builtin(node: P<Node>) -> bool {
+    get_source_file_of_node(node).is_some_and(|f| {
+        f.is_declaration_file() && f.file_name().starts_with("bundled:///libs/lib.")
+    })
+}
+
+/// Resolve value bindings, not their structurally compatible call signatures.
+fn static_binding(
+    checker: &mut Checker,
+    node: P<Node>,
+    seen: &mut Vec<P<Node>>,
+) -> Option<P<Node>> {
+    if seen.contains(&node) {
+        return None;
+    }
+    seen.push(node);
+    match node.kind() {
+        Kind::ArrowFunction | Kind::FunctionExpression => Some(node),
+        Kind::ParenthesizedExpression
+        | Kind::AsExpression
+        | Kind::SatisfiesExpression
+        | Kind::TypeAssertionExpression
+        | Kind::NonNullExpression => static_binding(checker, node.expression()?, seen),
+        Kind::Identifier => {
+            let symbol = checker.get_symbol_at_location_exported(node)?;
+            let symbol = if symbol.flags().intersects(SymbolFlags::Alias) {
+                checker.get_aliased_symbol(symbol)
+            } else {
+                symbol
+            };
+            let declarations = symbol.declarations();
+            if let Some(function) = declarations
+                .iter()
+                .copied()
+                .find(|d| d.kind() == Kind::FunctionDeclaration && d.body().is_some())
+            {
+                return Some(function);
+            }
+            let decl = declarations
+                .iter()
+                .copied()
+                .find(|d| d.kind() == Kind::VariableDeclaration)?;
+            if is_builtin(decl) {
+                return Some(decl);
+            }
+            if is_const(decl) {
+                return static_binding(checker, decl.initializer()?, seen);
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -140,10 +200,9 @@ fn usages(checker: &mut Checker, expression: P<Node>, body: P<Node>) -> Vec<Usag
     let mut queue = vec![expression];
     let mut seen = BTreeSet::new();
     while let Some(value) = queue.pop() {
-        let Some(decl) = value
-            .parent()
-            .filter(|n| n.kind() == Kind::VariableDeclaration && n.initializer() == Some(value))
-        else {
+        let Some(decl) = value.parent().filter(|n| {
+            n.kind() == Kind::VariableDeclaration && is_const(*n) && n.initializer() == Some(value)
+        }) else {
             continue;
         };
         if !seen.insert(decl.pos()) {
@@ -379,7 +438,18 @@ impl Inspector<'_> {
         let sig = checker.get_resolved_signature_exported(node);
         let declaration = sig.declaration();
         let uses = usages(checker, node, body);
-        if is_native_promise_reject(declaration) && node.kind() == Kind::CallExpression {
+        let callee = node.expression().expect("call expression");
+        let binding = static_binding(checker, callee, &mut vec![]);
+        if is_native_promise_reject(declaration)
+            && node.kind() == Kind::CallExpression
+            && callee.kind() == Kind::PropertyAccessExpression
+            && callee
+                .expression()
+                .and_then(|receiver| static_binding(checker, receiver, &mut vec![]))
+                .is_some_and(|receiver| {
+                    is_builtin(receiver) && receiver.name().is_some_and(|n| text(n) == "Promise")
+                })
+        {
             let argument = node.as_call_expression().arguments.nodes().first().copied();
             let ty = argument
                 .map(|n| {
@@ -399,6 +469,7 @@ impl Inspector<'_> {
         }
         // Built-in Error construction is the payload of a throw, not an additional call edge.
         if node.kind() == Kind::NewExpression
+            && binding.is_some_and(is_builtin)
             && declaration.is_some_and(|d| {
                 get_source_file_of_node(d)
                     .is_some_and(|f| f.is_declaration_file() && f.file_name().contains("/lib."))
@@ -409,25 +480,33 @@ impl Inspector<'_> {
         {
             return;
         }
-        let target = declaration.and_then(|decl| {
-            if self.bodies.contains_key(&key(self.root, decl)) {
-                return Some(decl);
-            }
-            decl.symbol().and_then(|symbol| {
-                symbol
-                    .declarations()
-                    .iter()
-                    .copied()
-                    .find(|d| self.bodies.contains_key(&key(self.root, *d)))
-            })
-        });
+        let member_call = matches!(
+            callee.kind(),
+            Kind::PropertyAccessExpression | Kind::ElementAccessExpression
+        );
+        let target = binding
+            .or_else(|| member_call.then_some(declaration).flatten())
+            .and_then(|decl| {
+                if self.bodies.contains_key(&key(self.root, decl)) {
+                    return Some(decl);
+                }
+                decl.symbol().and_then(|symbol| {
+                    symbol
+                        .declarations()
+                        .iter()
+                        .copied()
+                        .find(|d| self.bodies.contains_key(&key(self.root, *d)))
+                })
+            });
         if let Some(target) = target {
             let target_key = key(self.root, target);
-            if matches!(
-                target.kind(),
-                Kind::MethodDeclaration | Kind::GetAccessor | Kind::SetAccessor
-            ) {
-                self.unknown(owner, node, "method_dispatch_may_be_overridden");
+            if member_call
+                || matches!(
+                    target.kind(),
+                    Kind::MethodDeclaration | Kind::GetAccessor | Kind::SetAccessor
+                )
+            {
+                self.unknown(owner, node, "member_dispatch_may_be_overridden");
             }
             let target_flags = get_function_flags(Some(target));
             if target_flags.contains(FunctionFlags::Generator) {
@@ -483,7 +562,6 @@ fn is_native_promise_reject(decl: Option<P<Node>>) -> bool {
             && d.parent()
                 .and_then(|p| p.name())
                 .is_some_and(|n| text(n) == "PromiseConstructor")
-            && get_source_file_of_node(d)
-                .is_some_and(|f| f.is_declaration_file() && f.file_name().contains("/lib."))
+            && is_builtin(d)
     })
 }
