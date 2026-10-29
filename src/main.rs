@@ -21,6 +21,9 @@ struct Cli {
     format: Format,
     #[arg(long, global = true)]
     baseline: Option<PathBuf>,
+    /// Fail when an existing v2 scenario changes from the baseline (check/verify).
+    #[arg(long, global = true, requires = "baseline")]
+    strict_baseline: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

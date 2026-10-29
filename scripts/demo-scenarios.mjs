@@ -54,6 +54,23 @@ try {
     assert.deepEqual(removed.delta.removedScenarios["checkout.payment"], ["rate-limit-retries"]);
     reset();
 
+    const baselineVerify = [...verify, "--baseline", "baseline.json"];
+    const strictVerify = [...baselineVerify, "--strict-baseline"];
+    run("unchanged strict baseline", 0, strictVerify);
+    const weaker = JSON.parse(originalConfig);
+    weaker.contracts[0].cases.forEach(c => {
+      c.observe.assertions = c.observe.assertions.filter(id => id !== "orders");
+    });
+    writeFileSync(configPath, JSON.stringify(weaker));
+    writeFileSync(file, original.replaceAll('s.check("orders", orders, 0);', '/* check removed together with its requirement */'));
+    const defaultChanged = run("changed requirements remain allowed by default", 0, baselineVerify);
+    const strictChanged = run("strict baseline rejects weakened requirements despite passing tests", 1, strictVerify);
+    has(strictChanged, "EC014");
+    assert.deepEqual(strictChanged.delta, defaultChanged.delta);
+    assert.equal(strictChanged.diagnostics.filter(d => d.code === "EC014").length, 3);
+    assert(cases(strictChanged).every(c => c.testStatus === "passed" && c.observationStatus === "passed"));
+    reset();
+
     writeFileSync(file, original.replaceAll('s.check("orders", orders, 0);', '/* assertion accidentally removed */'));
     const missingCheck = run("passing tests with missing required assertion");
     assert(cases(missingCheck).every(c => c.testStatus === "passed"));
