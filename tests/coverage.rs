@@ -73,6 +73,35 @@ fn tags_are_asserted_mentioned_or_missing() {
     );
 }
 
+#[test]
+fn shared_tag_values_are_counted_per_discriminant_in_any_order() {
+    let mut code = candidate("code.ts", "CodeFailure", &["Shared"]);
+    code.source.discriminant = "code".into();
+    let mut kind = candidate("kind.ts", "KindFailure", &["Shared"]);
+    kind.source.discriminant = "kind".into();
+    for candidates in [[code.clone(), kind.clone()], [kind, code]] {
+        let (types, summary) = judge(&candidates, &[record(&[("code", "Shared")])], &[]);
+        for t in &types {
+            let wanted = if t.source.discriminant == "code" {
+                TagStatus::Asserted
+            } else {
+                TagStatus::Missing
+            };
+            assert_eq!(t.tags[0].status, wanted, "{t:?}");
+        }
+        assert_eq!(
+            (
+                summary.types,
+                summary.tags,
+                summary.asserted,
+                summary.mentioned,
+                summary.missing
+            ),
+            (2, 2, 1, 0, 1)
+        );
+    }
+}
+
 fn fixture() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
@@ -149,4 +178,62 @@ fn coverage_without_vitest_reports_where_it_looked() {
     assert_eq!(report["testsExecuted"], false);
     let message = report["diagnostics"][0]["message"].as_str().unwrap();
     assert!(message.contains("pass --vitest PATH"), "{message}");
+}
+
+fn append_runner(dir: &TempDir, script: &str) {
+    let path = dir.path().join("runner.sh");
+    let original = fs::read_to_string(&path).unwrap();
+    fs::write(path, format!("{original}{script}\n")).unwrap();
+}
+
+#[test]
+fn invalid_assertion_records_cannot_pass_after_a_successful_test_run() {
+    for corruption in [
+        "printf '%s' '{' >> \"$ERRSPEC_COVERAGE/one.jsonl\"",
+        "mkdir \"$ERRSPEC_COVERAGE/unreadable.jsonl\"",
+    ] {
+        for extra in [&[][..], &["--fail-on-missing"][..]] {
+            let dir = fixture();
+            append_runner(&dir, corruption);
+            let (status, report) = coverage(&dir, extra);
+            assert_eq!(status, 2, "{corruption}: {report}");
+            assert_eq!(report["testsExecuted"], true, "{report}");
+            assert_eq!(report["runnerOk"], true, "{report}");
+            assert_eq!(report["diagnostics"][0]["code"], "EC_RUNNER");
+            assert_eq!(report["types"], json!([]), "{report}");
+        }
+    }
+}
+
+#[test]
+fn a_failed_runner_with_valid_records_keeps_its_results_and_exit_one() {
+    let dir = fixture();
+    append_runner(&dir, "exit 1");
+    let (status, report) = coverage(&dir, &[]);
+    assert_eq!(status, 1, "{report}");
+    assert_eq!(report["testsExecuted"], true);
+    assert_eq!(report["runnerOk"], false);
+    assert_eq!(report["types"][0]["tags"][0]["status"], "asserted");
+    assert_eq!(report["diagnostics"][0]["code"], "EC_RUNNER");
+}
+
+#[test]
+fn fail_on_missing_checks_each_discriminant_even_when_a_value_is_shared() {
+    let dir = fixture();
+    fs::write(
+        dir.path().join("errors.ts"),
+        "export type CodeFailure = {code:'A'}; export type KindFailure = {kind:'A'};",
+    )
+    .unwrap();
+    fs::write(dir.path().join("case.test.ts"), "export {};").unwrap();
+    let runner = dir.path().join("runner.sh");
+    let script = fs::read_to_string(&runner).unwrap();
+    fs::write(runner, script.replace("\"_tag\"", "\"code\"")).unwrap();
+    let (status, report) = coverage(&dir, &["--fail-on-missing"]);
+    assert_eq!(status, 1, "{report}");
+    assert_eq!(report["runnerOk"], true);
+    assert_eq!(
+        report["summary"],
+        json!({"types": 2, "tags": 2, "asserted": 1, "mentioned": 0, "missing": 1})
+    );
 }
