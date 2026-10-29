@@ -149,6 +149,23 @@ try {
     writeFileSync(file, inputOnly.replace(", withoutFaults: true", "")); writeFileSync(configPath, JSON.stringify(faultFree));
     has(run("empty fault list still needs the SDK declaration"), "EC012"); reset();
 
+    // describe titles prefix the runner's full name; the stable name still identifies each scenario.
+    const runnerModule = runner === "bun" ? "bun:test" : "vitest";
+    const firstScenario = original.indexOf("scenarioTest(test,");
+    const withDescribe = (open, close) => original.slice(0, firstScenario)
+      .replace(`import { test } from "${runnerModule}";`, `import { describe, test } from "${runnerModule}";`)
+      + open + original.slice(firstScenario) + close;
+    assert(withDescribe("", "").includes("import { describe, test }"));
+    writeFileSync(file, withDescribe('describe("checkout", () => {\n', "});\n"));
+    const grouped = run("scenarios inside describe", 0);
+    assert(cases(grouped).every(c => c.observationStatus === "passed"));
+    reset();
+    writeFileSync(file, withDescribe('describe("決済", () => {\ndescribe("失敗時 [x]", () => {\n', "});\n});\n")
+      .replace(/tag: ("\w+"),/g, 'tag: $1, description: "[異常系] 注文を作らない",'));
+    run("nested describes with descriptions", 0); reset();
+    writeFileSync(file, withDescribe('describe("a", () => {\n', "});\n") + 'describe("b", () => {\n' + original.slice(firstScenario) + "});\n");
+    has(run("same scenario in two describes"), "EC005"); reset();
+
     // The body runs twice under the same stable id: a retry/repeat is not silently accepted.
     writeFileSync(file, original + original.slice(original.indexOf("scenarioTest(test,")));
     has(run("duplicate scenario execution"), "EC011"); reset();
