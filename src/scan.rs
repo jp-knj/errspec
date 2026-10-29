@@ -229,22 +229,23 @@ fn usages(checker: &mut Checker, expression: P<Node>, body: P<Node>) -> Vec<Usag
 }
 
 pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
-    let mut report = ScanReport::default();
     let project = match project.canonicalize() {
         Ok(p) => p,
         Err(e) => {
-            report
-                .diagnostics
-                .push(Finding::new("EC_CONFIG", e.to_string()));
-            return report;
+            return ScanReport {
+                diagnostics: vec![Finding::new("EC_CONFIG", e.to_string())],
+                ..ScanReport::default()
+            };
         }
     };
     let root = project.parent().expect("canonical project parent");
     let adapter = match TsrsAdapter::open(root, &project.to_string_lossy()) {
         Ok(a) => a,
         Err(errors) => {
-            report.diagnostics = errors;
-            return report;
+            return ScanReport {
+                diagnostics: errors,
+                ..ScanReport::default()
+            };
         }
     };
     let files: Vec<P<SourceFile>> = adapter
@@ -257,12 +258,13 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
             !path.contains("/node_modules/") && Path::new(f.file_name()).starts_with(root)
         })
         .collect();
+    let mut facts = ScanFacts::default();
     let mut bodies = BTreeMap::new();
     for file in &files {
         let mut checker = adapter
             .program
             .get_type_checker_for_file(&adapter.context, *file);
-        report.files.push(location(root, file.as_node()).file);
+        facts.files.push(location(root, file.as_node()).file);
         if let Some(module) = file.symbol() {
             for export in checker.get_exports_of_module_exported(module) {
                 let name = export.name().to_owned();
@@ -282,7 +284,7 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
                     if collect_tags(&mut checker, ty, discriminant, &mut tags).is_ok()
                         && !tags.is_empty()
                     {
-                        report.candidates.push(Candidate {
+                        facts.candidates.push(Candidate {
                             source: Source {
                                 file: location(root, file.as_node()).file,
                                 export: name.clone(),
@@ -310,13 +312,11 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
                         .map(text)
                         .unwrap_or_else(|| "<anonymous>".into())
                 };
-                report.functions.push(Function {
+                facts.functions.push(FunctionFacts {
                     id: id.clone(),
                     name,
                     location: location(root, node),
                     is_async: get_function_flags(Some(node)).contains(FunctionFlags::Async),
-                    effects: vec![],
-                    has_unknown: false,
                 });
                 bodies.insert(id, node);
             }
@@ -326,34 +326,23 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
         root,
         adapter: &adapter,
         bodies: &bodies,
-        report: &mut report,
+        facts: &mut facts,
     };
     for (id, node) in &bodies {
         inspector.function(id, *node);
     }
-    report.files.sort();
-    report.files.dedup();
-    report.candidates.sort_by(|a, b| {
-        (&a.source.file, &a.source.export, &a.source.discriminant).cmp(&(
-            &b.source.file,
-            &b.source.export,
-            &b.source.discriminant,
-        ))
-    });
-    propagate(&mut report);
-    report.scan_complete = true;
-    report
+    facts.into_report()
 }
 
 struct Inspector<'a> {
     root: &'a Path,
     adapter: &'a TsrsAdapter,
     bodies: &'a BTreeMap<String, P<Node>>,
-    report: &'a mut ScanReport,
+    facts: &'a mut ScanFacts,
 }
 impl Inspector<'_> {
     fn unknown(&mut self, owner: &str, node: P<Node>, reason: &str) {
-        self.report.unknowns.push(Unknown {
+        self.facts.unknowns.push(Unknown {
             function: owner.into(),
             location: location(self.root, node),
             expression: text(node),
@@ -369,7 +358,7 @@ impl Inspector<'_> {
         caught: bool,
         escapes: bool,
     ) {
-        self.report.origins.push(Origin {
+        self.facts.origins.push(Origin {
             id: format!("{}:{channel:?}", key(self.root, node)),
             function: owner.into(),
             location: location(self.root, node),
@@ -514,7 +503,7 @@ impl Inspector<'_> {
                 self.unknown(owner, node, "promise_use_not_resolved_to_await_or_return");
             }
             for usage in uses {
-                self.report.edges.push(Edge {
+                self.facts.edges.push(Edge {
                     caller: owner.into(),
                     callee: target_key.clone(),
                     location: location(self.root, node),

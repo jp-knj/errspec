@@ -1,6 +1,6 @@
 //! Owned, compiler-independent facts and a finite may-propagate analysis.
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+mod propagation;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +42,70 @@ pub struct Effect {
     pub channel: Channel,
     /// Finite witness to the origin. Recursion may revisit a function in a different channel.
     pub via: Vec<String>,
+}
+
+/// Collected function identity, before propagation has computed any effects.
+#[derive(Debug)]
+pub struct FunctionFacts {
+    pub id: String,
+    pub name: String,
+    pub location: Location,
+    pub is_async: bool,
+}
+
+/// Owned facts collected by a frontend. No compiler handles or derived summaries.
+#[derive(Debug, Default)]
+pub struct ScanFacts {
+    pub files: Vec<String>,
+    pub candidates: Vec<Candidate>,
+    pub origins: Vec<Origin>,
+    pub functions: Vec<FunctionFacts>,
+    pub edges: Vec<Edge>,
+    pub unknowns: Vec<Unknown>,
+}
+
+impl ScanFacts {
+    /// Analyze a successfully collected scan and assemble its wire report once.
+    /// Completion does not imply that every runtime error or call target is known.
+    pub fn into_report(mut self) -> ScanReport {
+        self.files.sort();
+        self.files.dedup();
+        self.candidates.sort_by(|a, b| {
+            (&a.source.file, &a.source.export, &a.source.discriminant).cmp(&(
+                &b.source.file,
+                &b.source.export,
+                &b.source.discriminant,
+            ))
+        });
+        let summaries = propagation::evaluate(
+            self.functions.iter().map(|f| (f.id.as_str(), f.is_async)),
+            &self.origins,
+            &self.edges,
+            &self.unknowns,
+        );
+        ScanReport {
+            scan_complete: true,
+            files: self.files,
+            candidates: self.candidates,
+            origins: self.origins,
+            functions: self
+                .functions
+                .into_iter()
+                .zip(summaries)
+                .map(|(f, summary)| Function {
+                    id: f.id,
+                    name: f.name,
+                    location: f.location,
+                    is_async: f.is_async,
+                    effects: summary.effects,
+                    has_unknown: summary.has_unknown,
+                })
+                .collect(),
+            edges: self.edges,
+            unknowns: self.unknowns,
+            ..ScanReport::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -118,74 +182,17 @@ impl Default for ScanReport {
     }
 }
 
-/// Monotone fixed point over (function, origin, channel). Each fact is inserted once.
-/// Witnesses do not participate in equality, so recursive graphs cannot grow paths forever.
+/// Recompute an existing report's function summaries from its recorded facts.
+/// Kept for callers of the original Rust API; CLI collection uses `ScanFacts`.
 pub fn propagate(report: &mut ScanReport) {
-    let indices: BTreeMap<_, _> = report
-        .functions
-        .iter()
-        .enumerate()
-        .map(|(i, f)| (f.id.clone(), i))
-        .collect();
-    let mut facts: Vec<BTreeMap<(String, Channel), Vec<String>>> =
-        vec![BTreeMap::new(); report.functions.len()];
-    let mut unknown: BTreeSet<String> =
-        report.unknowns.iter().map(|u| u.function.clone()).collect();
-    for origin in &report.origins {
-        if origin.escapes
-            && let Some(&i) = indices.get(&origin.function)
-        {
-            facts[i].insert(
-                (origin.id.clone(), origin.channel),
-                vec![origin.function.clone()],
-            );
-        }
-    }
-    loop {
-        let mut changed = false;
-        for edge in &report.edges {
-            let (Some(&caller), Some(&callee)) =
-                (indices.get(&edge.caller), indices.get(&edge.callee))
-            else {
-                continue;
-            };
-            if unknown.contains(&edge.callee) && unknown.insert(edge.caller.clone()) {
-                changed = true;
-            }
-            for ((origin, channel), path) in facts[callee].clone() {
-                let channel = match channel {
-                    Channel::Throw if edge.catches && !edge.may_rethrow => continue,
-                    Channel::Throw if report.functions[caller].is_async => Channel::Rejection,
-                    Channel::Rejection if edge.awaited && edge.catches && !edge.may_rethrow => {
-                        continue;
-                    }
-                    Channel::Rejection if !edge.awaited && !edge.returned => continue,
-                    Channel::Result if !edge.returned => continue,
-                    other => other,
-                };
-                if let std::collections::btree_map::Entry::Vacant(entry) =
-                    facts[caller].entry((origin, channel))
-                {
-                    let mut witness = vec![edge.caller.clone()];
-                    witness.extend(path);
-                    entry.insert(witness);
-                    changed = true;
-                }
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    for (i, function) in report.functions.iter_mut().enumerate() {
-        function.effects = std::mem::take(&mut facts[i])
-            .into_iter()
-            .map(|((origin, channel), via)| Effect {
-                origin,
-                channel,
-                via,
-            })
-            .collect();
-        function.has_unknown = unknown.contains(&function.id);
+    let summaries = propagation::evaluate(
+        report.functions.iter().map(|f| (f.id.as_str(), f.is_async)),
+        &report.origins,
+        &report.edges,
+        &report.unknowns,
+    );
+    for (function, summary) in report.functions.iter_mut().zip(summaries) {
+        function.effects = summary.effects;
+        function.has_unknown = summary.has_unknown;
     }
 }
