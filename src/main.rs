@@ -7,6 +7,7 @@ mod request;
 mod runner;
 mod scaffold;
 mod scan;
+mod scenario_source;
 mod tsrs_adapter;
 mod verification;
 

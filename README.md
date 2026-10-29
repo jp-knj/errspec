@@ -127,7 +127,7 @@ scenarioTest(test, import.meta.url, {
 - 設定に必須としたcheckが欠けていれば、テストが成功していてもRust側の照合が失敗します。
 - テスト名は`errspec ["契約ID","シナリオID"]`として自動生成します。設定の`test.name`は省略します。
 - 定義に`description`を渡すと、ランナーの表示名は`errspec ["checkout.payment","declined"] [異常系] 注文を作らない`のように説明付きになります。照合は先頭の固定部分で行うため、説明を変えてもシナリオの変更にはなりません。説明は1行の空でない文字列です。
-- `scenarioTest`はトップレベルで登録してください。`describe`内の登録は現在未対応で、完全なテスト名が一致せず失敗します。
+- `scenarioTest`はトップレベルで登録してください。`describe`内の登録は現在未対応で、完全なテスト名が一致せず失敗します。テストがtsconfigのプロジェクトに含まれていれば、`check`が実行前に`EC017`で報告します。
 - `test.concurrent`は対応済みです（BunではBun 1.3以降が提供します）。`test.skip`は未検証になります。retry/repeatで同一シナリオが複数回実行された場合は曖昧として拒否します。
 
 依存を引数で受け取らず直接importしているコードには、Bunの`mock.module`やVitestの`vi.mock`で`s.fault`を差し込みます。
@@ -136,6 +136,21 @@ scenarioTest(test, import.meta.url, {
 パッケージの移植方法とAPIは[packages/testkit/README.md](packages/testkit/README.md)を参照してください。
 
 ## 確認できること
+
+### 実行前の静的照合
+
+`check`と`verify`は、登録したテストファイルがtsconfigのプロジェクトに含まれていれば、テストを実行する前に設定と照合します。
+tsrsの型情報で、`scenarioTest`と`s.fault`／`s.check`を名前ではなく宣言から特定します。IDやタグは各値の型から読むため、`const`の定数や`as const`の配列をループで回す書き方でも照合できます。
+
+報告するのは、実行すれば必ず失敗する食い違いだけです。
+- 未登録のシナリオ、登録と違うタグやテストファイル、`withoutFaults`と`"faults": []`の不一致（EC015）
+- 設定にない障害IDや比較IDの使用（EC016）
+- `describe`の中での`scenarioTest`の登録（EC017）
+
+`string`型に広がった値、本体の外のヘルパーに渡した`s`、プロジェクト外のテストファイルは照合せず、実行時の観測の照合に任せます。
+必須のIDがテストに書かれていないことも、ヘルパー経由で呼ばれる可能性があるため、静的には報告しません。
+
+### 実行時の照合
 
 `verify`は毎回、新規の一時ディレクトリを作り、ランナーのレポートと補助APIの観測記録を照合します。
 以前の実行結果を読み込んで合格にするオプションはありません。
@@ -247,6 +262,9 @@ Bunは起動前に`--version`で版を確認し、1.2.19未満なら実行しま
 | EC011 / EC012 | 観測の識別情報が不一致・重複／シナリオが正常完了しなかった |
 | EC013 | baselineにあったシナリオの削除 |
 | EC014 | strictモードでbaselineにあったシナリオが変更された |
+| EC015 | テストが未登録のシナリオを登録している、タグ・テストファイル・`withoutFaults`が設定と食い違う（実行前の静的照合） |
+| EC016 | シナリオ本体が、設定にない障害IDや比較IDを使っている（実行前の静的照合） |
+| EC017 | `scenarioTest`を`describe`の中で登録している（実行前の静的照合） |
 | EC_EVIDENCE | 観測プロトコル・run ID・ファイルが不正 |
 | EC_CONFIG / EC_BASELINE / EC_RUNNER / EC_SNAPSHOT / EC_INTERNAL | 設定・比較対象・実行器・保存・内部処理のエラー |
 | TS… | tsrsによるコンパイラ診断 |
