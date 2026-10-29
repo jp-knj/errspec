@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "errspec/snapshot",
+  "contracts": {
+    "checkout.payment": {
+      "source": { "file": "src/errors.ts", "export": "PaymentError", "discriminant": "_tag" },
+      "tags": ["Declined"]
+    }
+  }
+}

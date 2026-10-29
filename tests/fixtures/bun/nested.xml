@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="6" assertions="4" failures="1" skipped="2" time="0.005909186">
+  <testsuite name="one.test.ts" file="one.test.ts" tests="5" assertions="3" failures="1" skipped="2" time="0.001558413" hostname="fixture">
+    <testcase name="top-level" classname="" time="0.000019" file="one.test.ts" line="2" assertions="1" />
+    <testsuite name="outer &lt;xml&gt;" file="one.test.ts" line="3" tests="4" assertions="2" failures="1" skipped="2" time="0" hostname="fixture">
+      <testsuite name="inner &amp; 日本語" file="one.test.ts" line="4" tests="4" assertions="2" failures="1" skipped="2" time="0" hostname="fixture">
+        <testcase name="pass &quot;quoted&quot;" classname="inner &amp; 日本語 &gt; outer &lt;xml&gt;" time="0.000008" file="one.test.ts" line="5" assertions="1" />
+        <testcase name="skipped" classname="inner &amp; 日本語 &gt; outer &lt;xml&gt;" time="0" file="one.test.ts" line="6" assertions="0">
+          <skipped />
+        </testcase>
+        <testcase name="unfinished" classname="inner &amp; 日本語 &gt; outer &lt;xml&gt;" time="0" file="one.test.ts" line="7" assertions="0">
+          <skipped message="TODO" />
+        </testcase>
+        <testcase name="fails" classname="inner &amp; 日本語 &gt; outer &lt;xml&gt;" time="0.000135" file="one.test.ts" line="8" assertions="1">
+          <failure type="AssertionError" message="expect(received).toBe(expected)&#10;&#10;Expected: 2&#10;Received: 1&#10;">AssertionError: expect(received).toBe(expected)&#10;&#10;Expected: 2&#10;Received: 1&#10;&#10;</failure>
+        </testcase>
+      </testsuite>
+    </testsuite>
+  </testsuite>
+  <testsuite name="two.test.ts" file="two.test.ts" tests="1" assertions="1" failures="0" skipped="0" time="0.000205604" hostname="fixture">
+    <testcase name="top-level" classname="" time="0.000012" file="two.test.ts" line="1" assertions="1" />
+  </testsuite>
+</testsuites>

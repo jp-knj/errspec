@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="1" assertions="0" failures="1" skipped="0" time="0.016709052">
+  <testsuite name="hooks.test.ts" file="hooks.test.ts" tests="1" assertions="0" failures="1" skipped="0" time="0.005951529" hostname="fixture">
+    <testcase name="(unnamed)" classname="" time="0.001237" file="hooks.test.ts" assertions="0">
+      <failure type="Error" message="setup failed">Error: setup failed&#10;      at hooks.test.ts:1:88&#10;</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
