@@ -6,13 +6,20 @@ TypeScriptのエラー型・失敗シナリオ・テスト結果を対応付け�
 型の解決には[oxc-project/tsrs](https://github.com/oxc-project/tsrs/tree/1bfd1e65be95131f9242a03687d37006214a96f6)を使用します。
 既存のResult型を使い続けられます。エディタ拡張は不要です。npm/crates.ioには未公開です。
 
-`scan`でプロジェクトからエラー候補と伝播経路を調べ、`init`で選んだ型の設定・テストを生成できます。
-npm CLIとLinux/macOS向けバイナリは配布準備中です。[配布物の作成と導入](packages/cli/README.md)を参照してください。
+使い方は2段階です。
+
+1. `errspec coverage`: 既存のVitestテストをそのまま実行し、どのエラータグが確かめられていないかを示します。設定ファイルも専用のテストAPIも要りません。
+2. `scenarioTest`と`verify`: 重要なエラーだけ、障害が本当に呼ばれたことと必須の比較がそろったことまで契約として検証します。
 
 ```text
-EC010 checkout.payment RateLimited rate-limit-retries:
-Required assertion did not pass: attempts
+coverage: 2 error types, 3 tags: 1 asserted, 1 mentioned only, 1 missing
+src/gateway.ts GatewayError [_tag]: 1/3 asserted
+  mentioned RateLimited
+  missing   Timeout
 ```
+
+`scan`でプロジェクトからエラー候補と伝播経路を調べ、`init`で選んだ型の設定・テストを生成することもできます。
+npm CLIとLinux/macOS向けバイナリは配布準備中です。[配布物の作成と導入](packages/cli/README.md)を参照してください。
 
 ## 最初に動かす
 
@@ -20,8 +27,19 @@ Required assertion did not pass: attempts
 Bun 1.2.18以前はJUnitレポートにテストファイルを出力しないため、`verify`はテストを起動する前に`EC_RUNNER`で停止します。
 Rustはrust-toolchain.tomlで固定しています。Linux x86_64、Bun 1.4.4、Vitest 5.0.5、Node.js 24で検証しました。
 
+まず、既存テストだけで調べます。
+
 ```sh
 cargo build --locked
+(cd examples/checkout && npm ci --ignore-scripts --no-audit --no-fund)
+(cd examples/checkout && ../../target/debug/errspec coverage)
+```
+
+この例のテストは、決済の失敗をスタブから流し込み、HTTPステータスだけを比較しています。そのため`Declined`と`RateLimited`は`mentioned`になります。
+
+次に、契約として検証する例です。
+
+```sh
 ./target/debug/errspec verify --runner bun \
   --config examples/scenarios-bun/errspec.json --format json
 ```
