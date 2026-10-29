@@ -1,10 +1,5 @@
-use crate::{
-    input::{read_json, resolve_paths},
-    request::Runner,
-};
-use errspec::{
-    bun, contract::Registration, evidence, model::*, observation, observation_io, vitest,
-};
+use crate::{input::read_json, request::Runner};
+use errspec::{bun, evidence, model::Finding, observation, observation_io, vitest};
 use std::{
     fs,
     io::{self, Write},
@@ -12,21 +7,37 @@ use std::{
     process::Command,
 };
 
-pub(crate) struct Verification {
-    pub tests: evidence::TestRun,
-    pub diagnostics: Vec<Finding>,
-    // Observation read failure must retain the successfully parsed runner results.
-    pub observations: Result<(observation::ObservationJudgments, Vec<Finding>), Finding>,
+/// Normalized runner output plus ownership of this execution's observation files.
+pub(crate) struct Execution {
+    pub evidence: evidence::RunEvidence,
+    pub process_ok: bool,
+    pub observations: ObservationSession,
 }
 
-pub(crate) fn verify(
-    registrations: &[Registration<'_>],
+/// Keep the workspace alive until all observation reads and judgments finish.
+/// Its directory and run identity cannot be paired with another execution.
+pub(crate) struct ObservationSession {
+    temp: tempfile::TempDir,
+    run: observation::RunContext,
+}
+
+impl ObservationSession {
+    pub(crate) fn context(&self) -> &observation::RunContext {
+        &self.run
+    }
+
+    pub(crate) fn read(&self) -> Result<observation::ValidatedObservations, Finding> {
+        observation_io::read(&self.temp.path().join("observations"), &self.run)
+    }
+}
+
+pub(crate) fn run(
     root: &Path,
     runner: Runner,
     vitest: Option<&Path>,
     bun: Option<&Path>,
     test_files: &[PathBuf],
-) -> Result<Verification, Finding> {
+) -> Result<Execution, Finding> {
     if matches!(runner, Runner::Bun) && vitest.is_some()
         || matches!(runner, Runner::Vitest) && bun.is_some()
     {
@@ -96,33 +107,12 @@ pub(crate) fn verify(
             bun::parse_junit(&xml).map_err(|e| Finding::new("EC_RUNNER", e))?
         }
     };
-    let registered_files = || {
-        registrations
-            .iter()
-            .flat_map(|r| &r.cases)
-            .filter_map(|case| case.test().map(|test| test.file.as_str()))
-    };
-    let mut paths = resolve_paths(root, registered_files());
-    paths.extend(resolve_paths(
-        root,
-        result.tests.iter().map(|test| test.file.as_str()),
-    ));
-    let (tests, diagnostics) =
-        evidence::judge(registrations, &paths, result, output.status.success());
-    let run = observation::RunContext::new(run_id);
-    let observations = (|| {
-        let records = observation_io::read(&observations, &run)?;
-        // Resolve again after reading observations, preserving the existing phase boundary.
-        let mut paths = resolve_paths(root, registered_files());
-        paths.extend(resolve_paths(
-            root,
-            records.records().iter().map(|record| record.file.as_str()),
-        ));
-        observation::judge(registrations, &tests, &paths, &run, &records)
-    })();
-    Ok(Verification {
-        tests,
-        diagnostics,
-        observations,
+    Ok(Execution {
+        evidence: result,
+        process_ok: output.status.success(),
+        observations: ObservationSession {
+            temp,
+            run: observation::RunContext::new(run_id),
+        },
     })
 }

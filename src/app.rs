@@ -2,7 +2,7 @@ use crate::{
     input::{existing_tests, read_json},
     onboard,
     request::{ContractAction, ContractRequest, Request},
-    runner, scan, tsrs_adapter,
+    scan, tsrs_adapter, verification,
 };
 use errspec::{config::ValidatedConfig, contract, model::*, report::ReportData, snapshot};
 use std::{
@@ -131,7 +131,7 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
                         "No registered test files to select",
                     ));
                 }
-                let verification = runner::verify(
+                let verification = verification::verify(
                     &data.registrations,
                     root,
                     *runner,

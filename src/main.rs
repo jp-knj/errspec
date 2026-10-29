@@ -7,6 +7,7 @@ mod request;
 mod runner;
 mod scan;
 mod tsrs_adapter;
+mod verification;
 
 use clap::Parser;
 use std::process::ExitCode;
