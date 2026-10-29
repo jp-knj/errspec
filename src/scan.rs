@@ -35,6 +35,33 @@ pub(crate) fn line_at(text: &str, offset: usize) -> usize {
         .count()
         + 1
 }
+/// Whether every union member takes its discriminant property from a declaration outside `root`
+/// or in node_modules, such as `Omit<SdkIssue, 'at'>`. Unknown declarations count as local.
+fn declared_outside(checker: &mut Checker, ty: P<Type>, key: &str, root: &Path) -> bool {
+    let members: Vec<P<Type>> = if ty.flags().intersects(TypeFlags::Union) {
+        ty.types().to_vec()
+    } else {
+        vec![ty]
+    };
+    members.iter().all(|member| {
+        if member.flags().intersects(TypeFlags::Union) {
+            return declared_outside(checker, *member, key, root);
+        }
+        let Some(prop) = checker.get_property_of_type_exported(*member, key) else {
+            return false;
+        };
+        let Some(declaration) = prop.declarations().first() else {
+            return false;
+        };
+        let file = get_source_file_of_node(*declaration).expect("source node");
+        let name = file.file_name().replace('\\', "/");
+        name.contains("/node_modules/") || !Path::new(file.file_name()).starts_with(root)
+    })
+}
+
+/// Exports of one declaration, keyed by its location and discriminant.
+type DeclaredExports = BTreeMap<(String, u32, String), Vec<(Source, Vec<String>, bool)>>;
+
 fn key(root: &Path, node: P<Node>) -> String {
     let loc = location(root, node);
     format!("{}:{}:{:?}", loc.file, loc.byte_offset, node.kind())
@@ -264,6 +291,7 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
         .collect();
     let mut facts = ScanFacts::default();
     let mut bodies = BTreeMap::new();
+    let mut declared: DeclaredExports = BTreeMap::new();
     for file in &files {
         let mut checker = adapter
             .program
@@ -283,19 +311,31 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
                     continue;
                 }
                 let ty = checker.get_declared_type_of_symbol_exported(symbol);
+                let exporter = location(root, file.as_node()).file;
+                let declaration = symbol
+                    .declarations()
+                    .first()
+                    .map(|d| location(root, *d))
+                    .map(|l| (l.file, l.byte_offset))
+                    .unwrap_or_else(|| (exporter.clone(), 0));
                 for discriminant in discriminants {
                     let mut tags = BTreeSet::new();
                     if collect_tags(&mut checker, ty, discriminant, &mut tags).is_ok()
                         && !tags.is_empty()
                     {
-                        facts.candidates.push(Candidate {
-                            source: Source {
-                                file: location(root, file.as_node()).file,
-                                export: name.clone(),
-                                discriminant: discriminant.clone(),
-                            },
-                            tags: tags.into_iter().collect(),
-                        });
+                        let external = declared_outside(&mut checker, ty, discriminant, root);
+                        declared
+                            .entry((declaration.0.clone(), declaration.1, discriminant.clone()))
+                            .or_default()
+                            .push((
+                                Source {
+                                    file: exporter.clone(),
+                                    export: name.clone(),
+                                    discriminant: discriminant.clone(),
+                                },
+                                tags.into_iter().collect(),
+                                external,
+                            ));
                     }
                 }
             }
@@ -326,14 +366,52 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
             }
         });
     }
+    let mut candidate_declarations = vec![];
+    facts.candidates.extend(
+        declared
+            .into_iter()
+            .map(|((file, offset, _), mut exports)| {
+                candidate_declarations.push((file.clone(), offset));
+                // Prefer the declaring file; otherwise the first path in a stable order.
+                exports.sort_by(|a, b| (&a.0.file, &a.0.export).cmp(&(&b.0.file, &b.0.export)));
+                let primary = exports
+                    .iter()
+                    .position(|(source, _, _)| source.file == file)
+                    .unwrap_or(0);
+                let (source, tags, external) = exports.remove(primary);
+                Candidate {
+                    source,
+                    tags,
+                    external,
+                    flows: vec![],
+                    reexports: exports
+                        .into_iter()
+                        .map(|(s, _, _)| Export {
+                            file: s.file,
+                            export: s.export,
+                        })
+                        .collect(),
+                }
+            }),
+    );
     let mut inspector = Inspector {
         root,
         adapter: &adapter,
         bodies: &bodies,
         facts: &mut facts,
+        error_declarations: vec![],
     };
     for (id, node) in &bodies {
         inspector.function(id, *node);
+    }
+    let error_declarations = inspector.error_declarations;
+    for (candidate, declaration) in facts.candidates.iter_mut().zip(&candidate_declarations) {
+        let channels: BTreeSet<Channel> = error_declarations
+            .iter()
+            .filter(|(declarations, _)| declarations.contains(declaration))
+            .map(|(_, channel)| *channel)
+            .collect();
+        candidate.flows = channels.into_iter().collect();
     }
     facts.into_report()
 }
@@ -343,6 +421,8 @@ struct Inspector<'a> {
     adapter: &'a TsrsAdapter,
     bodies: &'a BTreeMap<String, P<Node>>,
     facts: &'a mut ScanFacts,
+    /// Declarations named by each origin's error type, for linking candidates to origins.
+    error_declarations: Vec<(BTreeSet<(String, u32)>, Channel)>,
 }
 impl Inspector<'_> {
     fn unknown(&mut self, owner: &str, node: P<Node>, reason: &str) {
@@ -353,15 +433,18 @@ impl Inspector<'_> {
             reason: reason.into(),
         });
     }
+    #[allow(clippy::too_many_arguments)]
     fn origin(
         &mut self,
         owner: &str,
         node: P<Node>,
         channel: Channel,
         ty: String,
+        declarations: BTreeSet<(String, u32)>,
         caught: bool,
         escapes: bool,
     ) {
+        self.error_declarations.push((declarations, channel));
         self.facts.origins.push(Origin {
             id: format!("{}:{channel:?}", key(self.root, node)),
             function: owner.into(),
@@ -387,14 +470,21 @@ impl Inspector<'_> {
             let sig = checker.get_signature_from_declaration_exported(node);
             let result = checker.get_return_type_of_signature_exported(sig);
             let result = checker.get_awaited_type_exported(result).unwrap_or(result);
-            let mut errors = BTreeSet::new();
+            let mut errors = vec![];
             result_errors(&mut checker, result, &mut errors);
             if !errors.is_empty() {
+                let mut declarations = BTreeSet::new();
+                let mut names = BTreeSet::new();
+                for error in errors {
+                    declarations_of(self.root, error, &mut declarations);
+                    names.insert(checker.type_to_string_exported(error));
+                }
                 self.origin(
                     owner,
                     node,
                     Channel::Result,
-                    errors.into_iter().collect::<Vec<_>>().join(" | "),
+                    names.into_iter().collect::<Vec<_>>().join(" | "),
+                    declarations,
                     false,
                     true,
                 );
@@ -402,8 +492,10 @@ impl Inspector<'_> {
         }
         walk_body(body, &mut |n| match n.kind() {
             Kind::ThrowStatement => {
-                let ty = checker.get_type_at_location(n.as_throw_statement().expression());
-                let ty = checker.type_to_string_exported(ty);
+                let thrown = checker.get_type_at_location(n.as_throw_statement().expression());
+                let ty = checker.type_to_string_exported(thrown);
+                let mut declarations = BTreeSet::new();
+                declarations_of(self.root, thrown, &mut declarations);
                 let (caught, rethrows) = catches(n);
                 self.origin(
                     owner,
@@ -414,6 +506,7 @@ impl Inspector<'_> {
                         Channel::Throw
                     },
                     ty,
+                    declarations,
                     caught,
                     !caught || rethrows,
                 );
@@ -439,9 +532,11 @@ impl Inspector<'_> {
                 })
         {
             let argument = node.as_call_expression().arguments.nodes().first().copied();
+            let mut declarations = BTreeSet::new();
             let ty = argument
                 .map(|n| {
                     let ty = checker.get_type_at_location(n);
+                    declarations_of(self.root, ty, &mut declarations);
                     checker.type_to_string_exported(ty)
                 })
                 .unwrap_or_else(|| "undefined".into());
@@ -449,7 +544,15 @@ impl Inspector<'_> {
                 .iter()
                 .any(|u| u.returned && !u.awaited || u.awaited && (!u.catches || u.may_rethrow));
             let caught = uses.iter().any(|u| u.awaited && u.catches);
-            self.origin(owner, node, Channel::Rejection, ty, caught, escapes);
+            self.origin(
+                owner,
+                node,
+                Channel::Rejection,
+                ty,
+                declarations,
+                caught,
+                escapes,
+            );
             if !uses.iter().any(|u| u.returned || u.awaited) {
                 self.unknown(owner, node, "unobserved_promise_rejection");
             }
@@ -531,7 +634,23 @@ impl Inspector<'_> {
     }
 }
 
-fn result_errors(checker: &mut Checker, ty: P<Type>, out: &mut BTreeSet<String>) {
+/// Declarations of a type's alias or symbol, and of each union member's, as (file, offset).
+fn declarations_of(root: &Path, ty: P<Type>, out: &mut BTreeSet<(String, u32)>) {
+    let symbols = [ty.alias().and_then(|a| a.symbol()), ty.symbol()];
+    for symbol in symbols.into_iter().flatten() {
+        if let Some(declaration) = symbol.declarations().first() {
+            let l = location(root, *declaration);
+            out.insert((l.file, l.byte_offset));
+        }
+    }
+    if ty.flags().contains(TypeFlags::Union) {
+        for member in ty.types() {
+            declarations_of(root, *member, out);
+        }
+    }
+}
+
+fn result_errors(checker: &mut Checker, ty: P<Type>, out: &mut Vec<P<Type>>) {
     if ty.flags().contains(TypeFlags::Union) {
         for member in ty.types() {
             result_errors(checker, *member, out);
@@ -541,7 +660,7 @@ fn result_errors(checker: &mut Checker, ty: P<Type>, out: &mut BTreeSet<String>)
         .intersects(TypeFlags::Any | TypeFlags::Unknown | TypeFlags::Never)
         && let Some(error) = checker.get_type_of_property_of_type_exported(ty, "error")
     {
-        out.insert(checker.type_to_string_exported(error));
+        out.push(error);
     }
 }
 fn is_native_promise_reject(decl: Option<P<Node>>) -> bool {

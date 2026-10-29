@@ -138,14 +138,36 @@ fn write_scan(
                 report.edges.len(),
                 report.unknowns.len()
             );
-            for c in &report.candidates {
+            // Local declarations first; dependency-only types are listed after them.
+            let (local, external): (Vec<_>, Vec<_>) =
+                report.candidates.iter().partition(|c| !c.external);
+            for c in local.into_iter().chain(external) {
+                let flows: Vec<_> = c
+                    .flows
+                    .iter()
+                    .map(|f| format!("{f:?}").to_lowercase())
+                    .collect();
                 println!(
-                    "{} export {} [{}]: {}",
+                    "{}{} export {} [{}]{}: {}",
+                    if c.external { "external " } else { "" },
                     c.source.file,
                     c.source.export,
                     c.source.discriminant,
+                    if flows.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" (flows: {})", flows.join(", "))
+                    },
                     c.tags.join(", ")
                 );
+                if !c.reexports.is_empty() {
+                    let paths: Vec<_> = c
+                        .reexports
+                        .iter()
+                        .map(|e| format!("{}#{}", e.file, e.export))
+                        .collect();
+                    println!("  also exported as {}", paths.join(", "));
+                }
             }
             for f in &report.functions {
                 if !f.effects.is_empty() {

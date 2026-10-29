@@ -14,6 +14,20 @@ pub struct Location {
 pub struct Candidate {
     pub source: crate::model::Source,
     pub tags: Vec<String>,
+    /// Other public paths to the same declaration. `source` names the declaring file when it exports the type.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reexports: Vec<Export>,
+    /// Every discriminant property is declared outside the project directory or in node_modules.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub external: bool,
+    /// Channels of origins whose error type is this declaration or a union containing it.
+    pub flows: Vec<Channel>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Export {
+    pub file: String,
+    pub export: String,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
