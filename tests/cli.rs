@@ -306,6 +306,9 @@ fn missing_vitest_cannot_be_reported_as_passed() {
     assert_eq!(status, 2);
     assert!(has(&report, "EC_RUNNER"));
     assert_eq!(report["testsExecuted"], false);
+    let message = report["diagnostics"][0]["message"].as_str().unwrap();
+    assert!(message.contains("node_modules/.bin/vitest"), "{message}");
+    assert!(message.ends_with("--vitest PATH when vitest is installed elsewhere"));
 }
 
 #[test]
@@ -314,6 +317,9 @@ fn missing_bun_and_mismatched_runner_options_are_rejected() {
     let (status, report) = run(&dir, &["verify", "--runner", "bun", "--bun", "missing-bun"]);
     assert_eq!(status, 2);
     assert!(has(&report, "EC_RUNNER"));
+    let message = report["diagnostics"][0]["message"].as_str().unwrap();
+    assert!(message.contains("missing-bun: "), "{message}");
+    assert!(!message.contains("--vitest"), "{message}");
     assert_eq!(report["testsExecuted"], false);
     let (status, report) = run(
         &dir,
