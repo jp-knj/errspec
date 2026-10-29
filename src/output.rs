@@ -29,6 +29,19 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
                         case.observation_status.as_str()
                     ));
                 }
+                for path in &c.paths {
+                    let reached = match path.reached {
+                        Some(true) => "reached",
+                        Some(false) => "not reached",
+                        None => "not recorded",
+                    };
+                    lines.push(format!(
+                        "  path {}:{} {}: {reached}",
+                        path.file,
+                        path.line,
+                        path.tags.join(" | ")
+                    ));
+                }
             }
             for d in &report.diagnostics {
                 let location = d.file.as_ref().map(|file| match d.line {

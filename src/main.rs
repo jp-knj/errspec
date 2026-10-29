@@ -1,5 +1,6 @@
 mod app;
 mod cli;
+mod failure_paths;
 mod input;
 mod onboard;
 mod output;

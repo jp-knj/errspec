@@ -18,7 +18,30 @@ pub struct Contract {
     pub source: Source,
     #[serde(default)]
     pub boundaries: Vec<String>,
+    /// The function that returns the error type; enables failure path checks.
+    #[serde(default)]
+    pub entry: Option<EntryRef>,
     pub cases: Vec<Case>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EntryRef {
+    pub file: String,
+    pub export: String,
+}
+
+/// A `return` of the entry function that yields one or more of the contract's tags.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FailurePath {
+    pub file: String,
+    pub line: usize,
+    pub byte_offset: u32,
+    pub tags: Vec<String>,
+    /// Present only when an execution recorded reachability.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reached: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -159,6 +182,10 @@ pub struct ContractResult {
     /// User declarations, not inferred call-graph reachability.
     pub declared_boundaries: Vec<String>,
     pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry: Option<EntryRef>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<FailurePath>,
     pub cases: Vec<CaseResult>,
 }
 
