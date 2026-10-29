@@ -1,11 +1,11 @@
 use errspec::{
     config::{CaseKind, ValidatedConfig},
-    contract,
-    model::{Config, ObservationStatus, Report, scenario_test_name},
+    evidence::{self, RunEvidence, TestEvidence},
+    model::{Config, ObservationStatus, scenario_test_name},
     observation::{self, RunContext},
 };
 use serde_json::{Value, json};
-use std::fs;
+mod support;
 
 fn fixture() -> Value {
     serde_json::from_str(include_str!("fixtures/observation-v1.json")).unwrap()
@@ -66,21 +66,39 @@ fn shared_sdk_fixture_passes_only_in_the_execution_that_validated_it() {
         scenario_test_name(&record.contract_id, &record.scenario_id)
     );
     assert_eq!((record.faults[0].calls, record.faults[0].completed), (2, 2));
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("scenario.test.ts"), "").unwrap();
     let cfg = ValidatedConfig::try_from(config(2)).unwrap();
-    let (mut result, findings) =
-        contract::compare(dir.path(), &cfg.contracts()[0], vec!["Offline".into()]);
+    let mut data = support::register(&cfg, &["Offline"]);
+    let paths = support::paths(&["scenario.test.ts"]);
+    let (tests, findings) = evidence::judge(
+        &data.registrations,
+        &paths,
+        RunEvidence {
+            runner: "bun",
+            success: true,
+            tests: vec![TestEvidence {
+                file: record.file.clone(),
+                name: record.test_name.clone(),
+                status: "passed".into(),
+            }],
+        },
+        true,
+    );
     assert!(findings.is_empty());
-    result.cases[0].test_status = "passed".into();
-    let mut report = Report::new("verify");
-    report.contracts.push(result);
-    let before = serde_json::to_value(&report).unwrap();
-    let other_run = RunContext::new("another-run");
-    let error = observation::apply(&mut report, dir.path(), &other_run, &records).unwrap_err();
+    let error = observation::judge(
+        &data.registrations,
+        &tests,
+        &paths,
+        &RunContext::new("another-run"),
+        &records,
+    )
+    .unwrap_err();
     assert_eq!(error.code, "EC_EVIDENCE");
-    assert_eq!(serde_json::to_value(&report).unwrap(), before);
-    observation::apply(&mut report, dir.path(), &run, &records).unwrap();
+    let (observations, findings) =
+        observation::judge(&data.registrations, &tests, &paths, &run, &records).unwrap();
+    data.tests = Some(tests);
+    data.observations = Some(observations);
+    data.diagnostics.extend(findings);
+    let report = data.finish("verify");
     assert!(report.diagnostics.is_empty());
     assert_eq!(
         report.contracts[0].cases[0].observation_status,
@@ -113,10 +131,21 @@ fn in_memory_boundary_rejects_stale_and_malformed_observations() {
     }
     // Even an empty, previously validated batch cannot cross execution boundaries.
     let empty = observation::validate(vec![], &run).unwrap();
+    let (tests, _) = evidence::judge(
+        &[],
+        &Default::default(),
+        RunEvidence {
+            runner: "bun",
+            success: true,
+            tests: vec![],
+        },
+        true,
+    );
     assert!(
-        observation::apply(
-            &mut Report::new("verify"),
-            std::path::Path::new("."),
+        observation::judge(
+            &[],
+            &tests,
+            &Default::default(),
             &RunContext::new("other"),
             &empty
         )

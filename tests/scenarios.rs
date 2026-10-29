@@ -1,11 +1,13 @@
 use errspec::{
     config::ValidatedConfig,
-    contract,
+    evidence::{self, RunEvidence, TestEvidence},
     model::*,
     observation::{self, RunContext},
+    observation_io, snapshot,
 };
 use serde_json::{Value, json};
 use std::fs;
+mod support;
 
 fn config() -> Value {
     json!({"schemaVersion":2,"project":"tsconfig.json","contracts":[{
@@ -23,39 +25,51 @@ fn record() -> Value {
       "faults":[{"id":"gateway","calls":1,"completed":1}],
       "assertions":[{"id":"status","status":"passed"},{"id":"writes","status":"passed"}]})
 }
-fn check(mut values: Vec<Value>) -> (Report, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("case.test.ts"), "").unwrap();
+fn check(values: Vec<Value>) -> Report {
     let mut cfg: Config = serde_json::from_value(config()).unwrap();
     cfg.contracts[0].cases.truncate(1);
     let cfg = ValidatedConfig::try_from(cfg).unwrap();
-    let (mut result, findings) =
-        contract::compare(dir.path(), &cfg.contracts()[0], vec!["A".into()]);
-    assert!(findings.is_empty());
-    result.cases[0].test_status = "passed".into();
-    let mut report = Report::new("verify");
-    report.contracts.push(result);
-    let records: Vec<_> = values
-        .drain(..)
-        .map(|v| serde_json::from_value(v).unwrap())
-        .collect();
+    let mut data = support::register(&cfg, &["A"]);
+    let paths = support::paths(&["case.test.ts"]);
+    let (tests, findings) = evidence::judge(
+        &data.registrations,
+        &paths,
+        RunEvidence {
+            runner: "vitest",
+            success: true,
+            tests: vec![TestEvidence {
+                file: "case.test.ts".into(),
+                name: scenario_test_name("checkout", "first"),
+                status: "passed".into(),
+            }],
+        },
+        true,
+    );
+    data.diagnostics.extend(findings);
     let run = RunContext::new("run-1");
-    let records = observation::validate(records, &run).unwrap();
-    observation::apply(&mut report, dir.path(), &run, &records).unwrap();
-    (report, dir)
+    let records = observation::validate(
+        values
+            .into_iter()
+            .map(|v| serde_json::from_value(v).unwrap())
+            .collect(),
+        &run,
+    )
+    .unwrap();
+    let (observations, findings) =
+        observation::judge(&data.registrations, &tests, &paths, &run, &records).unwrap();
+    data.tests = Some(tests);
+    data.observations = Some(observations);
+    data.diagnostics.extend(findings);
+    data.finish("verify")
 }
 
 #[test]
 fn multiple_scenarios_share_a_tag_but_ids_are_unique() {
     let cfg: Config = serde_json::from_value(config()).unwrap();
     let cfg = ValidatedConfig::try_from(cfg).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("case.test.ts"), "").unwrap();
-    let (result, gaps) = contract::compare(
-        dir.path(),
-        &cfg.contracts()[0],
-        vec!["A".into(), "B".into()],
-    );
+    let report = support::register(&cfg, &["A", "B"]).finish("check");
+    let result = &report.contracts[0];
+    let gaps = &report.diagnostics;
     assert_eq!(result.cases.len(), 3);
     assert_eq!(gaps.len(), 1);
     assert_eq!(gaps[0].tag.as_deref(), Some("B"));
@@ -95,13 +109,13 @@ fn version_two_cannot_omit_observation_requirements_or_use_old_names() {
 
 #[test]
 fn passing_test_requires_actual_complete_observations() {
-    let (report, _dir) = check(vec![record()]);
+    let report = check(vec![record()]);
     assert!(report.diagnostics.is_empty());
     assert_eq!(
         report.contracts[0].cases[0].observation_status,
         ObservationStatus::Passed
     );
-    let (report, _dir) = check(vec![]);
+    let report = check(vec![]);
     assert_eq!(report.diagnostics[0].code, "EC008");
     for (field, value, code) in [
         ("faults", json!([]), "EC009"),
@@ -130,7 +144,7 @@ fn passing_test_requires_actual_complete_observations() {
     ] {
         let mut changed = record();
         changed[field] = value;
-        let (report, _dir) = check(vec![changed]);
+        let report = check(vec![changed]);
         assert!(
             report.diagnostics.iter().any(|f| f.code == code),
             "{report:?}"
@@ -156,14 +170,14 @@ fn wrong_identity_extra_ids_and_repeated_execution_are_rejected() {
     ] {
         let mut changed = record();
         changed[field] = value;
-        let (report, _dir) = check(vec![changed]);
+        let report = check(vec![changed]);
         assert!(report.diagnostics.iter().any(|f| f.code == "EC011"));
         assert_ne!(
             report.contracts[0].cases[0].observation_status,
             ObservationStatus::Passed
         );
     }
-    let (report, _dir) = check(vec![record(), record()]);
+    let report = check(vec![record(), record()]);
     assert_eq!(
         report.contracts[0].cases[0].observation_status,
         ObservationStatus::Invalid
@@ -176,18 +190,18 @@ fn observation_reader_rejects_stale_corrupt_partial_and_invalid_records() {
     let path = dir.path().join("one.json");
     fs::write(&path, record().to_string()).unwrap();
     assert_eq!(
-        observation::read(dir.path(), &RunContext::new("run-1"))
+        observation_io::read(dir.path(), &RunContext::new("run-1"))
             .unwrap()
             .records()
             .len(),
         1
     );
-    assert!(observation::read(dir.path(), &RunContext::new("old-run")).is_err());
+    assert!(observation_io::read(dir.path(), &RunContext::new("old-run")).is_err());
     fs::write(&path, "{").unwrap();
-    assert!(observation::read(dir.path(), &RunContext::new("run-1")).is_err());
+    assert!(observation_io::read(dir.path(), &RunContext::new("run-1")).is_err());
     fs::remove_file(&path).unwrap();
     fs::write(dir.path().join("one.json.tmp"), "{}").unwrap();
-    assert!(observation::read(dir.path(), &RunContext::new("run-1")).is_err());
+    assert!(observation_io::read(dir.path(), &RunContext::new("run-1")).is_err());
     for change in [
         json!([{"id":"gateway","calls":1,"completed":2}]),
         json!([{"id":"gateway","calls":1,"completed":1},{"id":"gateway","calls":1,"completed":1}]),
@@ -208,20 +222,20 @@ fn observation_reader_rejects_stale_corrupt_partial_and_invalid_records() {
 fn baseline_tracks_scenario_removal_and_requirement_changes_with_unchanged_tags() {
     let cfg =
         ValidatedConfig::try_from(serde_json::from_value::<Config>(config()).unwrap()).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("case.test.ts"), "").unwrap();
-    let (result, _) = contract::compare(dir.path(), &cfg.contracts()[0], vec!["A".into()]);
-    let mut report = Report::new("check");
-    report.contracts.push(result);
-    let before = contract::snapshot(&report);
-    report.contracts[0].cases.pop();
-    report.contracts[0].cases[0]
-        .observe
-        .as_mut()
+    let before = snapshot::capture(&support::register(&cfg, &["A"]).registrations);
+    let mut changed = config();
+    changed["contracts"][0]["cases"]
+        .as_array_mut()
         .unwrap()
-        .assertions
         .pop();
-    let delta = contract::diff(&contract::snapshot(&report), &before).unwrap();
+    changed["contracts"][0]["cases"][0]["observe"]["assertions"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    let cfg =
+        ValidatedConfig::try_from(serde_json::from_value::<Config>(changed).unwrap()).unwrap();
+    let after = snapshot::capture(&support::register(&cfg, &["A"]).registrations);
+    let delta = snapshot::diff(&after, &before).unwrap();
     assert!(delta.added.is_empty() && delta.removed.is_empty());
     assert_eq!(delta.removed_scenarios["checkout"], ["retry"]);
     assert_eq!(delta.changed_scenarios["checkout"], ["first"]);
