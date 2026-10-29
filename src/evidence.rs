@@ -64,12 +64,25 @@ impl TestStatus {
 pub struct TestRun {
     pub runner: &'static str,
     statuses: BTreeMap<TestRef, TestStatus>,
+    full_names: BTreeMap<TestRef, String>,
 }
 
 impl TestRun {
     pub fn status(&self, test: &TestRef) -> &TestStatus {
         self.statuses.get(test).unwrap_or(&TestStatus::NotFound)
     }
+    /// The runner's name for the single matching test, including any SDK description.
+    pub fn full_name<'a>(&'a self, test: &'a TestRef) -> &'a str {
+        self.full_names.get(test).unwrap_or(&test.name)
+    }
+}
+
+/// A scenario name may carry a human description after one space. The JSON tuple
+/// ends with `]`, so a description cannot make one scenario's name match another.
+fn names_scenario(runner_name: &str, scenario_name: &str) -> bool {
+    runner_name
+        .strip_prefix(scenario_name)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
 }
 
 pub fn judge(
@@ -88,17 +101,32 @@ pub fn judge(
         }
     }
     let mut statuses = BTreeMap::new();
+    let mut full_names = BTreeMap::new();
     let mut findings = Vec::new();
     for registration in registrations {
         for case in &registration.cases {
             let Some(test) = case.test() else { continue };
-            let matches = paths
-                .get(&test.file)
-                .and_then(|path| results.get(&(path, test.name.clone())));
-            let status = match matches {
-                None => TestStatus::NotFound,
-                Some(values) if values.len() != 1 => TestStatus::Ambiguous,
-                Some(values) => values[0].clone(),
+            let matches: Vec<_> = match paths.get(&test.file) {
+                // Legacy names are user-specified and must match exactly.
+                Some(path) if case.scenario().is_none() => results
+                    .get(&(path, test.name.clone()))
+                    .into_iter()
+                    .flat_map(|values| values.iter().map(|status| (&test.name, status)))
+                    .collect(),
+                Some(path) => results
+                    .iter()
+                    .filter(|((file, name), _)| *file == path && names_scenario(name, &test.name))
+                    .flat_map(|((_, name), values)| values.iter().map(move |status| (name, status)))
+                    .collect(),
+                None => Vec::new(),
+            };
+            let status = match matches.as_slice() {
+                [] => TestStatus::NotFound,
+                [(name, status)] => {
+                    full_names.insert(test.clone(), (*name).clone());
+                    (*status).clone()
+                }
+                _ => TestStatus::Ambiguous,
             };
             if status != TestStatus::Passed {
                 findings.push(case.finding(
@@ -123,6 +151,7 @@ pub fn judge(
         TestRun {
             runner: evidence.runner,
             statuses,
+            full_names,
         },
         findings,
     )

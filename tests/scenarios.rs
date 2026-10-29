@@ -29,6 +29,12 @@ fn check(values: Vec<Value>) -> Report {
     check_with(config(), values)
 }
 fn check_with(config: Value, values: Vec<Value>) -> Report {
+    check_runner(config, &[&scenario_test_name("checkout", "first")], values)
+}
+fn check_names(runner_names: &[&str], values: Vec<Value>) -> Report {
+    check_runner(config(), runner_names, values)
+}
+fn check_runner(config: Value, runner_names: &[&str], values: Vec<Value>) -> Report {
     let mut cfg: Config = serde_json::from_value(config).unwrap();
     cfg.contracts[0].cases.truncate(1);
     let cfg = ValidatedConfig::try_from(cfg).unwrap();
@@ -40,11 +46,14 @@ fn check_with(config: Value, values: Vec<Value>) -> Report {
         RunEvidence {
             runner: "vitest",
             success: true,
-            tests: vec![TestEvidence {
-                file: "case.test.ts".into(),
-                name: scenario_test_name("checkout", "first"),
-                status: "passed".into(),
-            }],
+            tests: runner_names
+                .iter()
+                .map(|name| TestEvidence {
+                    file: "case.test.ts".into(),
+                    name: (*name).into(),
+                    status: "passed".into(),
+                })
+                .collect(),
         },
         true,
     );
@@ -179,6 +188,40 @@ fn explicitly_fault_free_scenarios_pass_only_without_fault_observations() {
     input_only["assertions"] = json!([{"id":"status","status":"passed"}]);
     let report = check_with(cfg, vec![input_only]);
     assert!(report.diagnostics.iter().any(|f| f.code == "EC010"));
+}
+
+#[test]
+fn a_description_after_the_stable_name_matches_only_its_own_scenario() {
+    let base = scenario_test_name("checkout", "first");
+    let described = format!("{base} [異常系] 書き込まない");
+    let mut observed = record();
+    observed["testName"] = json!(described);
+    let report = check_names(&[&described], vec![observed.clone()]);
+    assert!(report.diagnostics.is_empty(), "{report:?}");
+    assert_eq!(
+        report.contracts[0].cases[0].observation_status,
+        ObservationStatus::Passed
+    );
+    // The observation must name the same runner test, not just the stable prefix.
+    let report = check_names(&[&described], vec![record()]);
+    assert!(report.diagnostics.iter().any(|f| f.code == "EC011"));
+    let report = check_names(&[&base, &described], vec![observed]);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|f| f.code == "EC005" && f.message.contains("ambiguous"))
+    );
+    for unrelated in [format!("{base}x"), format!("{base}\u{3000}説明")] {
+        let report = check_names(&[&unrelated], vec![record()]);
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|f| f.code == "EC005" && f.message.contains("not_found")),
+            "{unrelated}"
+        );
+    }
 }
 
 #[test]

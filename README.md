@@ -126,6 +126,7 @@ scenarioTest(test, import.meta.url, {
 - 入力だけで結果が決まるシナリオ（入力チェックなど）は、設定で`"faults": []`を書き、`scenarioTest`の定義に`withoutFaults: true`を指定します。両方そろわないと失敗します。`assertions`は1件以上必要です。
 - 設定に必須としたcheckが欠けていれば、テストが成功していてもRust側の照合が失敗します。
 - テスト名は`errspec ["契約ID","シナリオID"]`として自動生成します。設定の`test.name`は省略します。
+- 定義に`description`を渡すと、ランナーの表示名は`errspec ["checkout.payment","declined"] [異常系] 注文を作らない`のように説明付きになります。照合は先頭の固定部分で行うため、説明を変えてもシナリオの変更にはなりません。説明は1行の空でない文字列です。
 - `scenarioTest`はトップレベルで登録してください。`describe`内の登録は現在未対応で、完全なテスト名が一致せず失敗します。
 - `test.concurrent`は対応済みです（BunではBun 1.3以降が提供します）。`test.skip`は未検証になります。retry/repeatで同一シナリオが複数回実行された場合は曖昧として拒否します。
 
