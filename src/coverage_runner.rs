@@ -95,6 +95,17 @@ fn read_records(directory: &Path) -> Result<Vec<AssertionRecord>, Finding> {
 
 pub(crate) fn run(request: &CoverageRequest) -> CoverageReport {
     let mut report = CoverageReport::default();
+    // Read the baseline before running tests so a wrong path fails fast.
+    let previous = match &request.baseline {
+        Some(path) => match read_json::<coverage::CoverageBaseline>(path, "EC_BASELINE") {
+            Ok(previous) => Some(previous),
+            Err(finding) => {
+                report.diagnostics.push(finding);
+                return report;
+            }
+        },
+        None => None,
+    };
     let scanned = scan::run(&request.project, &request.discriminants);
     if !scanned.scan_complete {
         report.diagnostics = scanned.diagnostics;
@@ -102,8 +113,33 @@ pub(crate) fn run(request: &CoverageRequest) -> CoverageReport {
     }
     if let Err(finding) = execute(request, &scanned.candidates, &mut report) {
         report.diagnostics.push(finding);
+        return report;
+    }
+    if let Some(previous) = &previous {
+        match coverage::compare(previous, &report.types) {
+            Ok(delta) => report.delta = Some(delta),
+            Err(finding) => report.diagnostics.push(finding),
+        }
+    }
+    if let Some(out) = &request.save_baseline
+        && let Err(finding) = save(out, &report)
+    {
+        report.diagnostics.push(finding);
     }
     report
+}
+
+fn save(out: &Path, report: &CoverageReport) -> Result<(), Finding> {
+    let error = |e: io::Error| Finding::new("EC_BASELINE", format!("{}: {e}", out.display()));
+    let data = serde_json::to_vec_pretty(&coverage::capture(&report.types))
+        .expect("baseline serializes to JSON");
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(out)
+        .map_err(error)?
+        .write_all(&data)
+        .map_err(error)
 }
 
 fn execute(

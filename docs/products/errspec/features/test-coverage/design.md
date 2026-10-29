@@ -17,6 +17,10 @@ coverageを実装・変更する開発者とAI。
 5. 記録用ファイルは、テストと同じVitestのchaiに対して値の比較用マッチャー（`toBe`、`toEqual`、`toStrictEqual`、`toMatchObject`、`toContain`、`toContainEqual`、`toHaveProperty`）を包む。元のマッチャーが成功し、否定でない場合だけ、受け取った値から識別プロパティの文字列と、直接受け取った文字列・配列内の文字列を記録する。
 6. 判定は純粋関数で行う。記録に識別プロパティとタグが一致する値、または同じ文字列があれば`asserted`。なければ、ランナーのレポートにあるテストファイルの本文に引用符付きのタグがあれば`mentioned`。それ以外は`missing`。
 
+## baseline
+
+`--save-baseline`は型ごと（`file#export#discriminant`）にタグの状態を保存し、既存ファイルを上書きしません。`--baseline`は状態を`asserted`、`mentioned`、`missing`の順に強いとみなして比較します。弱くなったタグ（`regressed`）と、保存時になかった`missing`のタグ（`newMissing`）を失敗にし、強くなったタグ（`improved`）は報告だけにします。型やタグの削除は失敗にしません。網羅の対象から外れただけで、テストの後退ではないためです。
+
 ## 判断理由
 
 - `scenarioTest`を必須にすると既存テストが証拠にならず、導入時にすべてのタグが未登録になるため、受け取った値という既存の観測点を使う。

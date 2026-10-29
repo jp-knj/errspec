@@ -1,5 +1,8 @@
 use errspec::{
-    coverage::{AssertionRecord, TagStatus, judge},
+    coverage::{
+        AssertionRecord, CoverageDelta, TagChange, TagCoverage, TagRef, TagStatus, TypeCoverage,
+        capture, compare, judge,
+    },
     discovery::Candidate,
     model::Source,
 };
@@ -195,5 +198,102 @@ fn markdown_is_rejected_outside_coverage() {
         String::from_utf8_lossy(&output.stderr).contains("supported only by coverage"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn types(tags: &[(&str, TagStatus)]) -> Vec<TypeCoverage> {
+    vec![TypeCoverage {
+        source: candidate("errors.ts", "Failure", &[]).source,
+        tags: tags
+            .iter()
+            .map(|(tag, status)| TagCoverage {
+                tag: (*tag).into(),
+                status: *status,
+                tests: vec![],
+            })
+            .collect(),
+    }]
+}
+
+#[test]
+fn baseline_fails_only_on_regressions_and_new_missing_tags() {
+    use TagStatus::*;
+    let before = capture(&types(&[
+        ("Kept", Missing),
+        ("Weaker", Asserted),
+        ("Dropped", Mentioned),
+        ("Better", Missing),
+    ]));
+    let after = types(&[
+        ("Kept", Missing),
+        ("Weaker", Mentioned),
+        ("Dropped", Missing),
+        ("Better", Asserted),
+        ("NewGap", Missing),
+        ("NewMention", Mentioned),
+    ]);
+    let key = "errors.ts#Failure#_tag".to_owned();
+    let change = |tag: &str, from, to| TagChange {
+        type_key: key.clone(),
+        tag: tag.into(),
+        from,
+        to,
+    };
+    assert_eq!(
+        compare(&before, &after).unwrap(),
+        CoverageDelta {
+            regressed: vec![
+                change("Weaker", Asserted, Mentioned),
+                change("Dropped", Mentioned, Missing)
+            ],
+            new_missing: vec![TagRef {
+                type_key: key.clone(),
+                tag: "NewGap".into(),
+            }],
+            improved: vec![change("Better", Missing, Asserted)],
+        }
+    );
+    // An unchanged gap passes: adoption can start from today's state.
+    assert_eq!(
+        compare(&before, &types(&[("Kept", Missing)])).unwrap(),
+        CoverageDelta::default()
+    );
+}
+
+#[test]
+fn baseline_of_another_kind_is_rejected() {
+    let mut other = capture(&types(&[]));
+    other.kind = "errspec/snapshot".into();
+    assert_eq!(
+        compare(&other, &types(&[])).unwrap_err().code,
+        "EC_BASELINE"
+    );
+}
+
+#[test]
+fn saved_baseline_ratchets_later_runs() {
+    let dir = fixture();
+    let (status, _) = coverage(&dir, &["--save-baseline", "coverage-baseline.json"]);
+    assert_eq!(status, 0);
+    let saved: Value =
+        serde_json::from_slice(&fs::read(dir.path().join("coverage-baseline.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        saved["types"]["errors.ts#Failure#_tag"],
+        json!({"A": "asserted", "B": "mentioned", "C": "missing"})
+    );
+    // Existing files are never overwritten.
+    let (status, report) = coverage(&dir, &["--save-baseline", "coverage-baseline.json"]);
+    assert_eq!(status, 2, "{report}");
+    let (status, report) = coverage(&dir, &["--baseline", "coverage-baseline.json"]);
+    assert_eq!(status, 0, "{report}");
+    assert_eq!(report["delta"]["regressed"], json!([]));
+    // The test no longer mentions B: mentioned -> missing is a regression.
+    fs::write(dir.path().join("case.test.ts"), "export {};").unwrap();
+    let (status, report) = coverage(&dir, &["--baseline", "coverage-baseline.json"]);
+    assert_eq!(status, 1, "{report}");
+    assert_eq!(
+        report["delta"]["regressed"],
+        json!([{"type": "errors.ts#Failure#_tag", "tag": "B", "from": "mentioned", "to": "missing"}])
     );
 }

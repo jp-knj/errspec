@@ -59,6 +59,8 @@ pub(crate) struct CoverageRequest {
     pub vitest_config: Option<PathBuf>,
     pub fail_on_missing: bool,
     pub runner_args: Vec<String>,
+    pub baseline: Option<PathBuf>,
+    pub save_baseline: Option<PathBuf>,
 }
 
 pub(crate) struct InitRequest {
