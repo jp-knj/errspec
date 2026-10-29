@@ -166,6 +166,81 @@ fn snapshot_is_roundtrippable_and_does_not_overwrite() {
 }
 
 #[test]
+fn text_output_distinguishes_registration_from_execution() {
+    let dir = fixture("export type ErrorType = {_tag:'A'};", &["A"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+        .current_dir(dir.path())
+        .arg("check")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        concat!(
+            "check: pass (analysis complete: true, tests executed: false)\n",
+            "checkout: A\n",
+            "  A : registered, test=not_run, observation=NotRequired\n",
+        )
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn snapshot_inventories_tags_even_when_registrations_are_missing() {
+    let dir = fixture("export type ErrorType = {_tag:'A'} | {_tag:'B'};", &["A"]);
+    let (status, report) = run(&dir, &["snapshot", "--out", "baseline.json"]);
+    assert_eq!(status, 1);
+    assert!(has(&report, "EC001"));
+    let saved: Value =
+        serde_json::from_slice(&fs::read(dir.path().join("baseline.json")).unwrap()).unwrap();
+    assert_eq!(saved["contracts"]["checkout"]["tags"], json!(["A", "B"]));
+}
+
+#[cfg(unix)]
+#[test]
+fn runner_uses_config_directory_and_keeps_logs_out_of_json_despite_registration_gaps() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = fixture("export type ErrorType = {_tag:'A'} | {_tag:'B'};", &["A"]);
+    let caller = tempfile::tempdir().unwrap();
+    let executable = caller.path().join("fake-bun");
+    fs::write(&executable, r#"#!/bin/sh
+set -eu
+test -f test.ts
+test -d "$ERRSPEC_OBSERVATIONS"
+test -n "$ERRSPEC_RUN_ID"
+echo runner-stdout
+echo runner-stderr >&2
+printf '%s' '<testsuites tests="1" failures="0"><testsuite file="test.ts"><testcase name="A"/></testsuite></testsuites>' > "$4"
+"#).unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+        .current_dir(caller.path())
+        .args([
+            "verify",
+            "--runner",
+            "bun",
+            "--bun",
+            "./fake-bun",
+            "--format",
+            "json",
+            "--config",
+        ])
+        .arg(dir.path().join("errspec.json"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(has(&report, "EC001"));
+    assert_eq!(report["testsExecuted"], true);
+    assert_eq!(report["analysisComplete"], true);
+    assert_eq!(report["contracts"][0]["cases"][0]["testStatus"], "passed");
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "runner-stdout\nrunner-stderr\n"
+    );
+}
+
+#[test]
 fn missing_vitest_cannot_be_reported_as_passed() {
     let dir = fixture("export type ErrorType = {_tag:'A'};", &["A"]);
     let (status, report) = run(&dir, &["verify"]);
