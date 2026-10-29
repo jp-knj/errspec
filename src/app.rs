@@ -99,12 +99,41 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
         report.delta = Some(delta);
     }
     match &cli.command {
+        Action::Scan { .. } | Action::Init { .. } => unreachable!("separate report"),
         Action::Check => (),
         Action::Verify {
             runner,
             vitest,
             bun,
-        } => runner::verify(report, root, *runner, vitest.as_deref(), bun.as_deref())?,
+            only_contract_tests,
+        } => {
+            let files = if *only_contract_tests {
+                config
+                    .contracts
+                    .iter()
+                    .flat_map(|c| &c.cases)
+                    .map(|c| root.join(&c.test.file))
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            };
+            if *only_contract_tests && files.is_empty() {
+                return Err(Finding::new(
+                    "EC_CONFIG",
+                    "No registered test files to select",
+                ));
+            }
+            runner::verify(
+                report,
+                root,
+                *runner,
+                vitest.as_deref(),
+                bun.as_deref(),
+                &files,
+            )?;
+        }
         Action::Snapshot { out } => {
             // A snapshot inventories declared tags; missing registrations remain visible in this report.
             let data = serde_json::to_vec_pretty(&contract::snapshot(report))
@@ -123,6 +152,7 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
 
 pub(crate) fn execute(cli: Cli) -> Report {
     let mode = match cli.command {
+        Action::Scan { .. } | Action::Init { .. } => unreachable!("separate report"),
         Action::Check => "check",
         Action::Verify { .. } => "verify",
         Action::Snapshot { .. } => "snapshot",

@@ -6,6 +6,9 @@ TypeScriptのエラー型・失敗シナリオ・テスト結果を対応付け�
 型の解決には[oxc-project/tsrs](https://github.com/oxc-project/tsrs/tree/1bfd1e65be95131f9242a03687d37006214a96f6)を使用します。
 既存のResult型を使い続けられます。エディタ拡張は不要です。npm/crates.ioには未公開です。
 
+`scan`でプロジェクトからエラー候補と伝播経路を調べ、`init`で選んだ型の設定・テストを生成できます。
+npm CLIとLinux/macOS向けバイナリは配布準備中です。[配布物の作成と導入](packages/cli/README.md)を参照してください。
+
 ```text
 EC010 checkout.payment RateLimited rate-limit-retries:
 Required assertion did not pass: attempts
@@ -35,6 +38,22 @@ Vitest版も同じ仕組みです。
 ```
 
 ## 設定とテスト
+
+既存プロジェクトで一つの型から始める場合:
+
+```sh
+errspec scan --project tsconfig.json --format json
+errspec init --project tsconfig.json --source src/errors.ts --export Failure --runner bun
+errspec verify --runner bun --only-contract-tests
+```
+
+`init`はerrspec.jsonとerrspec.generated.test.tsを生成します。`--test`と`--config`で出力先を選べます。
+`--source`はtsconfigのあるディレクトリから、出力先は呼出元から解決します。出力ディレクトリは先に作成してください。
+既存ファイルは上書きしません。生成テストはTODOで失敗するため、依存を`s.fault`で呼び出し、期待動作を`s.check`で比較する処理を記入します。
+別途、同じ版の`@errspec/testkit`と選んだランナーを導入してください。公開前は配布tarballまたはローカル依存を使用します。
+
+`--only-contract-tests`は設定で参照したテストファイルだけをランナーへ渡します。省略時は従来どおりランナーが発見した全テストを実行します。
+選択実行の成功は、選ばなかったテストの成功を意味しません。
 
 設定のschemaVersion 2では、1つのタグに複数のシナリオを登録できます。
 `id`は契約内で一意です。`observe`に必須の障害観測とアサーションのIDを登録します。
@@ -139,7 +158,7 @@ JSON出力schemaVersionは2です。ケースには`testStatus`と`observationSt
 - タグの種類は型から列挙します。payload、時間、並行実行、処理順序のすべての組合せは列挙しません。
 - 補助APIとテストプロセスは信頼対象です。観測JSONは不正なテストコードに対する認証・証明ではありません。
 - 未awaitの障害呼び出しは検出しますが、補助APIを通らないバックグラウンド処理や観測期間外の挙動を追跡しません。
-- 任意のthrow/rejection、関数間の伝播、Resultを返す全関数の自動発見、タグが同じpayloadの型変更は未対応です。
+- `scan`は明示的なthrow・Promise.reject・構造的なerror戻り値と呼出関係を調べます。全実行時エラーの完全発見、任意のResultライブラリの意味、タグが同じpayloadの型変更は保証しません。
 - 実行中のソース書き換えや、残存した別プロセスによる書き換えに対する整合性保証はありません。
 
 ## ベースラインと互換性
@@ -187,10 +206,20 @@ import、再export、paths、具体化したgeneric、union/intersectionをtsrs�
 
 ## CLIと診断
 
+`scan`は検証とは独立した`errspec/scan` schemaVersion 1を返します。import/reexport、別名参照、オーバーロード、関数・arrow・メソッド、再帰、await/return、ローカル変数に保持したPromiseの使用とcatch境界を解析します。
+`functions[].effects`は発生元IDと経路を持つ「外へ伝わる可能性」の集合です。同期throw、rejection、Resultを区別します。
+`unknowns`は動的なsignature、外部実装、解決できないPromise使用などを示します。`--fail-on-unknown`で未解決箇所を終了コード1にできます。
+`scanComplete`は解析処理の完了であり、`allRuntimeErrorsKnown`は常にfalseです。getter/proxy、eval、任意callback、暗黙の例外、厳密な条件分岐やfinallyの上書きは完全にはモデル化しません。
+依存の型情報は使いますが、node_modulesとプロジェクトディレクトリ外の実装を走査対象に含めません。
+候補の既定識別子は`_tag,kind,type,code`です。`--discriminant code`などで変更できます。タグ型が業務上のエラーかはレビューしてください。
+
 | コマンド／オプション | 用途 |
 |---|---|
+| `scan --project PATH` | 型候補・明示的な失敗箇所と保守的な伝播を調べる。テスト実行なし |
+| `init --source FILE --export NAME` | 選んだ型の設定と未完成のテストを生成 |
 | `check` | 型とケース登録の照合。テスト実行なし |
 | `verify --runner bun\|vitest` | テストと観測の照合。既定はVitest |
+| `--only-contract-tests` | verifyで登録済みのテストファイルだけを選択 |
 | `snapshot --out PATH` | 型とシナリオの一覧を保存 |
 | `--baseline PATH` | 保存済み一覧との差分と削除を検出 |
 | `--strict-baseline` | check/verifyで既存シナリオの変更を不合格にする。`--baseline`が必須 |

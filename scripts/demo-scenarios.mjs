@@ -44,6 +44,18 @@ try {
     assert.equal(cases(green).length, 3);
     assert(cases(green).every(c => c.observationStatus === "passed" && c.testStatus === "passed"));
     assert.equal(cases(green).find(c => c.id === "rate-limit-retries").observedFaults[0].calls, 3);
+    const unrelated = join(work, "tests/unrelated.test.ts");
+    writeFileSync(unrelated, `import { test } from ${JSON.stringify(runner === "bun" ? "bun:test" : "vitest")}; test('unrelated', () => { throw new Error('unrelated failure'); });`);
+    run("registered files can be selected", 0, [...verify, "--only-contract-tests"]);
+    has(run("default execution still includes unrelated failures"), "EC006");
+    rmSync(unrelated);
+    const emptyConfig = JSON.parse(originalConfig);
+    emptyConfig.contracts.forEach(c => { c.cases = []; });
+    writeFileSync(configPath, JSON.stringify(emptyConfig));
+    const emptySelection = run("empty selection does not run the whole suite", 2, [...verify, "--only-contract-tests"]);
+    has(emptySelection, "EC_CONFIG");
+    assert.equal(emptySelection.testsExecuted, false);
+    reset();
     assert(cases(run("check does not imply observed", 0, ["check"])).every(c => c.observationStatus === "not_run"));
     run("snapshot includes scenario inventory", 0, ["snapshot", "--out", "baseline.json"]);
     const fewer = JSON.parse(originalConfig);
