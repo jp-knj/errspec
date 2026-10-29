@@ -151,3 +151,49 @@ fn coverage_without_vitest_reports_where_it_looked() {
     let message = report["diagnostics"][0]["message"].as_str().unwrap();
     assert!(message.contains("pass --vitest PATH"), "{message}");
 }
+
+#[test]
+fn markdown_lists_unasserted_tags_per_type() {
+    let dir = fixture();
+    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+        .current_dir(dir.path())
+        .args([
+            "coverage",
+            "--vitest",
+            "./runner.sh",
+            "--format",
+            "markdown",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        concat!(
+            "**errspec coverage**: 1 error types, 3 tags: 1 asserted, 1 mentioned only, 1 missing\n",
+            "\n",
+            "### `errors.ts` Failure (`_tag`): 1/3 asserted\n",
+            "\n",
+            "| Tag | Status | Note |\n",
+            "|---|---|---|\n",
+            "| `B` | mentioned | Written in a test, but no assertion received it |\n",
+            "| `C` | missing | No test refers to it |\n",
+        )
+    );
+}
+
+#[test]
+fn markdown_is_rejected_outside_coverage() {
+    let dir = fixture();
+    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+        .current_dir(dir.path())
+        .args(["scan", "--format", "markdown"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("supported only by coverage"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

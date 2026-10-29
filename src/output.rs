@@ -9,7 +9,7 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
     let output = match format {
         Format::Json => serde_json::to_string_pretty(report)
             .expect("report serialization uses only JSON primitives"),
-        Format::Text => {
+        Format::Text | Format::Markdown => {
             let mut lines = vec![format!(
                 "{}: {} (analysis complete: {}, tests executed: {})",
                 report.mode,
@@ -90,7 +90,7 @@ fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {
                     "{}",
                     serde_json::to_string_pretty(&serde_json::to_value(&report).unwrap()).unwrap()
                 ),
-                Format::Text => {
+                Format::Text | Format::Markdown => {
                     println!(
                         "Created configuration and tests: {}",
                         serde_json::to_string(&report.files).unwrap()
@@ -108,7 +108,7 @@ fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {
                     "{}",
                     serde_json::json!({"kind":"errspec/init","schemaVersion":1,"ready":false,"error":error})
                 ),
-                Format::Text => eprintln!("EC_INIT {error}"),
+                Format::Text | Format::Markdown => eprintln!("EC_INIT {error}"),
             };
             ExitCode::from(2)
         }
@@ -129,7 +129,7 @@ fn write_scan(
     };
     match format {
         Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
-        Format::Text => {
+        Format::Text | Format::Markdown => {
             println!(
                 "{} files, {} candidates, {} origins, {} calls, {} unknowns",
                 report.files.len(),
@@ -188,6 +188,7 @@ fn write_coverage(
     };
     match format {
         Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
+        Format::Markdown => print!("{}", coverage_markdown(report)),
         Format::Text => {
             let s = &report.summary;
             println!(
@@ -221,4 +222,48 @@ fn write_coverage(
         }
     }
     ExitCode::from(code)
+}
+
+/// For a CI job summary or a pull request comment. Fully asserted types are omitted.
+fn coverage_markdown(report: &errspec::coverage::CoverageReport) -> String {
+    use errspec::coverage::TagStatus;
+    let s = &report.summary;
+    let mut out = format!(
+        "**errspec coverage**: {} error types, {} tags: {} asserted, {} mentioned only, {} missing\n",
+        s.types, s.tags, s.asserted, s.mentioned, s.missing
+    );
+    for d in &report.diagnostics {
+        out.push_str(&format!("\n> {} {}\n", d.code, d.message));
+    }
+    let cell = |text: &str| text.replace('|', "\\|");
+    for t in &report.types {
+        let open: Vec<_> = t
+            .tags
+            .iter()
+            .filter(|tag| tag.status != TagStatus::Asserted)
+            .collect();
+        if open.is_empty() {
+            continue;
+        }
+        out.push_str(&format!(
+            "\n### `{}` {} (`{}`): {}/{} asserted\n\n| Tag | Status | Note |\n|---|---|---|\n",
+            cell(&t.source.file),
+            cell(&t.source.export),
+            cell(&t.source.discriminant),
+            t.tags.len() - open.len(),
+            t.tags.len()
+        ));
+        for tag in open {
+            let note = match tag.status {
+                TagStatus::Mentioned => "Written in a test, but no assertion received it",
+                _ => "No test refers to it",
+            };
+            out.push_str(&format!(
+                "| `{}` | {} | {note} |\n",
+                cell(&tag.tag),
+                tag.status.as_str()
+            ));
+        }
+    }
+    out
 }

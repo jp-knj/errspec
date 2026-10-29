@@ -28,6 +28,8 @@ pub(crate) struct Cli {
 pub(crate) enum Format {
     Json,
     Text,
+    /// GitHub-flavored Markdown; coverage only.
+    Markdown,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -118,6 +120,11 @@ impl From<CliRunner> for Runner {
 impl Cli {
     /// Translate CLI syntax once. Execution code never receives clap argument types.
     pub(crate) fn into_request(self) -> Result<(Request, Format), String> {
+        if matches!(self.format, Format::Markdown)
+            && !matches!(self.command, Action::Coverage { .. })
+        {
+            return Err("--format markdown is supported only by coverage".into());
+        }
         let command = match self.command {
             Action::Init {
                 project,
