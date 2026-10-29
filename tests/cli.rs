@@ -266,6 +266,42 @@ fn missing_bun_and_mismatched_runner_options_are_rejected() {
 
 #[cfg(unix)]
 #[test]
+fn bun_without_junit_file_paths_is_rejected_before_tests_run() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = fixture("export type ErrorType = {_tag:'A'};", &["A"]);
+    let executable = dir.path().join("fake-bun");
+    let ran = dir.path().join("ran");
+    for (version, expected) in [("1.2.18", 2), ("1.2.19", 0), ("1.4.4-canary.1", 0)] {
+        let _ = fs::remove_file(&ran);
+        fs::write(&executable, format!(r#"#!/bin/sh
+if [ "$1" = --version ]; then echo {version}; exit 0; fi
+touch ran
+printf '%s' '<testsuites tests="1" failures="0"><testsuite file="test.ts"><testcase name="A"/></testsuite></testsuites>' > "$4"
+"#)).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let (status, report) = run(
+            &dir,
+            &[
+                "verify",
+                "--runner",
+                "bun",
+                "--bun",
+                executable.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(status, expected, "{version}: {report}");
+        assert_eq!(ran.exists(), expected == 0, "{version}");
+        if expected == 2 {
+            let message = report["diagnostics"][0]["message"].as_str().unwrap();
+            assert_eq!(report["diagnostics"][0]["code"], "EC_RUNNER");
+            assert!(message.contains("Bun 1.2.18") && message.contains("1.2.19 or later"));
+            assert_eq!(report["testsExecuted"], false);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn zero_exit_bun_without_valid_report_cannot_pass() {
     use std::os::unix::fs::PermissionsExt;
     let dir = fixture("export type ErrorType = {_tag:'A'};", &["A"]);

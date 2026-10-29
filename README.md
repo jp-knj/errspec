@@ -16,7 +16,8 @@ Required assertion did not pass: attempts
 
 ## 最初に動かす
 
-必要なものはRust 1.99.1とBunです。初回ビルドではGitHub/crates.ioへの接続が必要です。
+必要なものはRust 1.99.1とBun 1.2.19以降です。初回ビルドではGitHub/crates.ioへの接続が必要です。
+Bun 1.2.18以前はJUnitレポートにテストファイルを出力しないため、`verify`はテストを起動する前に`EC_RUNNER`で停止します。
 Rustはrust-toolchain.tomlで固定しています。Linux x86_64、Bun 1.4.4、Vitest 5.0.5、Node.js 24で検証しました。
 
 ```sh
@@ -126,7 +127,7 @@ scenarioTest(test, import.meta.url, {
 - 設定に必須としたcheckが欠けていれば、テストが成功していてもRust側の照合が失敗します。
 - テスト名は`errspec ["契約ID","シナリオID"]`として自動生成します。設定の`test.name`は省略します。
 - `scenarioTest`はトップレベルで登録してください。`describe`内の登録は現在未対応で、完全なテスト名が一致せず失敗します。
-- `test.concurrent`は対応済みです。`test.skip`は未検証になります。retry/repeatで同一シナリオが複数回実行された場合は曖昧として拒否します。
+- `test.concurrent`は対応済みです（BunではBun 1.3以降が提供します）。`test.skip`は未検証になります。retry/repeatで同一シナリオが複数回実行された場合は曖昧として拒否します。
 
 依存を引数で受け取らず直接importしているコードには、Bunの`mock.module`やVitestの`vi.mock`で`s.fault`を差し込みます。
 手順は[testkitのREADME](packages/testkit/README.md#直接importしている依存に障害を差し込む)を参照してください。
@@ -231,6 +232,7 @@ import、再export、paths、具体化したgeneric、union/intersectionをtsrs�
 | `--vitest PATH` / `--bun PATH` | 実行ファイルの指定。指定パスは呼出元の作業ディレクトリから解決 |
 
 Vitestの既定パスは設定ディレクトリの`node_modules/.bin/vitest`です。BunはPATHで解決します。
+Bunは起動前に`--version`で版を確認し、1.2.19未満なら実行しません。版を取得できない場合は実行し、レポートの形式で判定します。
 `--baseline`と`--out`も呼出元の作業ディレクトリから解決します。
 
 | 診断 | 内容 |
