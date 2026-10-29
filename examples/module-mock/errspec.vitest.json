@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "project": "tsconfig.json",
+  "contracts": [
+    {
+      "id": "notify",
+      "source": {
+        "file": "src/notify.ts",
+        "export": "NotifyResult",
+        "discriminant": "status"
+      },
+      "cases": [
+        {
+          "id": "sent",
+          "tag": "sent",
+          "expect": "Report sent when the mailer accepts",
+          "test": {
+            "file": "tests/notify.vitest.test.ts"
+          },
+          "observe": {
+            "faults": [
+              "mailer"
+            ],
+            "assertions": [
+              "result"
+            ]
+          }
+        },
+        {
+          "id": "rejected",
+          "tag": "rejected",
+          "expect": "Report rejected without retrying when the mailer refuses",
+          "test": {
+            "file": "tests/notify.vitest.test.ts"
+          },
+          "observe": {
+            "faults": [
+              "mailer"
+            ],
+            "assertions": [
+              "result"
+            ]
+          }
+        },
+        {
+          "id": "offline",
+          "tag": "retry_later",
+          "expect": "Ask to retry later when the mailer is unreachable",
+          "test": {
+            "file": "tests/notify.vitest.test.ts"
+          },
+          "observe": {
+            "faults": [
+              "mailer"
+            ],
+            "assertions": [
+              "result"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
