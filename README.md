@@ -80,6 +80,15 @@ errspec coverage --project apps/api/tsconfig.json -- --project api   # vitest ru
 `--format markdown`は表形式で出力します。GitHub Actionsでは`errspec coverage --format markdown >> "$GITHUB_STEP_SUMMARY"`でジョブの概要に表示できます。
 障害が本当に呼ばれたか、必須の比較がそろっているかまで保証したい箇所は、次の`scenarioTest`と`verify`を使います。
 
+coverageの注意点:
+
+- 毎回テストを全件実行します。大きいプロジェクトでは`--`の後に`vitest run`の引数（ファイルや`--project`）を渡して絞れます。
+- 実行中のVitestの表示はJSONレポートに置き換わります。テストのログはstderrに出ます。
+- 識別プロパティの既定は`_tag,kind,type,code`です。`reason`や`status`で分かれるエラーは`--discriminant type,reason`のように指定してください。
+- テストが途中で失敗しても、それまでに成功したアサーションは数えます。ランナーの失敗は`runnerOk: false`と終了コード1で示します。
+- `mentioned`はテストファイルに引用符付きの同じ文字列があるかで判定します。コメントや無関係な文字列も数えるため、`asserted`より弱い目安です。
+- `toThrow`は対象の関数を再実行しないため、投げたErrorの値は記録しません。`rejects`で受け取った値は記録します。
+
 ## 設定とテスト
 
 既存プロジェクトで一つの型から始める場合:
