@@ -35,6 +35,9 @@ pub(crate) fn line_at(text: &str, offset: usize) -> usize {
         .count()
         + 1
 }
+/// Exports of one declaration, keyed by its location and discriminant.
+type DeclaredExports = BTreeMap<(String, u32, String), Vec<(Source, Vec<String>)>>;
+
 fn key(root: &Path, node: P<Node>) -> String {
     let loc = location(root, node);
     format!("{}:{}:{:?}", loc.file, loc.byte_offset, node.kind())
@@ -264,6 +267,7 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
         .collect();
     let mut facts = ScanFacts::default();
     let mut bodies = BTreeMap::new();
+    let mut declared: DeclaredExports = BTreeMap::new();
     for file in &files {
         let mut checker = adapter
             .program
@@ -283,19 +287,29 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
                     continue;
                 }
                 let ty = checker.get_declared_type_of_symbol_exported(symbol);
+                let exporter = location(root, file.as_node()).file;
+                let declaration = symbol
+                    .declarations()
+                    .first()
+                    .map(|d| location(root, *d))
+                    .map(|l| (l.file, l.byte_offset))
+                    .unwrap_or_else(|| (exporter.clone(), 0));
                 for discriminant in discriminants {
                     let mut tags = BTreeSet::new();
                     if collect_tags(&mut checker, ty, discriminant, &mut tags).is_ok()
                         && !tags.is_empty()
                     {
-                        facts.candidates.push(Candidate {
-                            source: Source {
-                                file: location(root, file.as_node()).file,
-                                export: name.clone(),
-                                discriminant: discriminant.clone(),
-                            },
-                            tags: tags.into_iter().collect(),
-                        });
+                        declared
+                            .entry((declaration.0.clone(), declaration.1, discriminant.clone()))
+                            .or_default()
+                            .push((
+                                Source {
+                                    file: exporter.clone(),
+                                    export: name.clone(),
+                                    discriminant: discriminant.clone(),
+                                },
+                                tags.into_iter().collect(),
+                            ));
                     }
                 }
             }
@@ -326,6 +340,28 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
             }
         });
     }
+    facts
+        .candidates
+        .extend(declared.into_iter().map(|((file, _, _), mut exports)| {
+            // Prefer the declaring file; otherwise the first path in a stable order.
+            exports.sort_by(|a, b| (&a.0.file, &a.0.export).cmp(&(&b.0.file, &b.0.export)));
+            let primary = exports
+                .iter()
+                .position(|(source, _)| source.file == file)
+                .unwrap_or(0);
+            let (source, tags) = exports.remove(primary);
+            Candidate {
+                source,
+                tags,
+                reexports: exports
+                    .into_iter()
+                    .map(|(s, _)| Export {
+                        file: s.file,
+                        export: s.export,
+                    })
+                    .collect(),
+            }
+        }));
     let mut inspector = Inspector {
         root,
         adapter: &adapter,

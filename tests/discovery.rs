@@ -60,13 +60,14 @@ export function shadow(renamed: () => void): void { renamed(); }
     ]);
     let (status, r) = scan(&dir, &[]);
     assert_eq!(status, 0, "{r}");
-    assert!(
-        r["candidates"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| c["source"]["export"] == "PublicFailure"
-                && c["tags"] == serde_json::json!(["Denied", "Offline"]))
+    assert_eq!(
+        r["candidates"],
+        serde_json::json!([{
+            "source": {"file": "leaf.ts", "export": "Failure", "discriminant": "_tag"},
+            "tags": ["Denied", "Offline"],
+            "reexports": [{"file": "barrel.ts", "export": "PublicFailure"}]
+        }]),
+        "{r}"
     );
     for name in ["api", "a", "b", "rethrow"] {
         assert!(
@@ -237,4 +238,48 @@ fn invalid_types_fail_without_claiming_a_complete_scan() {
     assert_eq!(status, 2);
     assert_eq!(r["scanComplete"], false);
     assert!(!r["diagnostics"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn reexported_declarations_are_one_candidate_and_distinct_declarations_stay_apart() {
+    let dir = project(&[
+        (
+            "errors.ts",
+            "type Hidden = { kind: 'Lost' }; export { Hidden as Renamed }; export type Failure = { kind: 'Offline' } | { kind: 'Denied' };",
+        ),
+        (
+            "index.ts",
+            "export type { Failure, Renamed } from './errors'; export type { Failure as Alias } from './errors';",
+        ),
+        (
+            "other.ts",
+            "export type Failure = { kind: 'Offline' } | { kind: 'Denied' };",
+        ),
+    ]);
+    let (status, r) = scan(&dir, &["--discriminant", "kind"]);
+    assert_eq!(status, 0, "{r}");
+    let summary: Vec<_> = r["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                format!(
+                    "{}#{}",
+                    c["source"]["file"].as_str().unwrap(),
+                    c["source"]["export"].as_str().unwrap()
+                ),
+                c["reexports"].as_array().map(|a| a.len()).unwrap_or(0),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("errors.ts#Failure".to_owned(), 2),
+            ("errors.ts#Renamed".to_owned(), 1),
+            ("other.ts#Failure".to_owned(), 0),
+        ],
+        "{r}"
+    );
 }

@@ -142,6 +142,14 @@ fn write_scan(
                     c.source.discriminant,
                     c.tags.join(", ")
                 );
+                if !c.reexports.is_empty() {
+                    let paths: Vec<_> = c
+                        .reexports
+                        .iter()
+                        .map(|e| format!("{}#{}", e.file, e.export))
+                        .collect();
+                    println!("  also exported as {}", paths.join(", "));
+                }
             }
             for f in &report.functions {
                 if !f.effects.is_empty() {
