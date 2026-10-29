@@ -205,6 +205,17 @@ Vitestの既定パスは設定ディレクトリの`node_modules/.bin/vitest`で
 
 ## 開発と検証
 
+仕様策定中は[sdev](https://github.com/azu/sdev)を使い、[Product・Requirements・Design](docs/README.md)をknjとAIで確認します。
+仕様案は日本語で整理しています。内容が固まった後にsdevを外し、英語のドキュメントを残します。
+sdevは開発中の作業用で、errspecの実行時依存やCIの必須条件には追加していません。
+
+```sh
+./bin/sdev help
+./bin/sdev lint
+```
+
+通常のビルドと検証は次のとおりです。
+
 ```sh
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
