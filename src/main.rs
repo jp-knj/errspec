@@ -5,6 +5,7 @@ mod onboard;
 mod output;
 mod request;
 mod runner;
+mod scaffold;
 mod scan;
 mod tsrs_adapter;
 mod verification;

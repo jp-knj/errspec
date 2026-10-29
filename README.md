@@ -270,10 +270,13 @@ node --test tests/testkit.test.mjs
 node scripts/demo.mjs
 node scripts/demo-bun.mjs
 node scripts/demo-scenarios.mjs
+node scripts/demo-init.mjs
 ```
 
-最後のスクリプトは実際のBun/Vitestを起動し、一時コピーだけに変更を加えます。
+`demo-scenarios.mjs`は実際のBun/Vitestを起動し、一時コピーだけに変更を加えます。
+`demo-init.mjs`は初期生成したテストを両ランナーで実行し、未記入のTODOが通常実行でもverifyでも失敗することを確認します。
 必要なら`node scripts/demo-scenarios.mjs /path/to/errspec /path/to/bun`で実行ファイルを指定できます。
+`demo-init.mjs`も同じ引数で実行ファイルを指定できます。
 受け入れ結果は`artifacts/acceptance*.json`に保存します。GitHub Actionsでも同じ検証を実行します。
 設計の詳細は[DESIGN.md](DESIGN.md)を参照してください。
 
