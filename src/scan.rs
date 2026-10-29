@@ -335,7 +335,11 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
     for (id, node) in &bodies {
         inspector.function(id, *node);
     }
-    facts.into_report()
+    let mut report = facts.into_report();
+    report
+        .assumptions
+        .extend(adapter.assumptions.iter().copied());
+    report
 }
 
 struct Inspector<'a> {

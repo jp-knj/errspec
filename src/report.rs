@@ -14,6 +14,7 @@ pub struct ReportData<'a> {
     pub observations: Option<ObservationJudgments>,
     pub diagnostics: Vec<Finding>,
     pub delta: Option<Delta>,
+    pub assumptions: Vec<&'static str>,
 }
 
 impl ReportData<'_> {
@@ -29,6 +30,7 @@ impl ReportData<'_> {
         report.test_runner = self.tests.as_ref().map(|tests| tests.runner);
         report.diagnostics = self.diagnostics;
         report.delta = self.delta;
+        report.assumptions = self.assumptions;
         report.contracts = self
             .registrations
             .iter()

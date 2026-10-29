@@ -35,6 +35,7 @@ Agent JSONは診断の受渡し手段であり、型・仕様・実行の対応�
 型解析はRust＋tsrs、対象コードとテストの実行はBun/Vitestが担当する。
 Oxcエコシステムのtsrsを使用しているが、追加のoxc_parserは入れていない。
 同じ型システムを再実装せず、tsrs内部APIへの依存はadapterに閉じ込める。
+TypeScript 7で廃止された`moduleResolution: node10`は、adapterがtsconfigの解析後に未指定へ戻してからProgramを作る。tsrsは未指定のCommonJSを`bundler`で解決するため、TS5108だけで解析を止めずに済む。置き換えはレポートの`assumptions`に記録し、`ok`には影響させない。ほかの廃止オプションは解決結果が変わるため置き換えない。
 Git revisionとCargo.lockを固定する。arenaは単発CLIのプロセス寿命で管理し、常駐APIはまだ提供しない。
 
 今回、並列化や高速キャッシュは追加していない。将来は所有可能なIRへ変換した後の処理や独立したプロジェクトの解析を候補にする。

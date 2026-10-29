@@ -192,6 +192,61 @@ fn text_output_locates_diagnostics_without_a_case() {
 }
 
 #[test]
+fn node10_resolution_is_analysed_as_bundler_with_a_visible_assumption() {
+    let dir = fixture(
+        "import type { Base } from './kinds';\nimport type { Nested } from './nested';\nimport type { Legacy } from 'legacy';\nexport type ErrorType = Base | Nested | Legacy;",
+        &["A", "B", "C"],
+    );
+    fs::write(
+        dir.path().join("kinds.ts"),
+        "export type Base = {_tag:'A'};",
+    )
+    .unwrap();
+    fs::create_dir(dir.path().join("nested")).unwrap();
+    fs::write(
+        dir.path().join("nested/index.ts"),
+        "export type Nested = {_tag:'B'};",
+    )
+    .unwrap();
+    // A CommonJS-era package: main/types only, no exports map.
+    fs::create_dir_all(dir.path().join("node_modules/legacy")).unwrap();
+    fs::write(
+        dir.path().join("node_modules/legacy/package.json"),
+        r#"{"name":"legacy","main":"index.js","types":"index.d.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("node_modules/legacy/index.d.ts"),
+        "export type Legacy = {_tag:'C'};",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("tsconfig.json"),
+        r#"{"compilerOptions":{"strict":true,"skipLibCheck":true,"module":"commonjs","moduleResolution":"node"},"files":["errors.ts"]}"#,
+    )
+    .unwrap();
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 0, "{report}");
+    assert_eq!(report["contracts"][0]["tags"], json!(["A", "B", "C"]));
+    assert!(
+        report["assumptions"][0]
+            .as_str()
+            .unwrap()
+            .contains("node10"),
+        "{report}"
+    );
+    let (status, scan) = run(&dir, &["scan"]);
+    assert_eq!(status, 0, "{scan}");
+    assert!(
+        scan["assumptions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a.as_str().unwrap().contains("node10"))
+    );
+}
+
+#[test]
 fn missing_test_file_and_removed_case_fail() {
     let dir = fixture("export type ErrorType = {_tag:'A'};", &["A", "B"]);
     fs::remove_file(dir.path().join("test.ts")).unwrap();
