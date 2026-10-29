@@ -25,6 +25,46 @@ scenarioTest(test, import.meta.url, {
 
 この短い例ではstubの動作を示しています。実用時は`fetchUser`をアプリケーションへ依存注入し、その応答や副作用を観測します。
 
+## 直接importしている依存に障害を差し込む
+
+依存を引数で受け取らず、モジュールから直接importしているコードもあります。
+製品コードを依存注入の形へ書き換えなくても、テストランナーのモジュールmockで差し込めます。
+mockは差替え可能な参照へ転送するだけにします。各シナリオがその参照へ`s.fault`の戻り値を代入します。
+
+Bun:
+
+```ts
+import { mock, test } from "bun:test";
+import { scenarioTest } from "@errspec/testkit";
+import { notify } from "../src/notify"; // 内部で "./mailer" の deliver をimportしている
+
+const mailer = { deliver: async (_to: string) => ({ accepted: true }) };
+mock.module("../src/mailer", () => ({ deliver: (to: string) => mailer.deliver(to) }));
+
+scenarioTest(test, import.meta.url, { contract: "notify", id: "offline", tag: "retry_later" }, async (s) => {
+  mailer.deliver = s.fault("mailer", async () => { throw new Error("offline"); });
+  s.check("result", await notify("user@example.com"), { status: "retry_later" });
+});
+```
+
+Vitest:
+
+```ts
+import { test, vi } from "vitest";
+import { scenarioTest } from "@errspec/testkit";
+import { notify } from "../src/notify";
+
+// vi.mockはimportより前へ巻き上げられるため、参照はvi.hoistedで作ります。
+const mailer = vi.hoisted(() => ({ deliver: async (_to: string) => ({ accepted: true }) }));
+vi.mock("../src/mailer", () => ({ deliver: (to: string) => mailer.deliver(to) }));
+// scenarioTest の中身は Bun と同じ
+```
+
+- mockの戻り値に`s.fault`を直接書くことはできません。mockはシナリオより先に評価され、`s`がまだないためです。
+- 各シナリオの先頭で参照へ代入し直します。前のシナリオの障害が残ったまま次のシナリオを実行しないためです。
+- mockが効いていないと実際の依存が呼ばれ、障害は未呼出の扱いになります。CLIは`EC009`で失敗します。
+- 動作する一式は[examples/module-mock](../../examples/module-mock)です。両ランナーで実行するには`node scripts/demo-module-mock.mjs`を使います。
+
 ## API
 
 - `scenarioTest(test, fileURL, { contract, id, tag }, body)` — トップレベルのテストを登録。bodyは必ず必要な非同期処理をawaitする。
