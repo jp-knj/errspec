@@ -13,9 +13,10 @@ export function scenarioTestName(contract, id) {
 
 /** Register at the top level. Each invocation owns its observations, including in concurrent tests. */
 export function scenarioTest(test, file, definition, body) {
-  const { contract, id, tag } = definition;
+  const { contract, id, tag, withoutFaults = false } = definition;
   const name = scenarioTestName(contract, id);
   if (typeof tag !== "string") throw new Error("Error tag must be a string");
+  if (typeof withoutFaults !== "boolean") throw new Error("withoutFaults must be a boolean");
   const filename = fileURLToPath(file);
   return test(name, async () => {
     const directory = process.env.ERRSPEC_OBSERVATIONS;
@@ -44,6 +45,7 @@ export function scenarioTest(test, file, definition, body) {
     const scope = Object.freeze({
       fault(faultId, produceFailure) {
         active();
+        if (withoutFaults) reject("Scenario declared withoutFaults; remove the fault or the declaration");
         if (!nonempty(faultId) || record.faults.some(f => f.id === faultId) || typeof produceFailure !== "function") {
           reject("Fault requires a unique nonempty id and a failure-producing function");
         }
@@ -78,7 +80,11 @@ export function scenarioTest(test, file, definition, body) {
     try {
       await body(scope);
       if (violated) throw new Error("Scenario contained a failed check or invalid operation, even if caught");
-      if (record.faults.length === 0 || record.faults.some(f => f.calls === 0 || f.calls !== f.completed)) {
+      if (record.faults.length === 0 && !withoutFaults) {
+        record.state = "incomplete";
+        throw new Error("Scenario has no faults; declare withoutFaults: true for an input-only scenario");
+      }
+      if (record.faults.some(f => f.calls === 0 || f.calls !== f.completed)) {
         record.state = "incomplete";
         throw new Error("Every configured fault must be invoked and settled before the scenario finishes");
       }

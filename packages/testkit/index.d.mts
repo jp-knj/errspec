@@ -2,6 +2,11 @@ export interface ScenarioDefinition {
   readonly contract: string;
   readonly id: string;
   readonly tag: string;
+  /**
+   * The outcome depends only on input. Pair with `observe.faults: []` in the configuration.
+   * The scenario then fails if it calls `fault`.
+   */
+  readonly withoutFaults?: boolean;
 }
 
 export interface ScenarioScope {

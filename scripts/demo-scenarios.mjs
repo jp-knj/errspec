@@ -123,6 +123,25 @@ try {
     const empty = run("matching passing tests without SDK");
     assert(cases(empty).every(c => c.testStatus === "passed")); has(empty, "EC008"); reset();
 
+    // An input-only scenario needs both the explicit empty fault list and the SDK declaration.
+    const declinedStart = original.indexOf("scenarioTest(test,");
+    const declinedEnd = original.indexOf("\n});\n", declinedStart) + "\n});\n".length;
+    const inputOnly = original.slice(0, declinedStart) + `scenarioTest(test, import.meta.url, {
+  contract: "checkout.payment", id: "declined", tag: "Declined", withoutFaults: true,
+}, async (s) => {
+  s.check("status", 402, 402);
+});
+` + original.slice(declinedEnd);
+    const faultFree = JSON.parse(originalConfig);
+    faultFree.contracts[0].cases[0].observe = { faults: [], assertions: ["status"] };
+    writeFileSync(file, inputOnly); writeFileSync(configPath, JSON.stringify(faultFree));
+    const inputOnlyReport = run("explicitly fault-free scenario", 0);
+    assert.equal(cases(inputOnlyReport)[0].observationStatus, "passed"); reset();
+    writeFileSync(file, inputOnly);
+    has(run("fault-free test cannot satisfy a required fault"), "EC009"); reset();
+    writeFileSync(file, inputOnly.replace(", withoutFaults: true", "")); writeFileSync(configPath, JSON.stringify(faultFree));
+    has(run("empty fault list still needs the SDK declaration"), "EC012"); reset();
+
     // The body runs twice under the same stable id: a retry/repeat is not silently accepted.
     writeFileSync(file, original + original.slice(original.indexOf("scenarioTest(test,")));
     has(run("duplicate scenario execution"), "EC011"); reset();

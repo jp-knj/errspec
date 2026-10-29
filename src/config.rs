@@ -154,14 +154,19 @@ impl TryFrom<Config> for ValidatedConfig {
                             "Version 2 requires observe.faults and observe.assertions",
                         ));
                     };
-                    for list in [&requirements.faults, &requirements.assertions] {
+                    // An explicit empty fault list declares an input-only scenario.
+                    // Every scenario still needs at least one required comparison.
+                    for (list, allow_empty) in [
+                        (&requirements.faults, true),
+                        (&requirements.assertions, false),
+                    ] {
                         let unique: BTreeSet<_> = list.iter().collect();
-                        if list.is_empty()
+                        if list.is_empty() && !allow_empty
                             || unique.len() != list.len()
                             || list.iter().any(|id| id.trim().is_empty())
                         {
                             return Err(invalid(
-                                "Observation ids must be nonempty, unique, nonempty lists",
+                                "Observation ids must be nonempty and unique; assertions must not be empty",
                             ));
                         }
                     }
