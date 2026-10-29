@@ -57,6 +57,8 @@ errspec coverage --project apps/api/tsconfig.json -- --project api   # vitest ru
 
 最も近い`vitest.config.*`と`node_modules/.bin/vitest`を親ディレクトリへ探します。利用者の設定とテストは変更せず、一時設定で記録用のsetup fileを追加して実行します。
 `--fail-on-missing`で`missing`があれば終了コード1にします。現在はVitestだけに対応します。
+集計は識別プロパティとタグの値の組で行います。同じ値でも`code`と`kind`は別々に数えます。
+テスト成功後に記録用ファイルを検証できない場合は、`EC_RUNNER`と終了コード2を返します。
 障害が本当に呼ばれたか、必須の比較がそろっているかまで保証したい箇所は、次の`scenarioTest`と`verify`を使います。
 
 ## 設定とテスト

@@ -179,7 +179,7 @@ fn write_coverage(
     format: Format,
 ) -> ExitCode {
     use errspec::coverage::TagStatus;
-    let code = if !report.tests_executed {
+    let code = if !report.tests_executed || !report.evaluation_complete {
         2
     } else if !report.runner_ok || fail_on_missing && report.summary.missing > 0 {
         1
