@@ -212,7 +212,7 @@ pub fn judge(
             let observed_file = paths.get(&record.file);
             if expected_file.is_none()
                 || expected_file != observed_file
-                || record.test_name != test.name
+                || record.test_name != tests.full_name(test)
                 || record.tag != case.tag()
             {
                 judgment.status = ObservationStatus::Invalid;

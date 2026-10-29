@@ -7,6 +7,8 @@ export interface ScenarioDefinition {
    * The scenario then fails if it calls `fault`.
    */
   readonly withoutFaults?: boolean;
+  /** Shown after the stable name in runner output. Changing it does not change the scenario. */
+  readonly description?: string;
 }
 
 export interface ScenarioScope {

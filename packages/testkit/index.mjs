@@ -13,8 +13,14 @@ export function scenarioTestName(contract, id) {
 
 /** Register at the top level. Each invocation owns its observations, including in concurrent tests. */
 export function scenarioTest(test, file, definition, body) {
-  const { contract, id, tag, withoutFaults = false } = definition;
-  const name = scenarioTestName(contract, id);
+  const { contract, id, tag, withoutFaults = false, description } = definition;
+  if (description !== undefined && (!nonempty(description) || /[\r\n]/.test(description))) {
+    throw new Error("Description must be a nonempty single line");
+  }
+  // CLI matching uses the stable id prefix; the description is for people reading runner output.
+  const name = description === undefined
+    ? scenarioTestName(contract, id)
+    : `${scenarioTestName(contract, id)} ${description.trim()}`;
   if (typeof tag !== "string") throw new Error("Error tag must be a string");
   if (typeof withoutFaults !== "boolean") throw new Error("withoutFaults must be a boolean");
   const filename = fileURLToPath(file);

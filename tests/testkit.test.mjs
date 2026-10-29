@@ -67,6 +67,35 @@ test("a scenario passes without faults only when it declares withoutFaults", asy
   assert.throws(() => register(() => {}, "one", { withoutFaults: "yes" }), /must be a boolean/);
 });
 
+test("a description follows the stable name and is recorded as the test name", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "errspec-description-"));
+  const previous = [process.env.ERRSPEC_OBSERVATIONS, process.env.ERRSPEC_RUN_ID];
+  process.env.ERRSPEC_OBSERVATIONS = directory;
+  process.env.ERRSPEC_RUN_ID = "run";
+  try {
+    let name;
+    let callback;
+    scenarioTest((n, run) => { name = n; callback = run; }, import.meta.url, {
+      contract: "x", id: "one", tag: "A", description: " [異常系] 送信しない ",
+    }, async s => {
+      await s.fault("gateway", () => 1)();
+      s.check("status", 1, 1);
+    });
+    assert.equal(name, 'errspec ["x","one"] [異常系] 送信しない');
+    await callback();
+    const [file] = readdirSync(directory);
+    assert.equal(JSON.parse(readFileSync(join(directory, file), "utf8")).testName, name);
+  } finally {
+    ["ERRSPEC_OBSERVATIONS", "ERRSPEC_RUN_ID"].forEach((key, i) => {
+      if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i];
+    });
+    rmSync(directory, { recursive: true, force: true });
+  }
+  for (const description of ["", "  ", "two\nlines", 1]) {
+    assert.throws(() => register(() => {}, "one", { description }), /nonempty single line/);
+  }
+});
+
 test("unfinished fault promises and absent checks cannot pass", async () => {
   await assert.rejects(register(s => {
     void s.fault("gateway", () => new Promise(() => {}))();

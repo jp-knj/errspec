@@ -69,6 +69,13 @@ try {
     const baselineVerify = [...verify, "--baseline", "baseline.json"];
     const strictVerify = [...baselineVerify, "--strict-baseline"];
     run("unchanged strict baseline", 0, strictVerify);
+    // Descriptions are display text after the stable name; they do not change scenarios.
+    const described = original.replace(/tag: ("\w+"),/g, 'tag: $1, description: "[異常系] 注文を作らない",');
+    assert.notEqual(described, original);
+    writeFileSync(file, described);
+    const describedReport = run("descriptions keep scenario identity under strict baseline", 0, strictVerify);
+    assert(cases(describedReport).every(c => c.observationStatus === "passed"));
+    reset();
     const weaker = JSON.parse(originalConfig);
     weaker.contracts[0].cases.forEach(c => {
       c.observe.assertions = c.observe.assertions.filter(id => id !== "orders");
