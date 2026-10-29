@@ -1,7 +1,7 @@
 //! Run the project's Vitest with the assertion recorder and judge scanned error tags.
 use crate::{input::read_json, request::CoverageRequest, scan};
 use errspec::{
-    coverage::{self, AssertionRecord, CoverageReport},
+    coverage::{self, AssertionRecord, CoverageReport, ErrorType},
     model::Finding,
     vitest,
 };
@@ -100,7 +100,15 @@ pub(crate) fn run(request: &CoverageRequest) -> CoverageReport {
         report.diagnostics = scanned.diagnostics;
         return report;
     }
-    if let Err(finding) = execute(request, &scanned.candidates, &mut report) {
+    let types: Vec<ErrorType> = scanned
+        .candidates
+        .into_iter()
+        .map(|c| ErrorType {
+            source: c.source,
+            tags: c.tags,
+        })
+        .collect();
+    if let Err(finding) = execute(request, &types, &mut report) {
         report.diagnostics.push(finding);
     }
     report
@@ -108,7 +116,7 @@ pub(crate) fn run(request: &CoverageRequest) -> CoverageReport {
 
 fn execute(
     request: &CoverageRequest,
-    candidates: &[errspec::discovery::Candidate],
+    types: &[ErrorType],
     report: &mut CoverageReport,
 ) -> Result<(), Finding> {
     let project = request
@@ -194,7 +202,7 @@ fn execute(
         .into_iter()
         .filter_map(|file| fs::read_to_string(file).ok())
         .collect();
-    let (types, summary) = coverage::judge(candidates, &read_records(&records)?, &test_sources);
+    let (types, summary) = coverage::judge(types, &read_records(&records)?, &test_sources);
     report.types = types;
     report.summary = summary;
     Ok(())
