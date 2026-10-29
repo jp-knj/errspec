@@ -1,11 +1,11 @@
-use crate::Format;
+use crate::{app::Outcome, cli::Format, onboard::InitReport};
 use errspec::model::Report;
 use std::{
     io::{self, Write},
     process::ExitCode,
 };
 
-pub(crate) fn write(report: &Report, format: Format) -> ExitCode {
+fn write_contract(report: &Report, format: Format) -> ExitCode {
     let output = match format {
         Format::Json => serde_json::to_string_pretty(report)
             .expect("report serialization uses only JSON primitives"),
@@ -56,4 +56,107 @@ pub(crate) fn write(report: &Report, format: Format) -> ExitCode {
     } else {
         2
     })
+}
+
+pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
+    match outcome {
+        Outcome::Contract(report) => write_contract(&report, format),
+        Outcome::Scan {
+            report,
+            fail_on_unknown,
+        } => write_scan(&report, fail_on_unknown, format),
+        Outcome::Init(result) => write_init(result, format),
+    }
+}
+
+fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {
+    match result {
+        Ok(report) => {
+            match format {
+                // Init originally returned a JSON object. Keep its sorted keys and formatting.
+                Format::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::to_value(&report).unwrap()).unwrap()
+                ),
+                Format::Text => {
+                    println!(
+                        "Created configuration and tests: {}",
+                        serde_json::to_string(&report.files).unwrap()
+                    );
+                    println!(
+                        "Tests intentionally fail until you specify the expected behavior. Install @errspec/testkit and your test runner, then run errspec verify."
+                    );
+                }
+            };
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            match format {
+                Format::Json => println!(
+                    "{}",
+                    serde_json::json!({"kind":"errspec/init","schemaVersion":1,"ready":false,"error":error})
+                ),
+                Format::Text => eprintln!("EC_INIT {error}"),
+            };
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn write_scan(
+    report: &errspec::discovery::ScanReport,
+    fail_on_unknown: bool,
+    format: Format,
+) -> ExitCode {
+    let code = if !report.scan_complete {
+        2
+    } else if fail_on_unknown && !report.unknowns.is_empty() {
+        1
+    } else {
+        0
+    };
+    match format {
+        Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
+        Format::Text => {
+            println!(
+                "{} files, {} candidates, {} origins, {} calls, {} unknowns",
+                report.files.len(),
+                report.candidates.len(),
+                report.origins.len(),
+                report.edges.len(),
+                report.unknowns.len()
+            );
+            for c in &report.candidates {
+                println!(
+                    "{} export {} [{}]: {}",
+                    c.source.file,
+                    c.source.export,
+                    c.source.discriminant,
+                    c.tags.join(", ")
+                );
+            }
+            for f in &report.functions {
+                if !f.effects.is_empty() {
+                    println!(
+                        "{}:{} {}: {} possible escaping errors",
+                        f.location.file,
+                        f.location.line,
+                        f.name,
+                        f.effects.len()
+                    );
+                }
+            }
+            for u in &report.unknowns {
+                println!(
+                    "UNKNOWN {}:{} {}: {}",
+                    u.location.file, u.location.line, u.expression, u.reason
+                );
+            }
+            for d in &report.diagnostics {
+                eprintln!("{} {}", d.code, d.message);
+            }
+            println!("Conservative scan; all runtime errors known: false.");
+        }
+    }
+    ExitCode::from(code)
 }
