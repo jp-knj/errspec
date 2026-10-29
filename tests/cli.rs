@@ -223,7 +223,7 @@ fn text_output_distinguishes_registration_from_execution() {
         concat!(
             "check: pass (analysis complete: true, tests executed: false)\n",
             "checkout: A\n",
-            "  A : registered, test=not_run, observation=NotRequired\n",
+            "  A : registered, test=not_run, observation=not_required\n",
         )
     );
     assert!(output.stderr.is_empty());

@@ -17,6 +17,18 @@ pub enum ScenarioState {
     Incomplete,
 }
 
+impl ScenarioState {
+    /// The state as the testkit records it.
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::Incomplete => "incomplete",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Observation {
@@ -266,7 +278,10 @@ pub fn judge(
             if record.state != ScenarioState::Passed {
                 findings.push(finding(
                     "EC012",
-                    format!("Scenario did not finish successfully: {:?}", record.state),
+                    format!(
+                        "Scenario did not finish successfully: {}",
+                        record.state.as_str()
+                    ),
                 ));
             }
             judgment.status = match record.state {

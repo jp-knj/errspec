@@ -192,6 +192,21 @@ pub enum ObservationStatus {
     Passed,
 }
 
+impl ObservationStatus {
+    /// The same name as the JSON value, for text output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotRequired => "not_required",
+            Self::NotRun => "not_run",
+            Self::Missing => "missing",
+            Self::Invalid => "invalid",
+            Self::Incomplete => "incomplete",
+            Self::Failed => "failed",
+            Self::Passed => "passed",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FaultObservation {
