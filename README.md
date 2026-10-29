@@ -154,6 +154,19 @@ JSON出力schemaVersionは2です。ケースには`testStatus`と`observationSt
 snapshot v2はタグに加え、シナリオID、タグ、期待動作の説明、テスト参照、必須観測IDを保存します。
 タグが残っていても、以前あったシナリオを削除すると`EC013`で失敗します。
 期待動作や必須観測の変更は`delta.changedScenarios`へ表示します。変更自体を禁止はしません。
+CIで既存シナリオの変更を止めたい場合は、`check`または`verify`に`--strict-baseline`を指定します。
+
+```sh
+./target/debug/errspec verify --runner bun \
+  --config examples/scenarios-bun/errspec.json \
+  --baseline baseline.json --strict-baseline
+```
+
+このモードでは、期待動作・タグ・テスト参照・必須観測が変わったシナリオを`EC014`で報告し、テストが成功しても終了コード1になります。
+検証を弱めたかどうかの意味判断はせず、観測IDの並び順の変更も対象です。既存シナリオを保った追加は許容し、削除は従来どおり失敗します。
+設定v2とシナリオ履歴を持つsnapshot v2が必要です。baselineの未指定、履歴不足、設定v1、`snapshot`との併用はエラーになります。
+意図した変更は差分をレビューし、新しいsnapshotへ更新してください。CIでは比較元の版を固定し、同じPRで書き換えたbaselineをそのまま比較元にしないようにします。errspecは人が承認した事実を証明しません。
+
 削除が意図した変更ならレビュー後に別パスへ新しいsnapshotを作成します。既存ファイルは上書きしません。
 
 設定v1とsnapshot v1は引き続き読み込めます。設定v1は以前どおり1タグ1テストの照合で、観測状態は`not_required`です。
@@ -180,6 +193,7 @@ import、再export、paths、具体化したgeneric、union/intersectionをtsrs�
 | `verify --runner bun\|vitest` | テストと観測の照合。既定はVitest |
 | `snapshot --out PATH` | 型とシナリオの一覧を保存 |
 | `--baseline PATH` | 保存済み一覧との差分と削除を検出 |
+| `--strict-baseline` | check/verifyで既存シナリオの変更を不合格にする。`--baseline`が必須 |
 | `--format json` | Agent向けJSONをstdoutへ出力。子プロセスのログはstderr |
 | `--vitest PATH` / `--bun PATH` | 実行ファイルの指定。指定パスは呼出元の作業ディレクトリから解決 |
 
@@ -196,6 +210,7 @@ Vitestの既定パスは設定ディレクトリの`node_modules/.bin/vitest`で
 | EC010 | 必須の値の比較が欠けている、または失敗 |
 | EC011 / EC012 | 観測の識別情報が不一致・重複／シナリオが正常完了しなかった |
 | EC013 | baselineにあったシナリオの削除 |
+| EC014 | strictモードでbaselineにあったシナリオが変更された |
 | EC_EVIDENCE | 観測プロトコル・run ID・ファイルが不正 |
 | EC_CONFIG / EC_BASELINE / EC_RUNNER / EC_SNAPSHOT / EC_INTERNAL | 設定・比較対象・実行器・保存・内部処理のエラー |
 | TS… | tsrsによるコンパイラ診断 |

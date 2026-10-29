@@ -103,6 +103,12 @@ ObservationStatus、ScenarioState、AssertionStatusにはRust enumを使用す�
 v2 snapshotはタグとシナリオのID・タグ・expect・テスト参照・必須観測を保存する。
 シナリオの削除はEC013。タグが別シナリオによって残っていても検出する。
 同じシナリオIDで期待動作や必須観測が変わればchangedScenariosへ表示する。
+`--strict-baseline`を指定したcheck/verifyでは、changedScenariosの各シナリオにEC014を追加し、ほかの処理に異常がなければ終了コード1にする。
+このオプションは`--baseline`を必須とし、設定v2と、すべての契約にシナリオ履歴を持つsnapshot v2を要求する。設定形式・snapshotとの併用はEC_CONFIG、履歴不足はEC_BASELINEとして終了コード2にする。
+引数としてbaselineがない場合はCLIの引数エラーとする。snapshotとの併用は書込前に拒否する。
+差分比較は既存の規則を使い、シナリオの追加だけでは不合格にしない。削除は従来のEC007/EC013で扱う。
+verifyでは有効な履歴との差分にEC014があってもテストと観測を実行し、実行結果と仕様変更の診断を同時に返す。破損した履歴や設定不備では実行しない。
+比較元は呼出側が管理する。新しいsnapshotの作成や差替えを承認の証明として扱わず、CIでは比較元の版をレビュー対象の変更と分けて指定する。
 旧snapshotはシナリオ履歴を持たないため、移行前の削除は判断しない。
 ソース定義の参照先が変わった場合は、以前と同じ型だと推定せずbaselineを拒否する。
 
