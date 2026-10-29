@@ -1,7 +1,7 @@
 use errspec::config::ValidatedConfig;
-use errspec::{bun, contract, evidence, model::*};
+use errspec::{bun, evidence, model::*};
+mod support;
 use serde_json::json;
-use std::fs;
 
 #[test]
 fn parses_real_bun_nested_names_entities_skip_and_todo() {
@@ -47,10 +47,6 @@ fn malformed_incomplete_and_unknown_reports_are_rejected() {
 
 #[test]
 fn bun_file_identity_duplicates_and_skipped_cases_are_checked() {
-    let dir = tempfile::tempdir().unwrap();
-    for f in ["a.test.ts", "b.test.ts"] {
-        fs::write(dir.path().join(f), "").unwrap();
-    }
     for (cases, expected) in [
         ("<testcase name='case'/>", "passed"),
         ("<testcase name='case'><skipped/></testcase>", "skipped"),
@@ -75,15 +71,16 @@ fn bun_file_identity_duplicates_and_skipped_cases_are_checked() {
             contracts: vec![c],
         })
         .unwrap();
-        let (result, _) = contract::compare(dir.path(), &config.contracts()[0], vec!["A".into()]);
-        let mut report = Report::new("verify");
-        report.contracts.push(result);
-        evidence::apply(
-            &mut report,
-            dir.path(),
+        let mut data = support::register(&config, &["A"]);
+        let (tests, findings) = evidence::judge(
+            &data.registrations,
+            &support::paths(&["a.test.ts", "b.test.ts"]),
             bun::parse_junit(&xml).unwrap(),
             true,
         );
+        data.tests = Some(tests);
+        data.diagnostics.extend(findings);
+        let report = data.finish("verify");
         assert_eq!(report.test_runner, Some("bun"));
         assert_eq!(report.contracts[0].cases[0].test_status, expected);
         assert_eq!(report.diagnostics.is_empty(), expected == "passed");
@@ -94,8 +91,7 @@ fn bun_file_identity_duplicates_and_skipped_cases_are_checked() {
 fn summary_errors_and_process_failure_fail_even_with_passing_cases() {
     let result = bun::parse_junit("<testsuites tests='1' failures='0' errors='1'><testsuite file='a.test.ts'><testcase name='case'/></testsuite></testsuites>").unwrap();
     assert!(!result.success);
-    let mut report = Report::new("verify");
     let result = bun::parse_junit("<testsuites tests='0' failures='0'/>").unwrap();
-    evidence::apply(&mut report, std::path::Path::new("."), result, false);
-    assert!(report.diagnostics.iter().any(|f| f.code == "EC006"));
+    let (_, findings) = evidence::judge(&[], &Default::default(), result, false);
+    assert!(findings.iter().any(|f| f.code == "EC006"));
 }

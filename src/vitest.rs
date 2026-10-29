@@ -1,10 +1,6 @@
 //! Convert Vitest JSON into runner-independent evidence.
-use crate::{
-    evidence::{self, RunEvidence, TestEvidence},
-    model::Report,
-};
+use crate::evidence::{RunEvidence, TestEvidence};
 use serde::Deserialize;
-use std::path::Path;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,9 +41,4 @@ pub fn normalize(report: VitestReport) -> RunEvidence {
             })
             .collect(),
     }
-}
-
-/// Compatibility entry point for the original Vitest adapter.
-pub fn apply(report: &mut Report, root: &Path, result: VitestReport, process_ok: bool) {
-    evidence::apply(report, root, normalize(result), process_ok);
 }

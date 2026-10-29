@@ -1,5 +1,10 @@
-use crate::{Runner, input::read_json};
-use errspec::{bun, evidence, model::*, observation, vitest};
+use crate::{
+    Runner,
+    input::{read_json, resolve_paths},
+};
+use errspec::{
+    bun, contract::Registration, evidence, model::*, observation, observation_io, vitest,
+};
 use std::{
     fs,
     io::{self, Write},
@@ -7,14 +12,21 @@ use std::{
     process::Command,
 };
 
+pub(crate) struct Verification {
+    pub tests: evidence::TestRun,
+    pub diagnostics: Vec<Finding>,
+    // Observation read failure must retain the successfully parsed runner results.
+    pub observations: Result<(observation::ObservationJudgments, Vec<Finding>), Finding>,
+}
+
 pub(crate) fn verify(
-    report: &mut Report,
+    registrations: &[Registration<'_>],
     root: &Path,
     runner: Runner,
     vitest: Option<&Path>,
     bun: Option<&Path>,
     test_files: &[PathBuf],
-) -> Result<(), Finding> {
+) -> Result<Verification, Finding> {
     if matches!(runner, Runner::Bun) && vitest.is_some()
         || matches!(runner, Runner::Vitest) && bun.is_some()
     {
@@ -84,9 +96,33 @@ pub(crate) fn verify(
             bun::parse_junit(&xml).map_err(|e| Finding::new("EC_RUNNER", e))?
         }
     };
-    evidence::apply(report, root, result, output.status.success());
+    let registered_files = || {
+        registrations
+            .iter()
+            .flat_map(|r| &r.cases)
+            .filter_map(|case| case.test().map(|test| test.file.as_str()))
+    };
+    let mut paths = resolve_paths(root, registered_files());
+    paths.extend(resolve_paths(
+        root,
+        result.tests.iter().map(|test| test.file.as_str()),
+    ));
+    let (tests, diagnostics) =
+        evidence::judge(registrations, &paths, result, output.status.success());
     let run = observation::RunContext::new(run_id);
-    let records = observation::read(&observations, &run)?;
-    observation::apply(report, root, &run, &records)?;
-    Ok(())
+    let observations = (|| {
+        let records = observation_io::read(&observations, &run)?;
+        // Resolve again after reading observations, preserving the existing phase boundary.
+        let mut paths = resolve_paths(root, registered_files());
+        paths.extend(resolve_paths(
+            root,
+            records.records().iter().map(|record| record.file.as_str()),
+        ));
+        observation::judge(registrations, &tests, &paths, &run, &records)
+    })();
+    Ok(Verification {
+        tests,
+        diagnostics,
+        observations,
+    })
 }
