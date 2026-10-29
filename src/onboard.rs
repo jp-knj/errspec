@@ -82,7 +82,14 @@ pub(crate) fn run(request: InitRequest) -> Result<InitReport, String> {
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let tags = adapter.tags(root, &source)?;
+    let tags = adapter.tags(root, &source).map_err(|error| {
+        if error.starts_with("Missing discriminant") {
+            // init defaults to _tag while scan also tries kind, type and code.
+            format!("{error}; select the type's property with --discriminant")
+        } else {
+            error
+        }
+    })?;
     if tags.is_empty() {
         return Err("Selected type has no error tags".into());
     }
