@@ -6,9 +6,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scenarioTest, scenarioTestName } from "../packages/testkit/index.mjs";
 
-function register(body, id = "one") {
+function register(body, id = "one", options = {}) {
   let callback;
-  scenarioTest((_name, run) => { callback = run; }, import.meta.url, { contract: "x", id, tag: "A" }, body);
+  scenarioTest((_name, run) => { callback = run; }, import.meta.url, { contract: "x", id, tag: "A", ...options }, body);
   return callback;
 }
 
@@ -54,6 +54,17 @@ test("configured but unused faults cannot pass", async () => {
     s.fault("gateway", () => ({ error: "A" }));
     s.check("status", 429, 429);
   }), /invoked and settled/);
+});
+
+test("a scenario passes without faults only when it declares withoutFaults", async () => {
+  await assert.rejects(register(s => { s.check("status", 400, 400); }), /declare withoutFaults: true/);
+  await register(s => { s.check("status", 400, 400); }, "one", { withoutFaults: true })();
+  await assert.rejects(register(async s => {
+    await s.fault("gateway", () => 1)();
+    s.check("status", 400, 400);
+  }, "one", { withoutFaults: true }), /declared withoutFaults/);
+  await assert.rejects(register(s => {}, "one", { withoutFaults: true }), /no completed assertions/);
+  assert.throws(() => register(() => {}, "one", { withoutFaults: "yes" }), /must be a boolean/);
 });
 
 test("unfinished fault promises and absent checks cannot pass", async () => {

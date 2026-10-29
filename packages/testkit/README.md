@@ -27,7 +27,8 @@ scenarioTest(test, import.meta.url, {
 
 ## API
 
-- `scenarioTest(test, fileURL, { contract, id, tag }, body)` — トップレベルのテストを登録。bodyは必ず必要な非同期処理をawaitする。
+- `scenarioTest(test, fileURL, { contract, id, tag, withoutFaults? }, body)` — トップレベルのテストを登録。bodyは必ず必要な非同期処理をawaitする。
+  `withoutFaults: true`は入力だけで結果が決まるシナリオの宣言です。設定の`observe.faults: []`と組み合わせます。指定すると`fault`の呼出が失敗になり、指定しないとfaultが0件のシナリオは失敗します。
 - `scenarioTestName(contract, id)` — 設定照合に使うテスト名を生成する。
 - `scope.fault(id, fn)` — 引数とthisを渡してfnを呼ぶasync wrapperを返す。fnの呼出回数と完了回数を記録。resolve/rejectとも完了と数える。
 - `scope.check(id, actual, expected)` — deepStrictEqualによる実際の比較を実行。失敗は投げ直し、内部にも失敗を保持する。

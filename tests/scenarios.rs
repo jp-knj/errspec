@@ -26,7 +26,10 @@ fn record() -> Value {
       "assertions":[{"id":"status","status":"passed"},{"id":"writes","status":"passed"}]})
 }
 fn check(values: Vec<Value>) -> Report {
-    let mut cfg: Config = serde_json::from_value(config()).unwrap();
+    check_with(config(), values)
+}
+fn check_with(config: Value, values: Vec<Value>) -> Report {
+    let mut cfg: Config = serde_json::from_value(config).unwrap();
     cfg.contracts[0].cases.truncate(1);
     let cfg = ValidatedConfig::try_from(cfg).unwrap();
     let mut data = support::register(&cfg, &["A"]);
@@ -91,7 +94,8 @@ fn version_two_cannot_omit_observation_requirements_or_use_old_names() {
     for (key, value) in [
         ("id", json!(null)),
         ("observe", json!(null)),
-        ("observe", json!({"faults":[],"assertions":["a"]})),
+        ("observe", json!({"faults":["a"],"assertions":[]})),
+        ("observe", json!({"faults":[""],"assertions":["a"]})),
         ("observe", json!({"faults":["a","a"],"assertions":["a"]})),
         ("test", json!({"file":"case.test.ts","name":"old name"})),
     ] {
@@ -154,6 +158,27 @@ fn passing_test_requires_actual_complete_observations() {
             ObservationStatus::Passed
         );
     }
+}
+
+#[test]
+fn explicitly_fault_free_scenarios_pass_only_without_fault_observations() {
+    let mut cfg = config();
+    cfg["contracts"][0]["cases"][0]["observe"]["faults"] = json!([]);
+    let mut input_only = record();
+    input_only["faults"] = json!([]);
+    let report = check_with(cfg.clone(), vec![input_only.clone()]);
+    assert!(report.diagnostics.is_empty(), "{report:?}");
+    assert_eq!(
+        report.contracts[0].cases[0].observation_status,
+        ObservationStatus::Passed
+    );
+    // A fault that the configuration did not require is still undeclared evidence.
+    let report = check_with(cfg.clone(), vec![record()]);
+    assert!(report.diagnostics.iter().any(|f| f.code == "EC011"));
+    // Required comparisons are not relaxed with the faults.
+    input_only["assertions"] = json!([{"id":"status","status":"passed"}]);
+    let report = check_with(cfg, vec![input_only]);
+    assert!(report.diagnostics.iter().any(|f| f.code == "EC010"));
 }
 
 #[test]

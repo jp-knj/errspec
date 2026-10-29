@@ -122,6 +122,7 @@ scenarioTest(test, import.meta.url, {
 - `s.check(id, actual, expected)`: `node:assert/strict`のdeep equalityを実行し、結果を記録します。空のcallbackで検証済みにするAPIはありません。非同期の値は先にawaitします。
 - 失敗したcheckをcatchしても、そのシナリオは失敗します。
 - 障害が未呼び出し／処理中、checkが0件の場合は補助API自体も失敗します。
+- 入力だけで結果が決まるシナリオ（入力チェックなど）は、設定で`"faults": []`を書き、`scenarioTest`の定義に`withoutFaults: true`を指定します。両方そろわないと失敗します。`assertions`は1件以上必要です。
 - 設定に必須としたcheckが欠けていれば、テストが成功していてもRust側の照合が失敗します。
 - テスト名は`errspec ["契約ID","シナリオID"]`として自動生成します。設定の`test.name`は省略します。
 - `scenarioTest`はトップレベルで登録してください。`describe`内の登録は現在未対応で、完全なテスト名が一致せず失敗します。
