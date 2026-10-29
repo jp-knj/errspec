@@ -64,6 +64,8 @@ impl Fixture {
         } else {
             &record
         };
+        // JSON goes in printf arguments, not the format: bash (macOS /bin/sh) rewrites `\"` in formats.
+        let (head, tail) = record.split_once("%s").unwrap_or((record, ""));
         let exit = if mode == "bad-observations" { 1 } else { 0 };
         let script = if mode == "spawn-failure" {
             "#!/errspec/nonexistent/interpreter\n".to_owned()
@@ -75,7 +77,7 @@ pwd -P > cwd
 printf '%s\n' "$@" > args
 printf '%s\n' "$ERRSPEC_RUN_ID" "$ERRSPEC_OBSERVATIONS" > session
 cat runner-report > "$4"
-printf '{record}' "$ERRSPEC_RUN_ID" > "$ERRSPEC_OBSERVATIONS/one.json"
+printf '%s' '{head}' "$ERRSPEC_RUN_ID" '{tail}' > "$ERRSPEC_OBSERVATIONS/one.json"
 printf 'runner-out\n'
 printf 'runner-err\n' >&2
 exit {exit}

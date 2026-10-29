@@ -45,7 +45,8 @@ fn verify(
     let observation = if corrupt {
         "printf '{' > \"$ERRSPEC_OBSERVATIONS/one.json\"".to_owned()
     } else {
-        r#"printf '{"schemaVersion":1,"kind":"errspec/observation","runId":"%s","contractId":"checkout","scenarioId":"first","tag":"A","file":"case.test.ts","testName":"errspec [\"checkout\",\"first\"]","state":"passed","faults":[{"id":"gateway","calls":1,"completed":1}],"assertions":[{"id":"status","status":"passed"}]}' "$ERRSPEC_RUN_ID" > "$ERRSPEC_OBSERVATIONS/one.json""#.to_owned()
+        // JSON goes in printf arguments, not the format: bash (macOS /bin/sh) rewrites `\"` in formats.
+        r#"printf '%s' '{"schemaVersion":1,"kind":"errspec/observation","runId":"' "$ERRSPEC_RUN_ID" '","contractId":"checkout","scenarioId":"first","tag":"A","file":"case.test.ts","testName":"errspec [\"checkout\",\"first\"]","state":"passed","faults":[{"id":"gateway","calls":1,"completed":1}],"assertions":[{"id":"status","status":"passed"}]}' > "$ERRSPEC_OBSERVATIONS/one.json""#.to_owned()
     };
     let runner = dir.path().join("runner.sh");
     fs::write(&runner, format!("#!/bin/sh\nset -eu\ncat runner-report.json > \"$4\"\n{observation}\n{mutation}\nexit {process_code}\n")).unwrap();
