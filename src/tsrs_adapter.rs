@@ -29,8 +29,12 @@ pub struct TsrsAdapter {
 
 fn diagnostic(d: P<tsrs_ast::Diagnostic>) -> Finding {
     let mut f = Finding::new(&format!("TS{}", d.code()), d.localize());
-    f.file = d.file().map(|file| file.file_name().to_owned());
+    f.file = d.file().map(|file| file.file_name().into());
     f.byte_offset = d.pos();
+    f.line = d
+        .file()
+        .zip(d.pos())
+        .map(|(file, pos)| crate::scan::line_at(file.text(), pos as usize) as u32);
     f
 }
 

@@ -174,6 +174,21 @@ fn compiler_error_is_not_a_clean_scan() {
     let (status, report) = run(&dir, &["check"]);
     assert_eq!(status, 2, "{report}");
     assert!(has(&report, "TS2304"));
+    assert_eq!(report["diagnostics"][0]["line"], 1);
+}
+
+#[test]
+fn text_output_locates_diagnostics_without_a_case() {
+    let dir = fixture("\nexport type ErrorType = MissingType;", &[]);
+    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+        .current_dir(dir.path())
+        .arg("check")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let last = stdout.lines().last().unwrap();
+    assert!(last.starts_with("TS2304 "), "{stdout}");
+    assert!(last.contains("errors.ts:2: Cannot find name"), "{stdout}");
 }
 
 #[test]

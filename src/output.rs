@@ -31,14 +31,22 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
                 }
             }
             for d in &report.diagnostics {
-                lines.push(format!(
-                    "{} {} {} {}: {}",
-                    d.code,
-                    d.contract_id.as_deref().unwrap_or(""),
-                    d.tag.as_deref().unwrap_or(""),
-                    d.scenario_id.as_deref().unwrap_or(""),
-                    d.message
-                ));
+                let location = d.file.as_ref().map(|file| match d.line {
+                    Some(line) => format!("{file}:{line}"),
+                    None => file.to_string(),
+                });
+                let subject = [
+                    Some(d.code.as_str()),
+                    d.contract_id.as_deref(),
+                    d.tag.as_deref(),
+                    d.scenario_id.as_deref(),
+                    location.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+                lines.push(format!("{subject}: {}", d.message));
             }
             if let Some(delta) = &report.delta {
                 lines.push(format!("delta: {}", serde_json::to_string(delta).unwrap()));

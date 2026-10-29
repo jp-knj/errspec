@@ -24,12 +24,16 @@ pub(crate) fn location(root: &Path, node: P<Node>) -> Location {
             .to_string_lossy()
             .replace('\\', "/"),
         byte_offset: offset as u32,
-        line: file.text().as_bytes()[..offset.min(file.text().len())]
-            .iter()
-            .filter(|&&c| c == b'\n')
-            .count()
-            + 1,
+        line: line_at(file.text(), offset),
     }
+}
+
+pub(crate) fn line_at(text: &str, offset: usize) -> usize {
+    text.as_bytes()[..offset.min(text.len())]
+        .iter()
+        .filter(|&&c| c == b'\n')
+        .count()
+        + 1
 }
 fn key(root: &Path, node: P<Node>) -> String {
     let loc = location(root, node);

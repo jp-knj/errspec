@@ -53,7 +53,7 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
                     data.analysis_complete = false;
                     let mut f = Finding::new("EC002", error);
                     f.contract_id = Some(c.id().into());
-                    f.file = Some(c.source().file.clone());
+                    f.file = Some(c.source().file.as_str().into());
                     data.diagnostics.push(f);
                 }
             }
