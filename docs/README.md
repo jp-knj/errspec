@@ -9,6 +9,9 @@
 2. [Requirements](products/errspec/features/failure-verification/requirements.md): 利用者から見える振る舞いと受け入れ条件。
 3. [Design](products/errspec/features/failure-verification/design.md): その条件を実現する仕組みと判断理由。
 
+現在はDesignに実装・リファクタリング方針の案を追加しています。CLIの責任分離、検証済み入力の型、判定とレポートの分離の順で進め、既存の入出力と合否を維持する提案です。
+機能追加や出力の意味の変更は、別の要件として判断します。
+
 [仕様を共有する進め方](engineering/guidelines/specification-workflow.md)に従って更新します。
 仕様の正本は日本語です。変更の経緯と確認結果はGitとPRに残します。
 
