@@ -12,16 +12,33 @@ import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 const revision = "d72f76fcf70ccfa0a5ca341b80da1d440ac60b11";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const checkout = process.argv[2] && resolve(process.argv[2]);
 if (!checkout)
   throw new Error(
-    "Usage: node scripts/pilot-valibot.mjs <valibot-checkout> [errspec-binary]",
+    "Usage: node scripts/pilot-valibot.mjs <valibot-checkout> [errspec-binary | --packages <manifest>]",
   );
-const binary = resolve(process.argv[3] || join(root, "target/debug/errspec"));
+const packaged = process.argv[3] === "--packages";
+if (packaged && !process.argv[4])
+  throw new Error("--packages requires a manifest path");
+const manifestPath = packaged ? resolve(process.argv[4]) : null;
+const manifest = manifestPath && JSON.parse(readFileSync(manifestPath, "utf8"));
+const packageFiles = manifest &&
+  manifest.packages.map((pkg) => {
+    const path = resolve(dirname(manifestPath), pkg.filename);
+    assert.equal(
+      createHash("sha256").update(readFileSync(path)).digest("hex"),
+      pkg.sha256,
+    );
+    return path;
+  });
 const dir = mkdtempSync(join(tmpdir(), "errspec-valibot-"));
+const binary = packaged
+  ? join(dir, "node_modules/.bin/errspec")
+  : resolve(process.argv[3] || join(root, "target/debug/errspec"));
 const checks = [];
 const timings = [];
 function run(command, args, expected = 0) {
@@ -73,8 +90,12 @@ try {
     "--ignore-scripts",
     "--no-audit",
     "--no-fund",
-    `file:${join(root, "packages/testkit")}`,
+    ...(packaged
+      ? ["--cache", join(dir, "npm-cache"), ...packageFiles]
+      : [`file:${join(root, "packages/testkit")}`]),
   ]);
+  if (packaged)
+    assert.equal(run(binary, ["--version"]).trim(), `errspec ${manifest.version}`);
   writeFileSync(
     join(dir, "errspec.tsconfig.json"),
     JSON.stringify({
@@ -199,6 +220,16 @@ scenarioTest(test, import.meta.url, { contract: 'valibot.string', id: 'case-1', 
   const result = {
     project: "https://github.com/open-circle/valibot",
     revision,
+    ...(packaged
+      ? {
+          installation: {
+            method: "npm tarballs, fresh cache, offline, lifecycle scripts disabled",
+            target: manifest.target,
+            version: manifest.version,
+            packages: manifest.packages,
+          },
+        }
+      : {}),
     node: process.version,
     bun: run("bun", ["--version"]).trim(),
     source: "library/src/schemas/string/string.ts",
@@ -229,8 +260,11 @@ scenarioTest(test, import.meta.url, { contract: 'valibot.string', id: 'case-1', 
   };
   mkdirSync(join(root, "artifacts"), { recursive: true });
   writeFileSync(
-    join(root, "artifacts/valibot-pilot.json"),
-    JSON.stringify(result, null, 2) + "\n",
+    join(
+      root,
+      packaged ? "artifacts/valibot-packaged-pilot.json" : "artifacts/valibot-pilot.json",
+    ),
+    JSON.stringify(result, null, 2).replaceAll(dir, "<temporary-project>") + "\n",
   );
   console.log(JSON.stringify(result, null, 2));
 } finally {

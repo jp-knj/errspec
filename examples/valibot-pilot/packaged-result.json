@@ -1,0 +1,275 @@
+{
+  "project": "https://github.com/open-circle/valibot",
+  "revision": "d72f76fcf70ccfa0a5ca341b80da1d440ac60b11",
+  "installation": {
+    "method": "npm tarballs, fresh cache, offline, lifecycle scripts disabled",
+    "target": "linux-x64",
+    "version": "0.1.0",
+    "packages": [
+      {
+        "name": "@errspec/cli-linux-x64",
+        "version": "0.1.0",
+        "filename": "errspec-cli-linux-x64-0.1.0.tgz",
+        "sha256": "256ea85781e4b5636eacc5b1f81f954c6cdd2404365f93b700c2870a3be96e8d",
+        "bytes": 5909803
+      },
+      {
+        "name": "@errspec/cli",
+        "version": "0.1.0",
+        "filename": "errspec-cli-0.1.0.tgz",
+        "sha256": "7070c68febb320f530a71485c7a6e221cf8840f7b27a59310b1099de54b1a98e",
+        "bytes": 2920
+      },
+      {
+        "name": "@errspec/testkit",
+        "version": "0.1.0",
+        "filename": "errspec-testkit-0.1.0.tgz",
+        "sha256": "23e971fd3453d5bc35903c957469ccc1df39e8adade83dc8b6ce26a1c596d296",
+        "bytes": 5104
+      }
+    ]
+  },
+  "node": "v24.22.1",
+  "bun": "1.4.4",
+  "source": "library/src/schemas/string/string.ts",
+  "export": "StringIssue",
+  "discriminant": "type",
+  "sourceFilesModified": 0,
+  "setupFiles": [
+    "package.json",
+    "package-lock.json",
+    "errspec.tsconfig.json",
+    "errspec.json",
+    "errspec.generated.test.ts",
+    "baseline.json"
+  ],
+  "scan": {
+    "files": 572,
+    "candidates": 1080,
+    "origins": 9,
+    "unknowns": 527
+  },
+  "checks": [
+    {
+      "name": "discover actual StringIssue",
+      "passed": true
+    },
+    {
+      "name": "generated TODO fails",
+      "passed": true
+    },
+    {
+      "name": "real Valibot failure behavior passes",
+      "passed": true
+    },
+    {
+      "name": "missing registration detected: EC001",
+      "passed": true
+    },
+    {
+      "name": "ordinary test passes but missing comparison fails: EC010",
+      "passed": true
+    },
+    {
+      "name": "removing comparison and requirement fails strict baseline: EC014",
+      "passed": true
+    },
+    {
+      "name": "restored behavior and reviewed baseline pass",
+      "passed": true
+    }
+  ],
+  "timings": [
+    {
+      "command": "npm",
+      "args": [
+        "install",
+        "--offline",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        "--cache",
+        "<temporary-project>/npm-cache",
+        "<packages>/errspec-cli-linux-x64-0.1.0.tgz",
+        "<packages>/errspec-cli-0.1.0.tgz",
+        "<packages>/errspec-testkit-0.1.0.tgz"
+      ],
+      "milliseconds": 1101
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "--version"
+      ],
+      "milliseconds": 102
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "scan",
+        "--project",
+        "errspec.tsconfig.json",
+        "--discriminant",
+        "type",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 592
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "init",
+        "--project",
+        "errspec.tsconfig.json",
+        "--source",
+        "library/src/schemas/string/string.ts",
+        "--export",
+        "StringIssue",
+        "--discriminant",
+        "type",
+        "--runner",
+        "bun",
+        "--contract",
+        "valibot.string",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 540
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 689
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 605
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "snapshot",
+        "--out",
+        "baseline.json",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 619
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--baseline",
+        "baseline.json",
+        "--strict-baseline",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 749
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "check",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 521
+    },
+    {
+      "command": "bun",
+      "args": [
+        "test",
+        "./errspec.generated.test.ts"
+      ],
+      "milliseconds": 22
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 945
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 575
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--baseline",
+        "baseline.json",
+        "--strict-baseline",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 540
+    },
+    {
+      "command": "errspec",
+      "args": [
+        "verify",
+        "--runner",
+        "bun",
+        "--only-contract-tests",
+        "--baseline",
+        "baseline.json",
+        "--strict-baseline",
+        "--format",
+        "json"
+      ],
+      "milliseconds": 554
+    },
+    {
+      "command": "bun",
+      "args": [
+        "--version"
+      ],
+      "milliseconds": 4
+    }
+  ],
+  "limits": [
+    "One schema and one scenario; not a benchmark of all Valibot behavior.",
+    "No claim about human setup time or long-term maintenance.",
+    "The test tsconfig focuses on source; runner type dependencies are not analyzed."
+  ],
+  "errspecRevision": "08b184ed7baa27a329abe6e3e952b493413a78e1"
+}
