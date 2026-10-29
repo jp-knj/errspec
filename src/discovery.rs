@@ -20,6 +20,8 @@ pub struct Candidate {
     /// Every discriminant property is declared outside the project directory or in node_modules.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub external: bool,
+    /// Channels of origins whose error type is this declaration or a union containing it.
+    pub flows: Vec<Channel>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]

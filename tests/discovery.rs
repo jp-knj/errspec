@@ -65,7 +65,8 @@ export function shadow(renamed: () => void): void { renamed(); }
         serde_json::json!([{
             "source": {"file": "leaf.ts", "export": "Failure", "discriminant": "_tag"},
             "tags": ["Denied", "Offline"],
-            "reexports": [{"file": "barrel.ts", "export": "PublicFailure"}]
+            "reexports": [{"file": "barrel.ts", "export": "PublicFailure"}],
+            "flows": []
         }]),
         "{r}"
     );
@@ -327,6 +328,41 @@ export type Local = { code: 'local' } | { code: 'other' };",
             ("Local", false),
             ("Mixed", false),
             ("Passed", true)
+        ],
+        "{r}"
+    );
+}
+
+#[test]
+fn candidates_record_the_channels_through_which_they_flow_as_errors() {
+    let dir = project(&[(
+        "errors.ts",
+        "export interface Offline { kind: 'offline' }
+export type Failure = Offline | { kind: 'denied' };
+export type Thrown = { kind: 'boom' };
+export type Rejected = { kind: 'late' };
+export type Shape = { kind: 'circle' } | { kind: 'square' };
+export function load(): { ok: true; value: number } | { ok: false; error: Failure } { return { ok: true, value: 1 }; }
+export function fail(e: Thrown): never { throw e; }
+export function later(e: Rejected): Promise<void> { return Promise.reject(e); }
+export function area(s: Shape): number { return s.kind === 'circle' ? 1 : 2; }",
+    )]);
+    let (status, r) = scan(&dir, &["--discriminant", "kind"]);
+    assert_eq!(status, 0, "{r}");
+    let flows: Vec<_> = r["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["source"]["export"].as_str().unwrap(), c["flows"].clone()))
+        .collect();
+    assert_eq!(
+        flows,
+        [
+            ("Failure", serde_json::json!(["result"])),
+            ("Offline", serde_json::json!(["result"])),
+            ("Rejected", serde_json::json!(["rejection"])),
+            ("Shape", serde_json::json!([])),
+            ("Thrown", serde_json::json!(["throw"])),
         ],
         "{r}"
     );
