@@ -61,6 +61,12 @@ export type ErrorType = {_tag:'A'};
 "#,
             &["A"],
         );
+        // The flags of @tsconfig/strictest that apply to vendored code, without the unused-name checks for this fixture.
+        fs::write(
+            dir.path().join("tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"skipLibCheck":true,"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","exactOptionalPropertyTypes":true,"noFallthroughCasesInSwitch":true,"noImplicitOverride":true,"noImplicitReturns":true,"noPropertyAccessFromIndexSignature":true,"noUncheckedIndexedAccess":true,"isolatedModules":true,"checkJs":true},"files":["errors.ts"]}"#,
+        )
+        .unwrap();
         fs::create_dir(dir.path().join("sdk")).unwrap();
         fs::write(dir.path().join("sdk/node.d.ts"), NODE_STUB).unwrap();
         fs::write(

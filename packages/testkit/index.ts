@@ -77,8 +77,8 @@ export function scenarioTest(
   if (typeof withoutFaults !== "boolean") throw new Error("withoutFaults must be a boolean");
   const filename = fileURLToPath(file);
   return test(name, async () => {
-    const directory = process.env.ERRSPEC_OBSERVATIONS;
-    const runId = process.env.ERRSPEC_RUN_ID;
+    const directory = process.env["ERRSPEC_OBSERVATIONS"];
+    const runId = process.env["ERRSPEC_RUN_ID"];
     if (Boolean(directory) !== Boolean(runId)) throw new Error("Incomplete errspec execution environment");
     const path = directory ? join(directory, `${randomUUID()}.json`) : undefined;
     const record: ObservationRecord = {
