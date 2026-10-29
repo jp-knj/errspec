@@ -14,7 +14,7 @@ use tsrs_ast::{
 use tsrs_checker::{Checker, Type, TypeFlags};
 use tsrs_core::P;
 
-fn location(root: &Path, node: P<Node>) -> Location {
+pub(crate) fn location(root: &Path, node: P<Node>) -> Location {
     let file = get_source_file_of_node(node).expect("source node");
     let offset = tsrs_scanner::get_token_pos_of_node(node, file, false) as usize;
     Location {
@@ -35,7 +35,7 @@ fn key(root: &Path, node: P<Node>) -> String {
     let loc = location(root, node);
     format!("{}:{}:{:?}", loc.file, loc.byte_offset, node.kind())
 }
-fn text(node: P<Node>) -> String {
+pub(crate) fn text(node: P<Node>) -> String {
     if matches!(
         node.kind(),
         Kind::Identifier | Kind::PrivateIdentifier | Kind::StringLiteral
@@ -51,7 +51,7 @@ fn text(node: P<Node>) -> String {
         .trim()
         .to_owned()
 }
-fn walk(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
+pub(crate) fn walk(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
     callback(node);
     node.for_each_child(&mut |child| {
         walk(child, callback);

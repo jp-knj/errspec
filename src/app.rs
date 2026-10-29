@@ -2,7 +2,7 @@ use crate::{
     input::{existing_tests, read_json},
     onboard,
     request::{ContractAction, ContractRequest, Request},
-    scan, tsrs_adapter, verification,
+    scan, scenario_source, tsrs_adapter, verification,
 };
 use errspec::{config::ValidatedConfig, contract, model::*, report::ReportData, snapshot};
 use std::{
@@ -61,6 +61,8 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
         if !data.analysis_complete {
             return Ok(());
         }
+        data.diagnostics
+            .extend(scenario_source::inspect(&adapter, root, &config));
         if let Some(baseline) = &request.baseline {
             let previous: Snapshot = read_json(baseline, "EC_BASELINE")?;
             if request.strict_baseline
