@@ -1,7 +1,7 @@
 use crate::tsrs_adapter::{TsrsAdapter, collect_tags};
 use errspec::{
     discovery::*,
-    model::{Config, Finding, Source},
+    model::{Finding, Source},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -240,12 +240,7 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
         }
     };
     let root = project.parent().expect("canonical project parent");
-    let config = Config {
-        schema_version: 2,
-        project: project.to_string_lossy().into_owned(),
-        contracts: vec![],
-    };
-    let adapter = match TsrsAdapter::open(root, &config) {
+    let adapter = match TsrsAdapter::open(root, &project.to_string_lossy()) {
         Ok(a) => a,
         Err(errors) => {
             report.diagnostics = errors;

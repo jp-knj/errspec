@@ -1,3 +1,4 @@
+use errspec::config::ValidatedConfig;
 use errspec::{contract, model::*, vitest};
 use serde_json::json;
 use std::fs;
@@ -14,7 +15,13 @@ fn skipped_missing_ambiguous_or_failed_tests_never_count_as_passed() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("case.test.ts"), "").unwrap();
         let c: Contract=serde_json::from_value(json!({"id":"x","source":{"file":"e.ts","export":"E","discriminant":"tag"},"cases":[{"tag":"A","expect":"rejects","test":{"file":"case.test.ts","name":"rejects A"}}]})).unwrap();
-        let (result, _) = contract::compare(dir.path(), &c, vec!["A".into()]);
+        let config = ValidatedConfig::try_from(Config {
+            schema_version: 1,
+            project: "tsconfig.json".into(),
+            contracts: vec![c],
+        })
+        .unwrap();
+        let (result, _) = contract::compare(dir.path(), &config.contracts()[0], vec!["A".into()]);
         let mut report = Report::new("verify");
         report.contracts.push(result);
         let evidence=serde_json::from_value(json!({"success":true,"testResults":[{"name":dir.path().join("case.test.ts"),"assertionResults":states.iter().map(|s|json!({"fullName":"rejects A","status":s})).collect::<Vec<_>>()}]})).unwrap();

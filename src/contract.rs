@@ -1,104 +1,32 @@
-use crate::model::*;
+use crate::{
+    config::{CaseKind, ValidatedContract},
+    model::*,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
 
-pub fn validate(config: &Config) -> Result<(), Finding> {
-    if !matches!(config.schema_version, 1 | 2)
-        || config.project.trim().is_empty()
-        || config.contracts.is_empty()
-    {
-        return Err(Finding::new(
-            "EC_CONFIG",
-            "Require schemaVersion: 1 or 2, a project, and at least one contract",
-        ));
-    }
-    let mut ids = BTreeSet::new();
-    for c in &config.contracts {
-        if c.id.trim().is_empty() || !ids.insert(&c.id) {
-            return Err(Finding::new(
-                "EC_CONFIG",
-                format!("Empty or duplicate contract id: {:?}", c.id),
-            ));
-        }
-        if [&c.source.file, &c.source.export, &c.source.discriminant]
-            .iter()
-            .any(|s| s.trim().is_empty())
-        {
-            return Err(Finding::new(
-                "EC_CONFIG",
-                format!("Incomplete source in {}", c.id),
-            ));
-        }
-        let mut identities = BTreeSet::new();
-        for case in &c.cases {
-            let invalid = |message: &str| {
-                Finding::new("EC_CONFIG", message)
-                    .for_case(&c.id, &case.tag)
-                    .for_scenario(case.id.as_deref())
-            };
-            if [&case.expect, &case.test.file]
-                .iter()
-                .any(|s| s.trim().is_empty())
-            {
-                return Err(invalid("Case requires expect and test.file"));
-            }
-            if config.schema_version == 1 {
-                if case.id.is_some() || case.observe.is_some() || case.test.name.trim().is_empty() {
-                    return Err(invalid(
-                        "Version 1 requires test.name; scenario ids and observe require schemaVersion: 2",
-                    ));
-                }
-                if !identities.insert(case.tag.as_str()) {
-                    return Err(invalid("Duplicate case tag"));
-                }
-            } else {
-                let Some(id) = case.id.as_deref().filter(|id| !id.trim().is_empty()) else {
-                    return Err(invalid("Version 2 requires a nonempty scenario id"));
-                };
-                if !identities.insert(id) {
-                    return Err(invalid("Duplicate scenario id within contract"));
-                }
-                if !case.test.name.is_empty() && case.test.name != scenario_test_name(&c.id, id) {
-                    return Err(invalid(
-                        "Version 2 uses SDK-generated test names; omit test.name",
-                    ));
-                }
-                let Some(requirements) = &case.observe else {
-                    return Err(invalid(
-                        "Version 2 requires observe.faults and observe.assertions",
-                    ));
-                };
-                for list in [&requirements.faults, &requirements.assertions] {
-                    let unique: BTreeSet<_> = list.iter().collect();
-                    if list.is_empty()
-                        || unique.len() != list.len()
-                        || list.iter().any(|id| id.trim().is_empty())
-                    {
-                        return Err(invalid(
-                            "Observation ids must be nonempty, unique, nonempty lists",
-                        ));
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
+/// Compare only contracts obtained through configuration validation.
+///
+/// ```compile_fail
+/// use errspec::{contract, model::Contract};
+/// fn unchecked(raw: &Contract) {
+///     contract::compare(std::path::Path::new("."), raw, vec![]);
+/// }
+/// ```
 pub fn compare(
     root: &Path,
-    contract: &Contract,
+    contract: &ValidatedContract,
     tags: Vec<String>,
 ) -> (ContractResult, Vec<Finding>) {
     let mut findings = Vec::new();
     let mut cases = Vec::new();
     for tag in &tags {
         let registered: Vec<_> = contract
-            .cases
+            .cases()
             .iter()
-            .filter(|case| case.tag == *tag)
+            .filter(|case| case.tag() == tag)
             .collect();
         if registered.is_empty() {
             findings.push(
@@ -106,7 +34,7 @@ pub fn compare(
                     "EC001",
                     "Error variant has no registered failure contract and test",
                 )
-                .for_case(&contract.id, tag),
+                .for_case(contract.id(), tag),
             );
             cases.push(CaseResult {
                 id: None,
@@ -122,29 +50,29 @@ pub fn compare(
             });
         }
         for case in registered {
-            if !root.join(&case.test.file).is_file() {
+            let (id, observe) = match case.kind() {
+                CaseKind::Legacy => (None, None),
+                CaseKind::Scenario { id, observe } => (Some(id.as_str()), Some(observe)),
+            };
+            if !root.join(&case.test().file).is_file() {
                 findings.push(
                     Finding::new(
                         "EC003",
-                        format!("Referenced test file does not exist: {}", case.test.file),
+                        format!("Referenced test file does not exist: {}", case.test().file),
                     )
-                    .for_case(&contract.id, tag)
-                    .for_scenario(case.id.as_deref()),
+                    .for_case(contract.id(), tag)
+                    .for_scenario(id),
                 );
             }
-            let mut test = case.test.clone();
-            if let Some(id) = &case.id {
-                test.name = scenario_test_name(&contract.id, id);
-            }
             cases.push(CaseResult {
-                id: case.id.clone(),
+                id: id.map(str::to_owned),
                 tag: tag.clone(),
                 registration: "registered",
                 test_status: "not_run".into(),
-                test: Some(test),
-                expect: Some(case.expect.clone()),
-                observe: case.observe.clone(),
-                observation_status: if case.observe.is_some() {
+                test: Some(case.test().clone()),
+                expect: Some(case.expect().to_owned()),
+                observe: observe.cloned(),
+                observation_status: if observe.is_some() {
                     ObservationStatus::NotRun
                 } else {
                     ObservationStatus::NotRequired
@@ -154,20 +82,24 @@ pub fn compare(
             });
         }
     }
-    for case in &contract.cases {
-        if !tags.contains(&case.tag) {
+    for case in contract.cases() {
+        let id = match case.kind() {
+            CaseKind::Legacy => None,
+            CaseKind::Scenario { id, .. } => Some(id.as_str()),
+        };
+        if !tags.iter().any(|tag| tag == case.tag()) {
             findings.push(
                 Finding::new("EC004", "Registered tag no longer exists in the error type")
-                    .for_case(&contract.id, &case.tag)
-                    .for_scenario(case.id.as_deref()),
+                    .for_case(contract.id(), case.tag())
+                    .for_scenario(id),
             );
         }
     }
     (
         ContractResult {
-            id: contract.id.clone(),
-            source: contract.source.clone(),
-            declared_boundaries: contract.boundaries.clone(),
+            id: contract.id().to_owned(),
+            source: contract.source().clone(),
+            declared_boundaries: contract.boundaries().to_vec(),
             tags,
             cases,
         },

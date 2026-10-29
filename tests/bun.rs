@@ -1,3 +1,4 @@
+use errspec::config::ValidatedConfig;
 use errspec::{bun, contract, evidence, model::*};
 use serde_json::json;
 use std::fs;
@@ -68,7 +69,13 @@ fn bun_file_identity_duplicates_and_skipped_cases_are_checked() {
             "<testsuites tests='{count}' failures='0'><testsuite file='a.test.ts' name='a.test.ts'>{cases}</testsuite><testsuite file='b.test.ts' name='b.test.ts'><testcase name='case'/></testsuite></testsuites>"
         );
         let c: Contract = serde_json::from_value(json!({"id":"x", "source":{"file":"e.ts","export":"E","discriminant":"tag"},"cases":[{"tag":"A","expect":"rejects","test":{"file":"a.test.ts","name":"case"}}]})).unwrap();
-        let (result, _) = contract::compare(dir.path(), &c, vec!["A".into()]);
+        let config = ValidatedConfig::try_from(Config {
+            schema_version: 1,
+            project: "tsconfig.json".into(),
+            contracts: vec![c],
+        })
+        .unwrap();
+        let (result, _) = contract::compare(dir.path(), &config.contracts()[0], vec!["A".into()]);
         let mut report = Report::new("verify");
         report.contracts.push(result);
         evidence::apply(

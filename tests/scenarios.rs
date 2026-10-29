@@ -1,4 +1,9 @@
-use errspec::{contract, model::*, observation};
+use errspec::{
+    config::ValidatedConfig,
+    contract,
+    model::*,
+    observation::{self, RunContext},
+};
 use serde_json::{Value, json};
 use std::fs;
 
@@ -23,8 +28,9 @@ fn check(mut values: Vec<Value>) -> (Report, tempfile::TempDir) {
     fs::write(dir.path().join("case.test.ts"), "").unwrap();
     let mut cfg: Config = serde_json::from_value(config()).unwrap();
     cfg.contracts[0].cases.truncate(1);
-    contract::validate(&cfg).unwrap();
-    let (mut result, findings) = contract::compare(dir.path(), &cfg.contracts[0], vec!["A".into()]);
+    let cfg = ValidatedConfig::try_from(cfg).unwrap();
+    let (mut result, findings) =
+        contract::compare(dir.path(), &cfg.contracts()[0], vec!["A".into()]);
     assert!(findings.is_empty());
     result.cases[0].test_status = "passed".into();
     let mut report = Report::new("verify");
@@ -33,18 +39,23 @@ fn check(mut values: Vec<Value>) -> (Report, tempfile::TempDir) {
         .drain(..)
         .map(|v| serde_json::from_value(v).unwrap())
         .collect();
-    observation::apply(&mut report, dir.path(), &records);
+    let run = RunContext::new("run-1");
+    let records = observation::validate(records, &run).unwrap();
+    observation::apply(&mut report, dir.path(), &run, &records).unwrap();
     (report, dir)
 }
 
 #[test]
 fn multiple_scenarios_share_a_tag_but_ids_are_unique() {
     let cfg: Config = serde_json::from_value(config()).unwrap();
-    contract::validate(&cfg).unwrap();
+    let cfg = ValidatedConfig::try_from(cfg).unwrap();
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("case.test.ts"), "").unwrap();
-    let (result, gaps) =
-        contract::compare(dir.path(), &cfg.contracts[0], vec!["A".into(), "B".into()]);
+    let (result, gaps) = contract::compare(
+        dir.path(),
+        &cfg.contracts()[0],
+        vec!["A".into(), "B".into()],
+    );
     assert_eq!(result.cases.len(), 3);
     assert_eq!(gaps.len(), 1);
     assert_eq!(gaps[0].tag.as_deref(), Some("B"));
@@ -58,7 +69,7 @@ fn multiple_scenarios_share_a_tag_but_ids_are_unique() {
     );
     let mut bad = config();
     bad["contracts"][0]["cases"][1]["id"] = json!("first");
-    assert!(contract::validate(&serde_json::from_value(bad).unwrap()).is_err());
+    assert!(ValidatedConfig::try_from(serde_json::from_value::<Config>(bad).unwrap()).is_err());
 }
 
 #[test]
@@ -73,13 +84,13 @@ fn version_two_cannot_omit_observation_requirements_or_use_old_names() {
         let mut bad = config();
         bad["contracts"][0]["cases"][0][key] = value;
         assert!(
-            contract::validate(&serde_json::from_value(bad).unwrap()).is_err(),
+            ValidatedConfig::try_from(serde_json::from_value::<Config>(bad).unwrap()).is_err(),
             "{key}"
         );
     }
     let mut bad = config();
     bad["schemaVersion"] = json!(1);
-    assert!(contract::validate(&serde_json::from_value(bad).unwrap()).is_err());
+    assert!(ValidatedConfig::try_from(serde_json::from_value::<Config>(bad).unwrap()).is_err());
 }
 
 #[test]
@@ -164,29 +175,42 @@ fn observation_reader_rejects_stale_corrupt_partial_and_invalid_records() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("one.json");
     fs::write(&path, record().to_string()).unwrap();
-    assert_eq!(observation::read(dir.path(), "run-1").unwrap().len(), 1);
-    assert!(observation::read(dir.path(), "old-run").is_err());
+    assert_eq!(
+        observation::read(dir.path(), &RunContext::new("run-1"))
+            .unwrap()
+            .records()
+            .len(),
+        1
+    );
+    assert!(observation::read(dir.path(), &RunContext::new("old-run")).is_err());
     fs::write(&path, "{").unwrap();
-    assert!(observation::read(dir.path(), "run-1").is_err());
+    assert!(observation::read(dir.path(), &RunContext::new("run-1")).is_err());
     fs::remove_file(&path).unwrap();
     fs::write(dir.path().join("one.json.tmp"), "{}").unwrap();
-    assert!(observation::read(dir.path(), "run-1").is_err());
+    assert!(observation::read(dir.path(), &RunContext::new("run-1")).is_err());
     for change in [
         json!([{"id":"gateway","calls":1,"completed":2}]),
         json!([{"id":"gateway","calls":1,"completed":1},{"id":"gateway","calls":1,"completed":1}]),
     ] {
         let mut value = record();
         value["faults"] = change;
-        assert!(observation::validate(&serde_json::from_value(value).unwrap(), "run-1").is_err());
+        assert!(
+            observation::validate(
+                vec![serde_json::from_value(value).unwrap()],
+                &RunContext::new("run-1")
+            )
+            .is_err()
+        );
     }
 }
 
 #[test]
 fn baseline_tracks_scenario_removal_and_requirement_changes_with_unchanged_tags() {
-    let cfg: Config = serde_json::from_value(config()).unwrap();
+    let cfg =
+        ValidatedConfig::try_from(serde_json::from_value::<Config>(config()).unwrap()).unwrap();
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("case.test.ts"), "").unwrap();
-    let (result, _) = contract::compare(dir.path(), &cfg.contracts[0], vec!["A".into()]);
+    let (result, _) = contract::compare(dir.path(), &cfg.contracts()[0], vec!["A".into()]);
     let mut report = Report::new("check");
     report.contracts.push(result);
     let before = contract::snapshot(&report);

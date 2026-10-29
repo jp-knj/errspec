@@ -33,11 +33,35 @@ pub struct Observation {
     pub assertions: Vec<AssertionObservation>,
 }
 
+/// Identity of the current CLI execution, supplied by the runner boundary.
+pub struct RunContext {
+    id: String,
+}
+
+impl RunContext {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self { id: id.into() }
+    }
+}
+
+/// Format-checked records belonging to one execution. They are not verdicts.
+#[derive(Debug)]
+pub struct ValidatedObservations {
+    run_id: String,
+    records: Vec<Observation>,
+}
+
+impl ValidatedObservations {
+    pub fn records(&self) -> &[Observation] {
+        &self.records
+    }
+}
+
 fn invalid(message: impl Into<String>) -> Finding {
     Finding::new("EC_EVIDENCE", message)
 }
 
-pub fn read(directory: &Path, run_id: &str) -> Result<Vec<Observation>, Finding> {
+pub fn read(directory: &Path, run: &RunContext) -> Result<ValidatedObservations, Finding> {
     let mut files = fs::read_dir(directory)
         .map_err(|e| invalid(e.to_string()))?
         .collect::<Result<Vec<_>, _>>()
@@ -66,14 +90,31 @@ pub fn read(directory: &Path, run_id: &str) -> Result<Vec<Observation>, Finding>
         let bytes = fs::read(&path).map_err(|e| invalid(e.to_string()))?;
         let record: Observation = serde_json::from_slice(&bytes)
             .map_err(|e| invalid(format!("Invalid observation JSON: {e}")))?;
-        validate(&record, run_id)?;
+        validate_record(&record, run)?;
         records.push(record);
     }
-    Ok(records)
+    Ok(ValidatedObservations {
+        run_id: run.id.clone(),
+        records,
+    })
 }
 
-pub fn validate(record: &Observation, run_id: &str) -> Result<(), Finding> {
-    if record.schema_version != 1 || record.kind != "errspec/observation" || record.run_id != run_id
+/// Validate in-memory records using the same boundary as file-based input.
+pub fn validate(
+    records: Vec<Observation>,
+    run: &RunContext,
+) -> Result<ValidatedObservations, Finding> {
+    for record in &records {
+        validate_record(record, run)?;
+    }
+    Ok(ValidatedObservations {
+        run_id: run.id.clone(),
+        records,
+    })
+}
+
+fn validate_record(record: &Observation, run: &RunContext) -> Result<(), Finding> {
+    if record.schema_version != 1 || record.kind != "errspec/observation" || record.run_id != run.id
     {
         return Err(invalid(
             "Observation protocol or current run id does not match",
@@ -105,10 +146,27 @@ pub fn validate(record: &Observation, run_id: &str) -> Result<(), Finding> {
     Ok(())
 }
 
-/// Match observations already accepted by `read` (or `validate`) for this run.
-pub fn apply(report: &mut Report, root: &Path, records: &[Observation]) {
+/// Match only validated records, rejecting another execution before changing the report.
+///
+/// ```compile_fail
+/// use errspec::{model::Report, observation::{self, Observation, RunContext}};
+/// fn unchecked(report: &mut Report, raw: &[Observation], run: &RunContext) {
+///     observation::apply(report, std::path::Path::new("."), run, raw);
+/// }
+/// ```
+pub fn apply(
+    report: &mut Report,
+    root: &Path,
+    run: &RunContext,
+    records: &ValidatedObservations,
+) -> Result<(), Finding> {
+    if records.run_id != run.id {
+        return Err(invalid(
+            "Observation protocol or current run id does not match",
+        ));
+    }
     let mut index: BTreeMap<(&str, &str), Vec<&Observation>> = BTreeMap::new();
-    for record in records {
+    for record in &records.records {
         index
             .entry((&record.contract_id, &record.scenario_id))
             .or_default()
@@ -219,4 +277,5 @@ pub fn apply(report: &mut Report, root: &Path, records: &[Observation]) {
         f.contract_id = Some(contract.into());
         report.diagnostics.push(f);
     }
+    Ok(())
 }

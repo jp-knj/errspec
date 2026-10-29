@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "kind": "errspec/observation",
+  "runId": "fixture-run",
+  "contractId": "checkout\"日本語",
+  "scenarioId": "retry/一",
+  "tag": "Offline",
+  "file": "scenario.test.ts",
+  "testName": "errspec [\"checkout\\\"日本語\",\"retry/一\"]",
+  "state": "passed",
+  "faults": [{ "id": "gateway", "calls": 2, "completed": 2 }],
+  "assertions": [{ "id": "status", "status": "passed" }]
+}

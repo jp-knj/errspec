@@ -1,6 +1,6 @@
 //! Isolate unpublished tsrs APIs. No native handles escape into reports.
 //! Compiler arena allocations live until this one-shot CLI process exits.
-use errspec::model::{Config, Finding, Source};
+use errspec::model::{Finding, Source};
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 use tsrs_ast::SymbolFlags;
 use tsrs_checker::{Checker, LiteralValue, Type, TypeFlags};
@@ -35,11 +35,11 @@ fn diagnostic(d: P<tsrs_ast::Diagnostic>) -> Finding {
 }
 
 impl TsrsAdapter {
-    pub fn open(root: &Path, config: &Config) -> Result<Self, Vec<Finding>> {
-        let project = root.join(&config.project).canonicalize().map_err(|e| {
+    pub fn open(root: &Path, project: &str) -> Result<Self, Vec<Finding>> {
+        let project = root.join(project).canonicalize().map_err(|e| {
             vec![Finding::new(
                 "EC_CONFIG",
-                format!("Cannot open project {}: {e}", config.project),
+                format!("Cannot open project {project}: {e}"),
             )]
         })?;
         let cwd = root.to_string_lossy().into_owned();

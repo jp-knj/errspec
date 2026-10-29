@@ -85,7 +85,8 @@ pub(crate) fn verify(
         }
     };
     evidence::apply(report, root, result, output.status.success());
-    let records = observation::read(&observations, &run_id)?;
-    observation::apply(report, root, &records);
+    let run = observation::RunContext::new(run_id);
+    let records = observation::read(&observations, &run)?;
+    observation::apply(report, root, &run, &records)?;
     Ok(())
 }
