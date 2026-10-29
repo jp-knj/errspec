@@ -1,7 +1,8 @@
 use crate::{
-    Action, Cli,
     input::{existing_tests, read_json},
-    runner, tsrs_adapter,
+    onboard,
+    request::{ContractAction, ContractRequest, Request},
+    runner, scan, tsrs_adapter,
 };
 use errspec::{config::ValidatedConfig, contract, model::*, report::ReportData, snapshot};
 use std::{
@@ -9,14 +10,14 @@ use std::{
     io::{self, Write},
 };
 
-fn run(cli: &Cli, mode: &str) -> Result<Report, Finding> {
-    if cli.strict_baseline && matches!(cli.command, Action::Snapshot { .. }) {
+fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
+    if request.strict_baseline && matches!(request.command, ContractAction::Snapshot { .. }) {
         return Err(Finding::new(
             "EC_CONFIG",
             "--strict-baseline is supported only by check and verify",
         ));
     }
-    let path = cli
+    let path = request
         .config
         .canonicalize()
         .map_err(|e| Finding::new("EC_CONFIG", e.to_string()))?;
@@ -25,7 +26,7 @@ fn run(cli: &Cli, mode: &str) -> Result<Report, Finding> {
         .ok_or_else(|| Finding::new("EC_CONFIG", "Config has no parent directory"))?;
     let config: Config = read_json(&path, "EC_CONFIG")?;
     let config = ValidatedConfig::try_from(config)?;
-    if cli.strict_baseline && config.schema_version() != 2 {
+    if request.strict_baseline && config.schema_version() != 2 {
         return Err(Finding::new(
             "EC_CONFIG",
             "--strict-baseline requires schemaVersion: 2 configuration",
@@ -60,9 +61,9 @@ fn run(cli: &Cli, mode: &str) -> Result<Report, Finding> {
         if !data.analysis_complete {
             return Ok(());
         }
-        if let Some(baseline) = &cli.baseline {
+        if let Some(baseline) = &request.baseline {
             let previous: Snapshot = read_json(baseline, "EC_BASELINE")?;
-            if cli.strict_baseline
+            if request.strict_baseline
                 && (previous.schema_version != 2
                     || previous.contracts.values().any(|c| c.scenarios.is_none()))
             {
@@ -89,7 +90,7 @@ fn run(cli: &Cli, mode: &str) -> Result<Report, Finding> {
                     data.diagnostics.push(finding);
                 }
             }
-            if cli.strict_baseline {
+            if request.strict_baseline {
                 for (id, scenarios) in &delta.changed_scenarios {
                     for scenario in scenarios {
                         let mut finding = Finding::new(
@@ -104,10 +105,9 @@ fn run(cli: &Cli, mode: &str) -> Result<Report, Finding> {
             }
             data.delta = Some(delta);
         }
-        match &cli.command {
-            Action::Scan { .. } | Action::Init { .. } => unreachable!("separate report"),
-            Action::Check => (),
-            Action::Verify {
+        match &request.command {
+            ContractAction::Check => (),
+            ContractAction::Verify {
                 runner,
                 vitest,
                 bun,
@@ -145,7 +145,7 @@ fn run(cli: &Cli, mode: &str) -> Result<Report, Finding> {
                 data.observations = Some(observations);
                 data.diagnostics.extend(findings);
             }
-            Action::Snapshot { out } => {
+            ContractAction::Snapshot { out } => {
                 // A snapshot inventories declared tags; registration gaps remain in the report.
                 let data = serde_json::to_vec_pretty(&snapshot::capture(&data.registrations))
                     .map_err(|e| Finding::new("EC_SNAPSHOT", e.to_string()))?;
@@ -166,34 +166,85 @@ fn run(cli: &Cli, mode: &str) -> Result<Report, Finding> {
     Ok(data.finish(mode))
 }
 
-pub(crate) fn execute(cli: Cli) -> Report {
-    let mode = match cli.command {
-        Action::Scan { .. } | Action::Init { .. } => unreachable!("separate report"),
-        Action::Check => "check",
-        Action::Verify { .. } => "verify",
-        Action::Snapshot { .. } => "snapshot",
-    };
-    // Deep compiler traversals need more stack than the platform default.
-    let worker = std::thread::Builder::new()
-        .name("errspec".into())
-        .stack_size(32 * 1024 * 1024)
-        .spawn(move || {
-            run(&cli, mode).unwrap_or_else(|finding| {
-                let mut data = ReportData::default();
-                data.fail(finding);
-                data.finish(mode)
+/// Results crossing the execution/output boundary contain no compiler handles.
+pub(crate) enum Outcome {
+    Contract(Report),
+    Scan {
+        report: errspec::discovery::ScanReport,
+        fail_on_unknown: bool,
+    },
+    Init(Result<onboard::InitReport, String>),
+}
+
+pub(crate) fn execute(request: Request) -> Outcome {
+    match request {
+        Request::Contract(request) => {
+            let mode = request.command.mode();
+            let report = worker(Some("errspec"), move || {
+                run(&request, mode).unwrap_or_else(|finding| failed_report(mode, finding))
             })
-        });
-    match worker.and_then(|t| {
-        t.join()
-            .map_err(|_| io::Error::other("tsrs analysis panicked"))
-    }) {
-        Ok(report) => report,
-        Err(error) => {
-            let mut r = Report::new(mode);
-            r.diagnostics
-                .push(Finding::new("EC_INTERNAL", error.to_string()));
-            r
+            .unwrap_or_else(|error| {
+                let message = match error {
+                    WorkerError::Spawn(error) => error.to_string(),
+                    WorkerError::Panicked => "tsrs analysis panicked".into(),
+                };
+                failed_report(mode, Finding::new("EC_INTERNAL", message))
+            });
+            Outcome::Contract(report)
+        }
+        Request::Scan(request) => {
+            let fail_on_unknown = request.fail_on_unknown;
+            let report = worker(None, move || {
+                scan::run(&request.project, &request.discriminants)
+            })
+            .unwrap_or_else(|_| {
+                let mut report = errspec::discovery::ScanReport::default();
+                report
+                    .diagnostics
+                    .push(Finding::new("EC_INTERNAL", "Scan worker failed"));
+                report
+            });
+            Outcome::Scan {
+                report,
+                fail_on_unknown,
+            }
+        }
+        Request::Init(request) => {
+            let result = worker(None, move || onboard::run(request))
+                .map_err(|error| match error {
+                    WorkerError::Spawn(error) => error.to_string(),
+                    WorkerError::Panicked => "Init worker failed".into(),
+                })
+                .and_then(|result| result);
+            Outcome::Init(result)
         }
     }
+}
+
+fn failed_report(mode: &str, finding: Finding) -> Report {
+    let mut data = ReportData::default();
+    data.fail(finding);
+    data.finish(mode)
+}
+
+enum WorkerError {
+    Spawn(io::Error),
+    Panicked,
+}
+
+fn worker<T: Send + 'static>(
+    name: Option<&str>,
+    task: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, WorkerError> {
+    // Deep compiler traversals need more stack than the platform default.
+    // All compiler work and arena handles stay inside this one-shot worker.
+    let mut builder = std::thread::Builder::new().stack_size(32 * 1024 * 1024);
+    if let Some(name) = name {
+        builder = builder.name(name.to_owned());
+    }
+    builder
+        .spawn(task)
+        .map_err(WorkerError::Spawn)?
+        .join()
+        .map_err(|_| WorkerError::Panicked)
 }

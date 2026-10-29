@@ -1,21 +1,26 @@
-use crate::{Runner, tsrs_adapter::TsrsAdapter};
+use crate::{
+    request::{InitRequest, Runner},
+    tsrs_adapter::TsrsAdapter,
+};
 use errspec::model::Source;
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::json;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
 };
 
-pub(crate) struct InitRequest {
-    pub project: PathBuf,
-    pub source: String,
-    pub export: String,
-    pub discriminant: String,
-    pub runner: Runner,
-    pub test: PathBuf,
-    pub config: PathBuf,
-    pub contract: Option<String>,
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InitReport {
+    kind: &'static str,
+    schema_version: u32,
+    pub files: [PathBuf; 2],
+    tags: Vec<String>,
+    tests_executed: bool,
+    ready: bool,
+    next_steps: [&'static str; 3],
 }
 
 fn relative(base: &Path, path: &Path) -> String {
@@ -48,7 +53,7 @@ fn output_path(path: &Path) -> Result<PathBuf, String> {
     Ok(parent.join(name))
 }
 
-pub(crate) fn run(request: InitRequest) -> Result<Value, String> {
+pub(crate) fn run(request: InitRequest) -> Result<InitReport, String> {
     let project = request.project.canonicalize().map_err(|e| e.to_string())?;
     let root = project.parent().ok_or("Project needs a parent")?;
     let config_path = output_path(&request.config)?;
@@ -110,11 +115,19 @@ pub(crate) fn run(request: InitRequest) -> Result<Value, String> {
     }
     let data = serde_json::to_vec_pretty(&config).map_err(|e| e.to_string())?;
     write_pair(&config_path, &data, &test_path, test.as_bytes())?;
-    Ok(
-        json!({"kind":"errspec/init","schemaVersion":1,"files":[config_path,test_path],
-        "tags":tags,"testsExecuted":false,"ready":false,
-        "nextSteps":["Install @errspec/testkit and your selected test runner.","Replace the failing TODOs with application calls and required comparisons.","Run errspec verify; keep a reviewed baseline for subsequent changes."]}),
-    )
+    Ok(InitReport {
+        kind: "errspec/init",
+        schema_version: 1,
+        files: [config_path, test_path],
+        tags,
+        tests_executed: false,
+        ready: false,
+        next_steps: [
+            "Install @errspec/testkit and your selected test runner.",
+            "Replace the failing TODOs with application calls and required comparisons.",
+            "Run errspec verify; keep a reviewed baseline for subsequent changes.",
+        ],
+    })
 }
 
 fn write_pair(
