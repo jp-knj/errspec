@@ -184,6 +184,27 @@ export function caller() { overload(''); }
 }
 
 #[test]
+fn unknown_expressions_keep_only_the_start_of_long_calls() {
+    let body: String = (0..50).map(|i| format!("  const v{i} = {i};\n")).collect();
+    let dir = project(&[(
+        "callbacks.ts",
+        &format!(
+            "export function run(f: (g: () => void) => void) {{\n  f(() => {{\n{body}  }});\n  f(() => {{}});\n}}\n"
+        ),
+    )]);
+    let (status, r) = scan(&dir, &[]);
+    assert_eq!(status, 0, "{r}");
+    let expressions: Vec<&str> = r["unknowns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|u| u["expression"].as_str().unwrap())
+        .collect();
+    assert!(expressions.contains(&"f(() => {…"), "{expressions:?}");
+    assert!(expressions.contains(&"f(() => {})"), "{expressions:?}");
+}
+
+#[test]
 fn matching_signatures_do_not_prove_runtime_call_targets() {
     let dir = project(&[(
         "bindings.ts",
