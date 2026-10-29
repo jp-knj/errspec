@@ -2,6 +2,7 @@
 pub mod bun;
 pub mod config;
 pub mod contract;
+pub mod coverage;
 pub mod discovery;
 pub mod evidence;
 pub mod model;

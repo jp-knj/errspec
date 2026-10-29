@@ -1,4 +1,5 @@
 use crate::{
+    coverage_runner,
     input::{existing_tests, read_json},
     onboard,
     request::{ContractAction, ContractRequest, Request},
@@ -176,6 +177,10 @@ pub(crate) enum Outcome {
         fail_on_unknown: bool,
     },
     Init(Result<onboard::InitReport, String>),
+    Coverage {
+        report: errspec::coverage::CoverageReport,
+        fail_on_missing: bool,
+    },
 }
 
 pub(crate) fn execute(request: Request) -> Outcome {
@@ -209,6 +214,21 @@ pub(crate) fn execute(request: Request) -> Outcome {
             Outcome::Scan {
                 report,
                 fail_on_unknown,
+            }
+        }
+        Request::Coverage(request) => {
+            let fail_on_missing = request.fail_on_missing;
+            let report =
+                worker(None, move || coverage_runner::run(&request)).unwrap_or_else(|_| {
+                    let mut report = errspec::coverage::CoverageReport::default();
+                    report
+                        .diagnostics
+                        .push(Finding::new("EC_INTERNAL", "Coverage worker failed"));
+                    report
+                });
+            Outcome::Coverage {
+                report,
+                fail_on_missing,
             }
         }
         Request::Init(request) => {

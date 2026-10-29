@@ -38,6 +38,27 @@ Vitest版も同じ仕組みです。
   --config examples/scenarios-vitest/errspec.json --format json
 ```
 
+## 既存テストで確かめる
+
+テストを書き換えずに、どのエラーが確かめられていないかを調べられます。設定ファイルも`scenarioTest`も不要です。
+
+```sh
+errspec coverage --project tsconfig.json
+errspec coverage --project apps/api/tsconfig.json -- --project api   # vitest runへ引数を渡す
+```
+
+`scan`で見つけた有限タグ型ごとに、タグを3つに分けて示します。
+
+| 状態 | 意味 |
+|---|---|
+| `asserted` | 成功したアサーション（`toEqual`、`toMatchObject`、`toBe`など）が、そのタグを持つ値を受け取った |
+| `mentioned` | テストファイルにタグが書かれているが、値として確かめていない（モックの入力だけなど） |
+| `missing` | どのテストにも現れない |
+
+最も近い`vitest.config.*`と`node_modules/.bin/vitest`を親ディレクトリへ探します。利用者の設定とテストは変更せず、一時設定で記録用のsetup fileを追加して実行します。
+`--fail-on-missing`で`missing`があれば終了コード1にします。現在はVitestだけに対応します。
+障害が本当に呼ばれたか、必須の比較がそろっているかまで保証したい箇所は、次の`scenarioTest`と`verify`を使います。
+
 ## 設定とテスト
 
 既存プロジェクトで一つの型から始める場合:

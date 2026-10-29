@@ -1,5 +1,6 @@
 mod app;
 mod cli;
+mod coverage_runner;
 mod input;
 mod onboard;
 mod output;
