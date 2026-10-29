@@ -2,12 +2,18 @@
 
 Bun testとVitestで、失敗シナリオの観測をRust CLIへ渡す小さなESMパッケージです。
 実装は通常のJavaScriptで、型定義はindex.d.mtsです。実行時の外部依存はありません。
+同じ実装をTypeScriptで書いた`index.ts`も同梱しています。パッケージの入口は`index.mjs`のままです。
 Node.jsの標準モジュールを使うため、ブラウザ内テストは対象外です。
 
 このリポジトリでは相対パスでimportしています。別のプロジェクトではこのディレクトリをコピーし、ローカル依存として追加できます。
 例えばプロジェクト直下の`vendor/errspec-testkit`へ置いた場合、package.jsonに
 `"devDependencies": { "@errspec/testkit": "file:./vendor/errspec-testkit" }`
 を追加し、利用中のパッケージマネージャーでインストールします。公開済みnpmパッケージを指す指定ではありません。
+
+JavaScriptのファイルを置けないプロジェクトや、依存を追加せずテストの隣に置きたい場合は、`index.ts`だけを複製できます。
+このファイル1つで型定義も含みます。テストからは`import { scenarioTest } from "./errspec-testkit"`のように読み込みます。
+strictな型検査とBun/Vitestでそのまま動きます。`node:`モジュールの型には`@types/node`または`@types/bun`が必要です。
+`index.ts`と`index.mjs`は同じテストを両方に対して実行し、挙動の一致を確認しています。複製した後に手で編集すると、上流の版との対応が分からなくなるため、取得元のcommitを記録してください。
 
 ```ts
 import { test } from "bun:test"; // または vitest

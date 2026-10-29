@@ -29,6 +29,50 @@ export type ErrorType = {_tag:'A'};
     assert_eq!(status, 0, "{report}");
 }
 
+/// Minimal declarations for the Node APIs the TypeScript testkit imports; the repository has no @types/node.
+const NODE_STUB: &str = r#"
+declare module "node:assert/strict" { export function deepStrictEqual(actual: unknown, expected: unknown): void; }
+declare module "node:crypto" { export function randomUUID(): string; }
+declare module "node:fs" {
+  export function writeFileSync(path: string, data: string, options: { flag: string }): void;
+  export function renameSync(from: string, to: string): void;
+}
+declare module "node:path" { export function join(...parts: string[]): string; }
+declare module "node:url" { export function fileURLToPath(url: string | URL): string; }
+declare var process: { env: Record<string, string | undefined> };
+"#;
+
+#[test]
+fn typescript_testkit_type_checks_strictly_with_the_public_types() {
+    for (extra, expected) in [("", 0), ("\nconst broken: number = 'x';\n", 2)] {
+        let dir = fixture(
+            r#"
+/// <reference path="./sdk/node.d.ts" />
+import { scenarioTest, type ScenarioScope } from './sdk/index';
+declare const s: ScenarioScope;
+const fail = s.fault('gateway', async (code: number) => ({ code }));
+const result: Promise<{code:number}> = fail(429);
+// @ts-expect-error argument type must survive the wrapper
+fail('429');
+// @ts-expect-error mismatched comparison type must be rejected
+s.check('status', 429, '429');
+scenarioTest((_name, body) => body(), 'file:///a.test.ts', { contract: 'c', id: 'i', tag: 'A', withoutFaults: true, description: 'd' }, (scope) => scope.check('n', 1, 1));
+export type ErrorType = {_tag:'A'};
+"#,
+            &["A"],
+        );
+        fs::create_dir(dir.path().join("sdk")).unwrap();
+        fs::write(dir.path().join("sdk/node.d.ts"), NODE_STUB).unwrap();
+        fs::write(
+            dir.path().join("sdk/index.ts"),
+            format!("{}{extra}", include_str!("../packages/testkit/index.ts")),
+        )
+        .unwrap();
+        let (status, report) = run(&dir, &["check"]);
+        assert_eq!(status, expected, "{report}");
+    }
+}
+
 fn fixture(source: &str, cases: &[&str]) -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("errors.ts"), source).unwrap();

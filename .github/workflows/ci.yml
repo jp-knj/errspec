@@ -25,6 +25,9 @@ jobs:
       - run: node scripts/demo.mjs
       - run: node scripts/demo-bun.mjs
       - run: node --test tests/testkit.test.mjs
+      - run: node --test tests/testkit.test.mjs
+        env:
+          TESTKIT_ENTRY: ../packages/testkit/index.ts
       - run: node --test tests/package.test.mjs
       - run: node scripts/demo-scenarios.mjs
       - run: node scripts/demo-init.mjs
