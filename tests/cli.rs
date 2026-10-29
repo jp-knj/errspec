@@ -192,6 +192,31 @@ fn text_output_locates_diagnostics_without_a_case() {
 }
 
 #[test]
+fn files_outside_root_dir_do_not_block_analysis() {
+    let dir = fixture(
+        "import type { Shared } from './shared/types';\nexport type ErrorType = Shared;",
+        &["A"],
+    );
+    fs::create_dir(dir.path().join("shared")).unwrap();
+    fs::write(
+        dir.path().join("shared/types.ts"),
+        "export type Shared = {_tag:'A'};",
+    )
+    .unwrap();
+    fs::create_dir(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("tsconfig.json"), r#"{"compilerOptions":{"strict":true,"skipLibCheck":true,"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","rootDir":"./src","outDir":"./dist"},"files":["errors.ts"]}"#).unwrap();
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 0, "{report}");
+    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+        .current_dir(dir.path())
+        .args(["scan", "--format", "json"])
+        .output()
+        .unwrap();
+    let scan: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(scan["scanComplete"], true, "{scan}");
+}
+
+#[test]
 fn missing_test_file_and_removed_case_fail() {
     let dir = fixture("export type ErrorType = {_tag:'A'};", &["A", "B"]);
     fs::remove_file(dir.path().join("test.ts")).unwrap();

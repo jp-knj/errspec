@@ -80,6 +80,8 @@ impl TsrsAdapter {
         errors.extend(program.get_syntactic_diagnostics(&context, None));
         errors.extend(program.get_global_diagnostics(&context));
         errors.extend(program.get_semantic_diagnostics(&context, None));
+        // TS6059 only constrains emitted paths, and errspec never emits.
+        errors.retain(|d| d.code() != 6059);
         if !errors.is_empty() {
             return Err(errors.into_iter().map(diagnostic).collect());
         }
