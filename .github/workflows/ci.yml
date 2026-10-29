@@ -29,6 +29,7 @@ jobs:
         env:
           TESTKIT_ENTRY: ../packages/testkit/index.ts
       - run: node --test tests/package.test.mjs
+      - run: node --test tests/vitest-recorder.test.mjs
       - run: node scripts/demo-scenarios.mjs
       - run: node scripts/demo-init.mjs
       - run: node scripts/demo-module-mock.mjs
