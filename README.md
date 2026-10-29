@@ -219,7 +219,7 @@ node scripts/demo-scenarios.mjs
 
 最後のスクリプトは実際のBun/Vitestを起動し、一時コピーだけに変更を加えます。
 必要なら`node scripts/demo-scenarios.mjs /path/to/errspec /path/to/bun`で実行ファイルを指定できます。
-受け入れ結果は`artifacts/acceptance*.json`に保存します。GitHub Actionsの設定も含みますが、リモートCIは未実行です。
+受け入れ結果は`artifacts/acceptance*.json`に保存します。GitHub Actionsでも同じ検証を実行します。
 設計の詳細は[DESIGN.md](DESIGN.md)を参照してください。
 
 ## 着想と関連プロジェクト

@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const binary = resolve(process.argv[2] ?? join(project, "target/debug/errspec"));
-const bun = process.argv[3] ? resolve(process.argv[3]) : "bun";
+const bun = process.argv[3] ? resolve(process.argv[3]) : null;
 assert(existsSync(binary), "Run cargo build first");
 const base = mkdtempSync(join(tmpdir(), "errspec-scenarios-"));
 const all = [];
@@ -19,7 +19,7 @@ try {
     const work = join(base, "examples", `scenarios-${runner}`);
     cpSync(join(project, "examples", `scenarios-${runner}`), work, { recursive: true, filter: p => !p.split("/").includes("node_modules") });
     if (runner === "vitest") symlinkSync(join(project, "examples/checkout/node_modules"), join(work, "node_modules"), "dir");
-    const verify = ["verify", "--runner", runner, ...(runner === "bun" ? ["--bun", bun] : [])];
+    const verify = ["verify", "--runner", runner, ...(runner === "bun" && bun ? ["--bun", bun] : [])];
     const file = join(work, "tests/checkout.test.ts");
     const source = join(work, "src/checkout.ts");
     const configPath = join(work, "errspec.json");
