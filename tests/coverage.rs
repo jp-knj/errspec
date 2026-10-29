@@ -17,6 +17,7 @@ fn candidate(file: &str, export: &str, tags: &[&str]) -> ErrorType {
             discriminant: "_tag".into(),
         },
         tags: tags.iter().map(|t| (*t).into()).collect(),
+        flows: vec![],
     }
 }
 
@@ -203,6 +204,7 @@ fn markdown_is_rejected_outside_coverage() {
 fn types(tags: &[(&str, TagStatus)]) -> Vec<TypeCoverage> {
     vec![TypeCoverage {
         source: candidate("errors.ts", "Failure", &[]).source,
+        flows: vec![],
         tags: tags
             .iter()
             .map(|(tag, status)| TagCoverage {

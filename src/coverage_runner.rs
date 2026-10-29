@@ -111,12 +111,15 @@ pub(crate) fn run(request: &CoverageRequest) -> CoverageReport {
         report.diagnostics = scanned.diagnostics;
         return report;
     }
-    let types: Vec<ErrorType> = scanned
-        .candidates
+    let (external, local): (Vec<_>, Vec<_>) =
+        scanned.candidates.into_iter().partition(|c| c.external);
+    report.skipped_external = external.len();
+    let types: Vec<ErrorType> = local
         .into_iter()
         .map(|c| ErrorType {
             source: c.source,
             tags: c.tags,
+            flows: c.flows,
         })
         .collect();
     if let Err(finding) = execute(request, &types, &mut report) {

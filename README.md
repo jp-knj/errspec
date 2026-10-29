@@ -55,6 +55,7 @@ errspec coverage --project apps/api/tsconfig.json -- --project api   # vitest ru
 | `mentioned` | テストファイルにタグが書かれているが、値として確かめていない（モックの入力だけなど） |
 | `missing` | どのテストにも現れない |
 
+依存パッケージで宣言された型だけでできた候補（scanの`external`）は対象から外し、外した数を示します。関数から返す・throwする流れが見つからない型には、その旨を添えます。
 最も近い`vitest.config.*`と`node_modules/.bin/vitest`を親ディレクトリへ探します。利用者の設定とテストは変更せず、一時設定で記録用のsetup fileを追加して実行します。
 `--fail-on-missing`で`missing`があれば終了コード1にします。現在はVitestだけに対応します。
 既存の漏れを認めたまま後退だけを止めるには、`--save-baseline coverage-baseline.json`で現在の状態を保存し、CIで`--baseline coverage-baseline.json`を付けて実行します。確認が弱くなったタグと、新しく現れた`missing`のタグがあれば終了コード1になります。
