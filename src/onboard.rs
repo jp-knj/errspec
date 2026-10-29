@@ -1,10 +1,6 @@
-use crate::{
-    request::{InitRequest, Runner},
-    tsrs_adapter::TsrsAdapter,
-};
+use crate::{request::InitRequest, scaffold, tsrs_adapter::TsrsAdapter};
 use errspec::model::Source;
 use serde::Serialize;
-use serde_json::json;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
@@ -91,30 +87,23 @@ pub(crate) fn run(request: InitRequest) -> Result<InitReport, String> {
         return Err("Selected type has no error tags".into());
     }
     let config_root = config_path.parent().unwrap();
-    let cases: Vec<_>=tags.iter().enumerate().map(|(i,tag)|json!({
-        "id":format!("case-{}",i+1), "tag":tag, "expect":format!("TODO: define the required behavior for {tag}"),
-        "test":{"file":relative(config_root,&test_path)},
-        "observe":{"faults":["dependency"],"assertions":["behavior"]}
-    })).collect();
-    let config = json!({"schemaVersion":2,"project":relative(config_root,&project),"contracts":[{
-        "id":contract,"source":{"file":relative(config_root,&source_path),"export":source.export,"discriminant":source.discriminant},
-        "boundaries":[],"cases":cases
-    }]});
-    let runner = match request.runner {
-        Runner::Bun => "bun:test",
-        Runner::Vitest => "vitest",
-    };
-    let mut test = format!(
-        "import {{ test }} from {runner:?};\nimport {{ scenarioTest }} from \"@errspec/testkit\";\n\n// Replace each TODO with an application call through s.fault(\"dependency\", fn),\n// then compare its observable behavior with s.check(\"behavior\", actual, expected).\n// The generated tests intentionally fail until real behavior is specified.\n"
-    );
-    for (i, tag) in tags.iter().enumerate() {
-        let identity = json!({"contract":contract,"id":format!("case-{}",i+1),"tag":tag});
-        let message =
-            serde_json::to_string(&format!("TODO: implement the {tag} failure scenario")).unwrap();
-        test.push_str(&format!("\nscenarioTest(test, import.meta.url, {identity}, async (_s) => {{\n  throw new Error({message});\n}});\n"));
-    }
-    let data = serde_json::to_vec_pretty(&config).map_err(|e| e.to_string())?;
-    write_pair(&config_path, &data, &test_path, test.as_bytes())?;
+    let files = scaffold::render(
+        &relative(config_root, &project),
+        &Source {
+            file: relative(config_root, &source_path),
+            ..source
+        },
+        &relative(config_root, &test_path),
+        &contract,
+        request.runner,
+        &tags,
+    )?;
+    write_pair(
+        &config_path,
+        &files.config,
+        &test_path,
+        files.test.as_bytes(),
+    )?;
     Ok(InitReport {
         kind: "errspec/init",
         schema_version: 1,
