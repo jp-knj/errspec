@@ -225,6 +225,10 @@ import、再export、paths、具体化したgeneric、union/intersectionをtsrs�
 `any`、`unknown`、広いstring、optionalな識別子は解析不能として報告します。`never`は0件です。
 型エラーや`noCheck: true`を無視して合格にはしません。
 
+型検査はTypeScript 7の動作に合わせたtsrsで行います。TypeScript 5.xの`tsc`で通るtsconfigでも、TypeScript 7で変わった既定値や廃止された設定で失敗することがあります。
+たとえば`outDir`があり`rootDir`を省略した設定では、`rootDir`がtsconfigのディレクトリになり、ワークスペースの別パッケージのソースを参照すると`TS6059`になります。
+`moduleResolution: node10`は`TS5108`になります。tsconfigに`rootDir`などを明示するか、それを補うtsconfigを`project`に指定してください。
+
 ## CLIと診断
 
 `scan`は検証とは独立した`errspec/scan` schemaVersion 1を返します。import/reexport、別名参照、オーバーロード、関数・arrow・メソッド、再帰、await/return、ローカル変数に保持したPromiseの使用とcatch境界を解析します。
