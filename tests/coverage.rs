@@ -1,14 +1,13 @@
 use errspec::{
-    coverage::{AssertionRecord, TagStatus, judge},
-    discovery::Candidate,
+    coverage::{AssertionRecord, ErrorType, TagStatus, judge},
     model::Source,
 };
 use serde_json::{Value, json};
 use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 use tempfile::TempDir;
 
-fn candidate(file: &str, export: &str, tags: &[&str]) -> Candidate {
-    Candidate {
+fn candidate(file: &str, export: &str, tags: &[&str]) -> ErrorType {
+    ErrorType {
         source: Source {
             file: file.into(),
             export: export.into(),
