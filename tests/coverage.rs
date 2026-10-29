@@ -1,17 +1,16 @@
 use errspec::{
     coverage::{
-        AssertionRecord, CoverageDelta, TagChange, TagCoverage, TagRef, TagStatus, TypeCoverage,
-        capture, compare, judge,
+        AssertionRecord, CoverageDelta, ErrorType, TagChange, TagCoverage, TagRef, TagStatus,
+        TypeCoverage, capture, compare, judge,
     },
-    discovery::Candidate,
     model::Source,
 };
 use serde_json::{Value, json};
 use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 use tempfile::TempDir;
 
-fn candidate(file: &str, export: &str, tags: &[&str]) -> Candidate {
-    Candidate {
+fn candidate(file: &str, export: &str, tags: &[&str]) -> ErrorType {
+    ErrorType {
         source: Source {
             file: file.into(),
             export: export.into(),

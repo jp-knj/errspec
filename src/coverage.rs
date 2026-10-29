@@ -1,8 +1,15 @@
 //! Judge which error tags existing tests assert, from recorded assertion values.
 //! Pure: callers supply candidates, records and test sources; nothing here reads files.
-use crate::{discovery::Candidate, model::Finding, model::Source};
+use crate::{model::Finding, model::Source};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A type to judge. Kept apart from scan candidates so their reporting fields can grow.
+#[derive(Clone, Debug)]
+pub struct ErrorType {
+    pub source: Source,
+    pub tags: Vec<String>,
+}
 
 /// One passing, non-negated assertion written by the Vitest recorder.
 #[derive(Debug, Deserialize)]
@@ -107,7 +114,7 @@ impl Default for CoverageReport {
 const SHOWN_TESTS: usize = 3;
 
 /// Re-exports list the same declaration under several files; judge each tag set once.
-fn distinct(candidates: &[Candidate]) -> Vec<&Candidate> {
+fn distinct(candidates: &[ErrorType]) -> Vec<&ErrorType> {
     let mut seen = BTreeSet::new();
     candidates
         .iter()
@@ -122,7 +129,7 @@ fn quoted(source: &str, tag: &str) -> bool {
 }
 
 pub fn judge(
-    candidates: &[Candidate],
+    candidates: &[ErrorType],
     records: &[AssertionRecord],
     test_sources: &[String],
 ) -> (Vec<TypeCoverage>, Summary) {
