@@ -44,6 +44,18 @@ try {
     assert.equal(cases(green).length, 3);
     assert(cases(green).every(c => c.observationStatus === "passed" && c.testStatus === "passed"));
     assert.equal(cases(green).find(c => c.id === "rate-limit-retries").observedFaults[0].calls, 3);
+    const unrelated = join(work, "tests/unrelated.test.ts");
+    writeFileSync(unrelated, `import { test } from ${JSON.stringify(runner === "bun" ? "bun:test" : "vitest")}; test('unrelated', () => { throw new Error('unrelated failure'); });`);
+    run("registered files can be selected", 0, [...verify, "--only-contract-tests"]);
+    has(run("default execution still includes unrelated failures"), "EC006");
+    rmSync(unrelated);
+    const emptyConfig = JSON.parse(originalConfig);
+    emptyConfig.contracts.forEach(c => { c.cases = []; });
+    writeFileSync(configPath, JSON.stringify(emptyConfig));
+    const emptySelection = run("empty selection does not run the whole suite", 2, [...verify, "--only-contract-tests"]);
+    has(emptySelection, "EC_CONFIG");
+    assert.equal(emptySelection.testsExecuted, false);
+    reset();
     assert(cases(run("check does not imply observed", 0, ["check"])).every(c => c.observationStatus === "not_run"));
     run("snapshot includes scenario inventory", 0, ["snapshot", "--out", "baseline.json"]);
     const fewer = JSON.parse(originalConfig);
@@ -52,6 +64,23 @@ try {
     const removed = run("removing a scenario while keeping its tag", 1, ["check", "--baseline", "baseline.json"]);
     has(removed, "EC013");
     assert.deepEqual(removed.delta.removedScenarios["checkout.payment"], ["rate-limit-retries"]);
+    reset();
+
+    const baselineVerify = [...verify, "--baseline", "baseline.json"];
+    const strictVerify = [...baselineVerify, "--strict-baseline"];
+    run("unchanged strict baseline", 0, strictVerify);
+    const weaker = JSON.parse(originalConfig);
+    weaker.contracts[0].cases.forEach(c => {
+      c.observe.assertions = c.observe.assertions.filter(id => id !== "orders");
+    });
+    writeFileSync(configPath, JSON.stringify(weaker));
+    writeFileSync(file, original.replaceAll('s.check("orders", orders, 0);', '/* check removed together with its requirement */'));
+    const defaultChanged = run("changed requirements remain allowed by default", 0, baselineVerify);
+    const strictChanged = run("strict baseline rejects weakened requirements despite passing tests", 1, strictVerify);
+    has(strictChanged, "EC014");
+    assert.deepEqual(strictChanged.delta, defaultChanged.delta);
+    assert.equal(strictChanged.diagnostics.filter(d => d.code === "EC014").length, 3);
+    assert(cases(strictChanged).every(c => c.testStatus === "passed" && c.observationStatus === "passed"));
     reset();
 
     writeFileSync(file, original.replaceAll('s.check("orders", orders, 0);', '/* assertion accidentally removed */'));

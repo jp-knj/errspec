@@ -15,6 +15,7 @@ serde_json = "1"
 tempfile = "3"
 roxmltree = "0.21.2"
 tsrs_ast = { git = "https://github.com/oxc-project/tsrs", rev = "1bfd1e65be95131f9242a03687d37006214a96f6" }
+tsrs_scanner = { git = "https://github.com/oxc-project/tsrs", rev = "1bfd1e65be95131f9242a03687d37006214a96f6" }
 tsrs_checker = { git = "https://github.com/oxc-project/tsrs", rev = "1bfd1e65be95131f9242a03687d37006214a96f6" }
 tsrs_compiler = { git = "https://github.com/oxc-project/tsrs", rev = "1bfd1e65be95131f9242a03687d37006214a96f6" }
 tsrs_core = { git = "https://github.com/oxc-project/tsrs", rev = "1bfd1e65be95131f9242a03687d37006214a96f6" }
@@ -25,5 +26,7 @@ tsrs_vfs = { git = "https://github.com/oxc-project/tsrs", rev = "1bfd1e65be95131
 debug = false
 
 [profile.release]
-lto = "thin"
+# Rust 1.99.1 thin LTO produced unresolved std/anonymous symbols in the release link.
+# Keep normal release optimization; verify the packed binary on each build host.
+lto = false
 strip = true

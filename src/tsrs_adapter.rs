@@ -23,8 +23,8 @@ impl ParseConfigHost for ConfigHost {
 }
 
 pub struct TsrsAdapter {
-    program: &'static Program,
-    context: Context,
+    pub(crate) program: &'static Program,
+    pub(crate) context: Context,
 }
 
 fn diagnostic(d: P<tsrs_ast::Diagnostic>) -> Finding {
@@ -116,7 +116,7 @@ impl TsrsAdapter {
     }
 }
 
-fn collect_tags(
+pub(crate) fn collect_tags(
     checker: &mut Checker,
     ty: P<Type>,
     key: &str,

@@ -9,7 +9,12 @@
 2. [Requirements](products/errspec/features/failure-verification/requirements.md): 利用者から見える振る舞いと受け入れ条件。
 3. [Design](products/errspec/features/failure-verification/design.md): その条件を実現する仕組みと判断理由。
 
-現在はDesignに実装・リファクタリング方針の案を追加しています。CLIの責任分離、検証済み入力の型、判定とレポートの分離の順で進め、既存の入出力と合否を維持する提案です。
+追加機能:
+
+- [エラー発見・伝播のRequirements](products/errspec/features/discovery/requirements.md) / [Design](products/errspec/features/discovery/design.md)
+- [配布・初期生成のRequirements](products/errspec/features/distribution/requirements.md) / [Design](products/errspec/features/distribution/design.md)
+
+CLIの責任分離は実装済みです。検証済み入力の型と判定・レポートの分離は、既存の入出力と合否を保つ次の改善としてDesignへ残しています。
 機能追加や出力の意味の変更は、別の要件として判断します。
 
 [仕様を共有する進め方](engineering/guidelines/specification-workflow.md)に従って更新します。

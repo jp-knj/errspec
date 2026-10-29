@@ -13,6 +13,7 @@ pub(crate) fn verify(
     runner: Runner,
     vitest: Option<&Path>,
     bun: Option<&Path>,
+    test_files: &[PathBuf],
 ) -> Result<(), Finding> {
     if matches!(runner, Runner::Bun) && vitest.is_some()
         || matches!(runner, Runner::Vitest) && bun.is_some()
@@ -67,6 +68,7 @@ pub(crate) fn verify(
                 .arg(&output_file);
         }
     }
+    command.args(test_files);
     let output = command
         .output()
         .map_err(|e| Finding::new("EC_RUNNER", e.to_string()))?;

@@ -6,6 +6,12 @@ use std::{
 };
 
 fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
+    if cli.strict_baseline && matches!(cli.command, Action::Snapshot { .. }) {
+        return Err(Finding::new(
+            "EC_CONFIG",
+            "--strict-baseline is supported only by check and verify",
+        ));
+    }
     let path = cli
         .config
         .canonicalize()
@@ -15,6 +21,12 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
         .ok_or_else(|| Finding::new("EC_CONFIG", "Config has no parent directory"))?;
     let config: Config = read_json(&path, "EC_CONFIG")?;
     contract::validate(&config)?;
+    if cli.strict_baseline && config.schema_version != 2 {
+        return Err(Finding::new(
+            "EC_CONFIG",
+            "--strict-baseline requires schemaVersion: 2 configuration",
+        ));
+    }
     let adapter = match tsrs_adapter::TsrsAdapter::open(root, &config) {
         Ok(adapter) => adapter,
         Err(errors) => {
@@ -44,6 +56,15 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
     }
     if let Some(baseline) = &cli.baseline {
         let previous: Snapshot = read_json(baseline, "EC_BASELINE")?;
+        if cli.strict_baseline
+            && (previous.schema_version != 2
+                || previous.contracts.values().any(|c| c.scenarios.is_none()))
+        {
+            return Err(Finding::new(
+                "EC_BASELINE",
+                "--strict-baseline requires a v2 snapshot with scenario history for every contract",
+            ));
+        }
         let delta = contract::diff(&contract::snapshot(report), &previous)?;
         for id in &delta.removed_contracts {
             report.diagnostics.push(Finding::new(
@@ -62,15 +83,57 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
                 report.diagnostics.push(finding);
             }
         }
+        if cli.strict_baseline {
+            for (id, scenarios) in &delta.changed_scenarios {
+                for scenario in scenarios {
+                    let mut finding = Finding::new(
+                        "EC014",
+                        "Scenario changed from baseline; review before creating a new baseline",
+                    )
+                    .for_scenario(Some(scenario));
+                    finding.contract_id = Some(id.as_str().into());
+                    report.diagnostics.push(finding);
+                }
+            }
+        }
         report.delta = Some(delta);
     }
     match &cli.command {
+        Action::Scan { .. } | Action::Init { .. } => unreachable!("separate report"),
         Action::Check => (),
         Action::Verify {
             runner,
             vitest,
             bun,
-        } => runner::verify(report, root, *runner, vitest.as_deref(), bun.as_deref())?,
+            only_contract_tests,
+        } => {
+            let files = if *only_contract_tests {
+                config
+                    .contracts
+                    .iter()
+                    .flat_map(|c| &c.cases)
+                    .map(|c| root.join(&c.test.file))
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            };
+            if *only_contract_tests && files.is_empty() {
+                return Err(Finding::new(
+                    "EC_CONFIG",
+                    "No registered test files to select",
+                ));
+            }
+            runner::verify(
+                report,
+                root,
+                *runner,
+                vitest.as_deref(),
+                bun.as_deref(),
+                &files,
+            )?;
+        }
         Action::Snapshot { out } => {
             // A snapshot inventories declared tags; missing registrations remain visible in this report.
             let data = serde_json::to_vec_pretty(&contract::snapshot(report))
@@ -89,6 +152,7 @@ fn run(cli: &Cli, report: &mut Report) -> Result<(), Finding> {
 
 pub(crate) fn execute(cli: Cli) -> Report {
     let mode = match cli.command {
+        Action::Scan { .. } | Action::Init { .. } => unreachable!("separate report"),
         Action::Check => "check",
         Action::Verify { .. } => "verify",
         Action::Snapshot { .. } => "snapshot",

@@ -6,6 +6,9 @@ TypeScriptのエラー型・失敗シナリオ・テスト結果を対応付け�
 型の解決には[oxc-project/tsrs](https://github.com/oxc-project/tsrs/tree/1bfd1e65be95131f9242a03687d37006214a96f6)を使用します。
 既存のResult型を使い続けられます。エディタ拡張は不要です。npm/crates.ioには未公開です。
 
+`scan`でプロジェクトからエラー候補と伝播経路を調べ、`init`で選んだ型の設定・テストを生成できます。
+npm CLIとLinux/macOS向けバイナリは配布準備中です。[配布物の作成と導入](packages/cli/README.md)を参照してください。
+
 ```text
 EC010 checkout.payment RateLimited rate-limit-retries:
 Required assertion did not pass: attempts
@@ -35,6 +38,22 @@ Vitest版も同じ仕組みです。
 ```
 
 ## 設定とテスト
+
+既存プロジェクトで一つの型から始める場合:
+
+```sh
+errspec scan --project tsconfig.json --format json
+errspec init --project tsconfig.json --source src/errors.ts --export Failure --runner bun
+errspec verify --runner bun --only-contract-tests
+```
+
+`init`はerrspec.jsonとerrspec.generated.test.tsを生成します。`--test`と`--config`で出力先を選べます。
+`--source`はtsconfigのあるディレクトリから、出力先は呼出元から解決します。出力ディレクトリは先に作成してください。
+既存ファイルは上書きしません。生成テストはTODOで失敗するため、依存を`s.fault`で呼び出し、期待動作を`s.check`で比較する処理を記入します。
+別途、同じ版の`@errspec/testkit`と選んだランナーを導入してください。公開前は配布tarballまたはローカル依存を使用します。
+
+`--only-contract-tests`は設定で参照したテストファイルだけをランナーへ渡します。省略時は従来どおりランナーが発見した全テストを実行します。
+選択実行の成功は、選ばなかったテストの成功を意味しません。
 
 設定のschemaVersion 2では、1つのタグに複数のシナリオを登録できます。
 `id`は契約内で一意です。`observe`に必須の障害観測とアサーションのIDを登録します。
@@ -139,7 +158,7 @@ JSON出力schemaVersionは2です。ケースには`testStatus`と`observationSt
 - タグの種類は型から列挙します。payload、時間、並行実行、処理順序のすべての組合せは列挙しません。
 - 補助APIとテストプロセスは信頼対象です。観測JSONは不正なテストコードに対する認証・証明ではありません。
 - 未awaitの障害呼び出しは検出しますが、補助APIを通らないバックグラウンド処理や観測期間外の挙動を追跡しません。
-- 任意のthrow/rejection、関数間の伝播、Resultを返す全関数の自動発見、タグが同じpayloadの型変更は未対応です。
+- `scan`は明示的なthrow・Promise.reject・構造的なerror戻り値と呼出関係を調べます。全実行時エラーの完全発見、任意のResultライブラリの意味、タグが同じpayloadの型変更は保証しません。
 - 実行中のソース書き換えや、残存した別プロセスによる書き換えに対する整合性保証はありません。
 
 ## ベースラインと互換性
@@ -154,6 +173,19 @@ JSON出力schemaVersionは2です。ケースには`testStatus`と`observationSt
 snapshot v2はタグに加え、シナリオID、タグ、期待動作の説明、テスト参照、必須観測IDを保存します。
 タグが残っていても、以前あったシナリオを削除すると`EC013`で失敗します。
 期待動作や必須観測の変更は`delta.changedScenarios`へ表示します。変更自体を禁止はしません。
+CIで既存シナリオの変更を止めたい場合は、`check`または`verify`に`--strict-baseline`を指定します。
+
+```sh
+./target/debug/errspec verify --runner bun \
+  --config examples/scenarios-bun/errspec.json \
+  --baseline baseline.json --strict-baseline
+```
+
+このモードでは、期待動作・タグ・テスト参照・必須観測が変わったシナリオを`EC014`で報告し、テストが成功しても終了コード1になります。
+検証を弱めたかどうかの意味判断はせず、観測IDの並び順の変更も対象です。既存シナリオを保った追加は許容し、削除は従来どおり失敗します。
+設定v2とシナリオ履歴を持つsnapshot v2が必要です。baselineの未指定、履歴不足、設定v1、`snapshot`との併用はエラーになります。
+意図した変更は差分をレビューし、新しいsnapshotへ更新してください。CIでは比較元の版を固定し、同じPRで書き換えたbaselineをそのまま比較元にしないようにします。errspecは人が承認した事実を証明しません。
+
 削除が意図した変更ならレビュー後に別パスへ新しいsnapshotを作成します。既存ファイルは上書きしません。
 
 設定v1とsnapshot v1は引き続き読み込めます。設定v1は以前どおり1タグ1テストの照合で、観測状態は`not_required`です。
@@ -174,12 +206,23 @@ import、再export、paths、具体化したgeneric、union/intersectionをtsrs�
 
 ## CLIと診断
 
+`scan`は検証とは独立した`errspec/scan` schemaVersion 1を返します。import/reexport、別名参照、オーバーロード、関数・arrow・メソッド、再帰、await/return、ローカル変数に保持したPromiseの使用とcatch境界を解析します。
+`functions[].effects`は発生元IDと経路を持つ「外へ伝わる可能性」の集合です。同期throw、rejection、Resultを区別します。
+`unknowns`は動的なsignature、外部実装、解決できないPromise使用などを示します。`--fail-on-unknown`で未解決箇所を終了コード1にできます。
+`scanComplete`は解析処理の完了であり、`allRuntimeErrorsKnown`は常にfalseです。getter/proxy、eval、任意callback、暗黙の例外、厳密な条件分岐やfinallyの上書きは完全にはモデル化しません。
+依存の型情報は使いますが、node_modulesとプロジェクトディレクトリ外の実装を走査対象に含めません。
+候補の既定識別子は`_tag,kind,type,code`です。`--discriminant code`などで変更できます。タグ型が業務上のエラーかはレビューしてください。
+
 | コマンド／オプション | 用途 |
 |---|---|
+| `scan --project PATH` | 型候補・明示的な失敗箇所と保守的な伝播を調べる。テスト実行なし |
+| `init --source FILE --export NAME` | 選んだ型の設定と未完成のテストを生成 |
 | `check` | 型とケース登録の照合。テスト実行なし |
 | `verify --runner bun\|vitest` | テストと観測の照合。既定はVitest |
+| `--only-contract-tests` | verifyで登録済みのテストファイルだけを選択 |
 | `snapshot --out PATH` | 型とシナリオの一覧を保存 |
 | `--baseline PATH` | 保存済み一覧との差分と削除を検出 |
+| `--strict-baseline` | check/verifyで既存シナリオの変更を不合格にする。`--baseline`が必須 |
 | `--format json` | Agent向けJSONをstdoutへ出力。子プロセスのログはstderr |
 | `--vitest PATH` / `--bun PATH` | 実行ファイルの指定。指定パスは呼出元の作業ディレクトリから解決 |
 
@@ -196,6 +239,7 @@ Vitestの既定パスは設定ディレクトリの`node_modules/.bin/vitest`で
 | EC010 | 必須の値の比較が欠けている、または失敗 |
 | EC011 / EC012 | 観測の識別情報が不一致・重複／シナリオが正常完了しなかった |
 | EC013 | baselineにあったシナリオの削除 |
+| EC014 | strictモードでbaselineにあったシナリオが変更された |
 | EC_EVIDENCE | 観測プロトコル・run ID・ファイルが不正 |
 | EC_CONFIG / EC_BASELINE / EC_RUNNER / EC_SNAPSHOT / EC_INTERNAL | 設定・比較対象・実行器・保存・内部処理のエラー |
 | TS… | tsrsによるコンパイラ診断 |
