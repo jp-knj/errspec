@@ -1,0 +1,28 @@
+name: Check
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy,rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: examples/checkout/package-lock.json
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --locked
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: examples/checkout
+      - run: node scripts/demo.mjs
+      - run: node scripts/demo-bun.mjs
+      - run: node --test tests/testkit.test.mjs
+      - run: node scripts/demo-scenarios.mjs

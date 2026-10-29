@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "project": "tsconfig.json",
+  "contracts": [
+    {
+      "id": "checkout.payment",
+      "source": {
+        "file": "src/errors.ts",
+        "export": "PaymentError",
+        "discriminant": "_tag"
+      },
+      "boundaries": [
+        "POST /checkout"
+      ],
+      "cases": [
+        {
+          "id": "declined",
+          "tag": "Declined",
+          "expect": "Return 402 without creating an order",
+          "test": {
+            "file": "tests/checkout.test.ts"
+          },
+          "observe": {
+            "faults": [
+              "gateway"
+            ],
+            "assertions": [
+              "status",
+              "orders"
+            ]
+          }
+        },
+        {
+          "id": "rate-limit-first",
+          "tag": "RateLimited",
+          "expect": "Return 429 without retrying or creating an order",
+          "test": {
+            "file": "tests/checkout.test.ts"
+          },
+          "observe": {
+            "faults": [
+              "gateway"
+            ],
+            "assertions": [
+              "status",
+              "orders",
+              "attempts"
+            ]
+          }
+        },
+        {
+          "id": "rate-limit-retries",
+          "tag": "RateLimited",
+          "expect": "Stop at three attempts, return 429 and create no order",
+          "test": {
+            "file": "tests/checkout.test.ts"
+          },
+          "observe": {
+            "faults": [
+              "gateway"
+            ],
+            "assertions": [
+              "status",
+              "orders",
+              "attempts"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "project": "tsconfig.json",
+  "contracts": [{
+    "id": "checkout.payment",
+    "source": { "file": "src/errors.ts", "export": "PaymentError", "discriminant": "_tag" },
+    "boundaries": ["POST /checkout"],
+    "cases": [{
+      "tag": "Declined",
+      "expect": "Returns 402 and creates no order",
+      "test": { "file": "tests/checkout.test.ts", "name": "checkout Declined returns 402 without creating an order" }
+    }]
+  }]
+}

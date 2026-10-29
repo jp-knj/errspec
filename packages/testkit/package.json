@@ -1,0 +1,13 @@
+{
+  "name": "@errspec/testkit",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jp-knj/errspec.git",
+    "directory": "packages/testkit"
+  },
+  "type": "module",
+  "exports": { ".": { "types": "./index.d.mts", "import": "./index.mjs" } }
+}

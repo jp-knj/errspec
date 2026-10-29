@@ -1,0 +1,216 @@
+use serde_json::{Value, json};
+use std::{fs, process::Command};
+use tempfile::TempDir;
+
+#[test]
+fn sdk_types_preserve_fault_arguments_and_assertion_value_types() {
+    let dir = fixture(
+        r#"
+import type { ScenarioScope } from './sdk/index.mjs';
+declare const s: ScenarioScope;
+const fail = s.fault('gateway', async (code: number) => ({ code }));
+const result: Promise<{code:number}> = fail(429);
+// @ts-expect-error argument type must survive the wrapper
+fail('429');
+s.check('status', 429 as number, 429);
+// @ts-expect-error mismatched comparison type must be rejected
+s.check('status', 429, '429');
+export type ErrorType = {_tag:'A'};
+"#,
+        &["A"],
+    );
+    fs::create_dir(dir.path().join("sdk")).unwrap();
+    fs::write(
+        dir.path().join("sdk/index.d.mts"),
+        include_str!("../packages/testkit/index.d.mts"),
+    )
+    .unwrap();
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 0, "{report}");
+}
+
+fn fixture(source: &str, cases: &[&str]) -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("errors.ts"), source).unwrap();
+    fs::write(dir.path().join("test.ts"), "export {};").unwrap();
+    fs::write(dir.path().join("tsconfig.json"), r#"{"compilerOptions":{"strict":true,"skipLibCheck":true,"target":"ES2022","module":"ESNext","moduleResolution":"Bundler"},"files":["errors.ts"]}"#).unwrap();
+    let config = json!({"schemaVersion":1,"project":"tsconfig.json","contracts":[{
+        "id":"checkout","source":{"file":"errors.ts","export":"ErrorType","discriminant":"_tag"},
+        "cases":cases.iter().map(|tag| json!({"tag":tag,"expect":"must reject", "test":{"file":"test.ts","name":tag}})).collect::<Vec<_>>()
+    }]});
+    fs::write(dir.path().join("errspec.json"), config.to_string()).unwrap();
+    dir
+}
+
+fn run(dir: &TempDir, command: &[&str]) -> (i32, Value) {
+    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+        .current_dir(dir.path())
+        .args(command)
+        .args(["--format", "json"])
+        .output()
+        .unwrap();
+    let report = serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+        panic!(
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    (output.status.code().unwrap(), report)
+}
+
+fn has(report: &Value, code: &str) -> bool {
+    report["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == code)
+}
+
+#[test]
+fn added_variant_requires_a_case_and_is_in_delta() {
+    let dir = fixture("export type ErrorType = {_tag:'A'} | {_tag:'B'};", &["A"]);
+    fs::write(dir.path().join("baseline.json"), json!({"schemaVersion":1,"kind":"errspec/snapshot","contracts":{"checkout":{"source":{"file":"errors.ts","export":"ErrorType","discriminant":"_tag"},"tags":["A"]}}}).to_string()).unwrap();
+    let (status, report) = run(&dir, &["check", "--baseline", "baseline.json"]);
+    assert_eq!(status, 1);
+    assert!(has(&report, "EC001"));
+    assert_eq!(report["delta"]["added"]["checkout"], json!(["B"]));
+    assert_eq!(report["analysisComplete"], true);
+}
+
+#[test]
+fn resolves_reexports_generics_intersections_and_path_aliases() {
+    let dir = fixture(
+        "export type { Failures as ErrorType } from '@domain/errors';",
+        &["A", "B"],
+    );
+    fs::create_dir(dir.path().join("domain")).unwrap();
+    fs::write(dir.path().join("domain/errors.ts"), "interface Base { message: string }; type Tagged<T extends string> = Base & {_tag:T}; export type Failures = Tagged<'A'> | Tagged<'B'>;").unwrap();
+    fs::write(dir.path().join("tsconfig.json"), r#"{"compilerOptions":{"strict":true,"skipLibCheck":true,"module":"ESNext","moduleResolution":"Bundler","paths":{"@domain/*":["./domain/*"]}},"files":["errors.ts"]}"#).unwrap();
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 0, "{report}");
+    assert_eq!(report["contracts"][0]["tags"], json!(["A", "B"]));
+    assert_eq!(report["testsExecuted"], false);
+    assert_eq!(report["contracts"][0]["cases"][0]["testStatus"], "not_run");
+}
+
+#[test]
+fn wide_unknown_any_and_optional_discriminants_are_incomplete() {
+    for ty in [
+        "any",
+        "unknown",
+        "{_tag: string}",
+        "{_tag?: 'A'}",
+        "{_tag:'A'} | {code:1}",
+    ] {
+        let dir = fixture(&format!("export type ErrorType = {ty};"), &[]);
+        let (status, report) = run(&dir, &["check"]);
+        assert_eq!(status, 2, "{ty}: {report}");
+        assert!(has(&report, "EC002"));
+        assert_eq!(report["analysisComplete"], false);
+    }
+}
+
+#[test]
+fn finite_literals_and_never_are_supported() {
+    let dir = fixture(
+        "export type ErrorType = {_tag:'日本語' | 'A'};",
+        &["A", "日本語"],
+    );
+    assert_eq!(run(&dir, &["check"]).0, 0);
+    let dir = fixture("export type ErrorType = never;", &[]);
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 0, "{report}");
+    assert_eq!(report["contracts"][0]["tags"], json!([]));
+}
+
+#[test]
+fn compiler_error_is_not_a_clean_scan() {
+    let dir = fixture("export type ErrorType = MissingType;", &[]);
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 2, "{report}");
+    assert!(has(&report, "TS2304"));
+}
+
+#[test]
+fn missing_test_file_and_removed_case_fail() {
+    let dir = fixture("export type ErrorType = {_tag:'A'};", &["A", "B"]);
+    fs::remove_file(dir.path().join("test.ts")).unwrap();
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 1);
+    assert!(has(&report, "EC003"));
+    assert!(has(&report, "EC004"));
+}
+
+#[test]
+fn duplicate_cases_and_unknown_config_fields_are_rejected() {
+    let dir = fixture("export type ErrorType = {_tag:'A'};", &["A", "A"]);
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 2);
+    assert!(has(&report, "EC_CONFIG"));
+    fs::write(
+        dir.path().join("errspec.json"),
+        r#"{"schemaVersion":1,"project":"tsconfig.json","contracts":[],"constracts":[]}"#,
+    )
+    .unwrap();
+    assert_eq!(run(&dir, &["check"]).0, 2);
+}
+
+#[test]
+fn snapshot_is_roundtrippable_and_does_not_overwrite() {
+    let dir = fixture("export type ErrorType = {_tag:'A'};", &["A"]);
+    let (status, report) = run(&dir, &["snapshot", "--out", "baseline.json"]);
+    assert_eq!(status, 0, "{report}");
+    assert_eq!(run(&dir, &["check", "--baseline", "baseline.json"]).0, 0);
+    assert_eq!(run(&dir, &["snapshot", "--out", "baseline.json"]).0, 2);
+}
+
+#[test]
+fn missing_vitest_cannot_be_reported_as_passed() {
+    let dir = fixture("export type ErrorType = {_tag:'A'};", &["A"]);
+    let (status, report) = run(&dir, &["verify"]);
+    assert_eq!(status, 2);
+    assert!(has(&report, "EC_RUNNER"));
+    assert_eq!(report["testsExecuted"], false);
+}
+
+#[test]
+fn missing_bun_and_mismatched_runner_options_are_rejected() {
+    let dir = fixture("export type ErrorType = {_tag:'A'};", &["A"]);
+    let (status, report) = run(&dir, &["verify", "--runner", "bun", "--bun", "missing-bun"]);
+    assert_eq!(status, 2);
+    assert!(has(&report, "EC_RUNNER"));
+    assert_eq!(report["testsExecuted"], false);
+    let (status, report) = run(
+        &dir,
+        &["verify", "--runner", "bun", "--vitest", "missing-vitest"],
+    );
+    assert_eq!(status, 2);
+    assert!(has(&report, "EC_CONFIG"));
+}
+
+#[cfg(unix)]
+#[test]
+fn zero_exit_bun_without_valid_report_cannot_pass() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = fixture("export type ErrorType = {_tag:'A'};", &["A"]);
+    let executable = dir.path().join("fake-bun");
+    for body in ["exit 0", "printf '%s' '<testsuites>' > \"$4\""] {
+        fs::write(&executable, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let (status, report) = run(
+            &dir,
+            &[
+                "verify",
+                "--runner",
+                "bun",
+                "--bun",
+                executable.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(status, 2, "{report}");
+        assert!(has(&report, "EC_RUNNER"));
+        assert_eq!(report["testsExecuted"], false);
+        assert_eq!(report["contracts"][0]["cases"][0]["testStatus"], "not_run");
+    }
+}
