@@ -29,7 +29,7 @@ Agent JSONは診断の受渡し手段であり、型・仕様・実行の対応�
 | runner | プロセス、環境変数、ランナーレポートの読取、今回の観測ファイルと実行IDの所有 |
 | verification | 実行後のパス解決、テスト照合、観測の読取と照合の順序、部分結果の受渡し |
 | output | 検証・走査・初期生成のtext/JSON表示、標準出力・標準エラーと終了コード |
-| packages/testkit | JSランナー内で障害用関数の実行と値の比較を記録 |
+| packages/testkit | JSランナー内で障害用関数の実行と値の比較を記録。`index.mjs`を入口とし、複製用に同じ実装の`index.ts`を同梱する。両者は同じtestkitのテストで挙動を、tsrsのstrict検査で型を確認する |
 
 型解析はRust＋tsrs、対象コードとテストの実行はBun/Vitestが担当する。
 Oxcエコシステムのtsrsを使用しているが、追加のoxc_parserは入れていない。

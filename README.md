@@ -273,6 +273,7 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 cargo build --locked
 node --test tests/testkit.test.mjs
+TESTKIT_ENTRY=../packages/testkit/index.ts node --test tests/testkit.test.mjs
 (cd examples/checkout && npm ci --ignore-scripts --no-audit --no-fund)
 node scripts/demo.mjs
 node scripts/demo-bun.mjs

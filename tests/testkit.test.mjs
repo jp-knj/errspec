@@ -4,7 +4,9 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { scenarioTest, scenarioTestName } from "../packages/testkit/index.mjs";
+// TESTKIT_ENTRY=../packages/testkit/index.ts runs the same tests against the TypeScript copy.
+const entry = new URL(process.env.TESTKIT_ENTRY ?? "../packages/testkit/index.mjs", import.meta.url);
+const { scenarioTest, scenarioTestName } = await import(entry.href);
 
 function register(body, id = "one", options = {}) {
   let callback;
