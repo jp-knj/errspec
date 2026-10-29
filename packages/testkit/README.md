@@ -67,7 +67,7 @@ vi.mock("../src/mailer", () => ({ deliver: (to: string) => mailer.deliver(to) })
 
 ## API
 
-- `scenarioTest(test, fileURL, { contract, id, tag, withoutFaults? }, body)` — トップレベルのテストを登録。bodyは必ず必要な非同期処理をawaitする。
+- `scenarioTest(test, fileURL, { contract, id, tag, withoutFaults? }, body)` — テストを登録する。トップレベルでも`describe`の中でもよい。bodyは必ず必要な非同期処理をawaitする。
   `withoutFaults: true`は入力だけで結果が決まるシナリオの宣言です。設定の`observe.faults: []`と組み合わせます。指定すると`fault`の呼出が失敗になり、指定しないとfaultが0件のシナリオは失敗します。
 - `scenarioTestName(contract, id)` — 設定照合に使うテスト名を生成する。
 - 定義の`description`は、テスト名の後ろに空白1つを挟んで付く表示用の説明です。1行の空でない文字列に限ります。CLIは説明を除いた固定部分で照合し、観測にはランナーと同じ完全な名前を記録します。

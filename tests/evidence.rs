@@ -38,6 +38,33 @@ fn skipped_missing_ambiguous_or_failed_tests_never_count_as_passed() {
 }
 
 #[test]
+fn legacy_names_still_match_exactly_without_describe_or_description_parts() {
+    for (runner_name, wanted) in [
+        ("rejects A", "passed"),
+        ("group rejects A", "not_found"),
+        ("rejects A extra", "not_found"),
+    ] {
+        let c: Contract=serde_json::from_value(json!({"id":"x","source":{"file":"e.ts","export":"E","discriminant":"tag"},"cases":[{"tag":"A","expect":"rejects","test":{"file":"case.test.ts","name":"rejects A"}}]})).unwrap();
+        let config = ValidatedConfig::try_from(Config {
+            schema_version: 1,
+            project: "tsconfig.json".into(),
+            contracts: vec![c],
+        })
+        .unwrap();
+        let data = support::register(&config, &["A"]);
+        let raw = serde_json::from_value(json!({"success":true,"testResults":[{"name":"case.test.ts","assertionResults":[{"fullName":runner_name,"status":"passed"}]}]})).unwrap();
+        let (tests, _) = evidence::judge(
+            &data.registrations,
+            &support::paths(&["case.test.ts"]),
+            vitest::normalize(raw),
+            true,
+        );
+        let test = data.registrations[0].cases[0].test().unwrap();
+        assert_eq!(tests.status(test).as_str(), wanted, "{runner_name}");
+    }
+}
+
+#[test]
 fn failed_runner_invalidates_individually_passing_tests() {
     let raw = serde_json::from_value(json!({"success":true,"testResults":[]})).unwrap();
     let (_, findings) = evidence::judge(&[], &Default::default(), vitest::normalize(raw), false);

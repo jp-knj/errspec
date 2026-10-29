@@ -127,7 +127,7 @@ scenarioTest(test, import.meta.url, {
 - 設定に必須としたcheckが欠けていれば、テストが成功していてもRust側の照合が失敗します。
 - テスト名は`errspec ["契約ID","シナリオID"]`として自動生成します。設定の`test.name`は省略します。
 - 定義に`description`を渡すと、ランナーの表示名は`errspec ["checkout.payment","declined"] [異常系] 注文を作らない`のように説明付きになります。照合は先頭の固定部分で行うため、説明を変えてもシナリオの変更にはなりません。説明は1行の空でない文字列です。
-- `scenarioTest`はトップレベルで登録してください。`describe`内の登録は現在未対応で、完全なテスト名が一致せず失敗します。テストがtsconfigのプロジェクトに含まれていれば、`check`が実行前に`EC017`で報告します。
+- `scenarioTest`は`describe`の中でも登録できます。ランナーは`describe`の題名を前に付けた完全名を報告しますが、照合は空白で区切られた`errspec [...]`の部分で行います。同じシナリオを2つの`describe`に置くと曖昧として失敗します。
 - `test.concurrent`は対応済みです（BunではBun 1.3以降が提供します）。`test.skip`は未検証になります。retry/repeatで同一シナリオが複数回実行された場合は曖昧として拒否します。
 
 依存を引数で受け取らず直接importしているコードには、Bunの`mock.module`やVitestの`vi.mock`で`s.fault`を差し込みます。
@@ -145,7 +145,6 @@ tsrsの型情報で、`scenarioTest`と`s.fault`／`s.check`を名前ではな�
 報告するのは、実行すれば必ず失敗する食い違いだけです。
 - 未登録のシナリオ、登録と違うタグやテストファイル、`withoutFaults`と`"faults": []`の不一致（EC015）
 - 設定にない障害IDや比較IDの使用（EC016）
-- `describe`の中での`scenarioTest`の登録（EC017）
 
 `string`型に広がった値、本体の外のヘルパーに渡した`s`、プロジェクト外のテストファイルは照合せず、実行時の観測の照合に任せます。
 必須のIDがテストに書かれていないことも、ヘルパー経由で呼ばれる可能性があるため、静的には報告しません。
@@ -264,7 +263,6 @@ Bunは起動前に`--version`で版を確認し、1.2.19未満なら実行しま
 | EC014 | strictモードでbaselineにあったシナリオが変更された |
 | EC015 | テストが未登録のシナリオを登録している、タグ・テストファイル・`withoutFaults`が設定と食い違う（実行前の静的照合） |
 | EC016 | シナリオ本体が、設定にない障害IDや比較IDを使っている（実行前の静的照合） |
-| EC017 | `scenarioTest`を`describe`の中で登録している（実行前の静的照合） |
 | EC_EVIDENCE | 観測プロトコル・run ID・ファイルが不正 |
 | EC_CONFIG / EC_BASELINE / EC_RUNNER / EC_SNAPSHOT / EC_INTERNAL | 設定・比較対象・実行器・保存・内部処理のエラー |
 | TS… | tsrsによるコンパイラ診断 |
