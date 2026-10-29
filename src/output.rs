@@ -21,12 +21,12 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
                 lines.push(format!("{}: {}", c.id, c.tags.join(", ")));
                 for case in &c.cases {
                     lines.push(format!(
-                        "  {} {}: {}, test={}, observation={:?}",
+                        "  {} {}: {}, test={}, observation={}",
                         case.tag,
                         case.id.as_deref().unwrap_or(""),
                         case.registration,
                         case.test_status,
-                        case.observation_status
+                        case.observation_status.as_str()
                     ));
                 }
             }

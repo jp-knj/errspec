@@ -156,12 +156,21 @@ fn passing_test_requires_actual_complete_observations() {
         ("state", json!("failed"), "EC012"),
     ] {
         let mut changed = record();
-        changed[field] = value;
+        changed[field] = value.clone();
         let report = check(vec![changed]);
         assert!(
             report.diagnostics.iter().any(|f| f.code == code),
             "{report:?}"
         );
+        if let Some(state) = value.as_str().filter(|_| field == "state") {
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|f| f.message.ends_with(&format!(": {state}"))),
+                "{report:?}"
+            );
+        }
         assert_ne!(
             report.contracts[0].cases[0].observation_status,
             ObservationStatus::Passed
@@ -237,7 +246,7 @@ fn wrong_identity_extra_ids_and_repeated_execution_are_rejected() {
         ),
     ] {
         let mut changed = record();
-        changed[field] = value;
+        changed[field] = value.clone();
         let report = check(vec![changed]);
         assert!(report.diagnostics.iter().any(|f| f.code == "EC011"));
         assert_ne!(
