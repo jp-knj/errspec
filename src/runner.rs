@@ -93,9 +93,18 @@ pub(crate) fn run(
     };
     let executable = if let Some(path) = explicit {
         path.canonicalize().map_err(|e| {
+            // Workspaces often install vitest only at the repository root.
+            let hint = if matches!(runner, Runner::Vitest) && vitest.is_none() {
+                "; pass --vitest PATH when vitest is installed elsewhere"
+            } else {
+                ""
+            };
             Finding::new(
                 "EC_RUNNER",
-                format!("Cannot open test runner executable: {e}"),
+                format!(
+                    "Cannot open test runner executable {}: {e}{hint}",
+                    path.display()
+                ),
             )
         })?
     } else {
