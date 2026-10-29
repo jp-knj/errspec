@@ -1,7 +1,10 @@
 {
   "name": "@errspec/testkit",
   "version": "0.1.0",
-  "private": true,
+  "description": "Record failure scenarios and required comparisons for errspec",
+  "files": ["index.mjs", "index.d.mts", "README.md", "LICENSE"],
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" },
   "license": "MIT",
   "repository": {
     "type": "git",
