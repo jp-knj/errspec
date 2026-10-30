@@ -62,7 +62,7 @@ errspec coverage --project apps/api/tsconfig.json -- --project api   # vitest ru
 既存の漏れを認めたまま後退だけを止めるには、`--save-baseline coverage-baseline.json`で現在の状態を保存し、CIで`--baseline coverage-baseline.json`を付けて実行します。確認が弱くなったタグと、新しく現れた`missing`のタグがあれば終了コード1になります。
 `--format markdown`は表形式で出力します。GitHub Actionsでは`errspec coverage --format markdown >> "$GITHUB_STEP_SUMMARY"`でジョブの概要に表示できます。
 
-`expect(result).toMatchObject({ ok: false })`は、`result.error`にタグがあってもそのタグの検証には数えません。タグを指定しない`toHaveProperty`、オブジェクトの参照一致、非対称マッチャーも証拠にしません。比較の後にテストが失敗した場合も確認済みにはしません。`asserted`は期待値にタグがあることの確認であり、製品コードから来た値であることや、エラー処理の正しさの証明ではありません。
+`expect(result).toMatchObject({ ok: false })`は、`result.error`にタグがあってもそのタグの検証には数えません。タグを指定しない`toHaveProperty`、オブジェクトの参照一致、非対称マッチャーも証拠にしません。比較の後にテストが失敗した場合も確認済みにはしません。判定が厳しくなるため、既存のbaselineでは回帰として表示される場合があります。`asserted`は期待値にタグがあることの確認であり、製品コードから来た値であることや、エラー処理の正しさの証明ではありません。
 
 ## 障害時の部分更新を再現する
 
