@@ -147,9 +147,13 @@ fn write_scan(
                 report.edges.len(),
                 report.unknowns.len()
             );
-            for c in &report.candidates {
+            // Local declarations first; dependency-only types are listed after them.
+            let (local, external): (Vec<_>, Vec<_>) =
+                report.candidates.iter().partition(|c| !c.external);
+            for c in local.into_iter().chain(external) {
                 println!(
-                    "{} export {} [{}]: {}",
+                    "{}{} export {} [{}]: {}",
+                    if c.external { "external " } else { "" },
                     c.source.file,
                     c.source.export,
                     c.source.discriminant,

@@ -35,8 +35,32 @@ pub(crate) fn line_at(text: &str, offset: usize) -> usize {
         .count()
         + 1
 }
+/// Whether every union member takes its discriminant property from a declaration outside `root`
+/// or in node_modules, such as `Omit<SdkIssue, 'at'>`. Unknown declarations count as local.
+fn declared_outside(checker: &mut Checker, ty: P<Type>, key: &str, root: &Path) -> bool {
+    let members: Vec<P<Type>> = if ty.flags().intersects(TypeFlags::Union) {
+        ty.types().to_vec()
+    } else {
+        vec![ty]
+    };
+    members.iter().all(|member| {
+        if member.flags().intersects(TypeFlags::Union) {
+            return declared_outside(checker, *member, key, root);
+        }
+        let Some(prop) = checker.get_property_of_type_exported(*member, key) else {
+            return false;
+        };
+        let Some(declaration) = prop.declarations().first() else {
+            return false;
+        };
+        let file = get_source_file_of_node(*declaration).expect("source node");
+        let name = file.file_name().replace('\\', "/");
+        name.contains("/node_modules/") || !Path::new(file.file_name()).starts_with(root)
+    })
+}
+
 /// Exports of one declaration, keyed by its location and discriminant.
-type DeclaredExports = BTreeMap<(String, u32, String), Vec<(Source, Vec<String>)>>;
+type DeclaredExports = BTreeMap<(String, u32, String), Vec<(Source, Vec<String>, bool)>>;
 
 pub(crate) fn key(root: &Path, node: P<Node>) -> String {
     let loc = location(root, node);
@@ -315,6 +339,7 @@ pub(crate) fn collect(adapter: &TsrsAdapter, root: &Path, discriminants: &[Strin
                     if collect_tags(&mut checker, ty, discriminant, &mut tags).is_ok()
                         && !tags.is_empty()
                     {
+                        let external = declared_outside(&mut checker, ty, discriminant, root);
                         declared
                             .entry((declaration.0.clone(), declaration.1, discriminant.clone()))
                             .or_default()
@@ -325,6 +350,7 @@ pub(crate) fn collect(adapter: &TsrsAdapter, root: &Path, discriminants: &[Strin
                                     discriminant: discriminant.clone(),
                                 },
                                 tags.into_iter().collect(),
+                                external,
                             ));
                     }
                 }
@@ -363,15 +389,16 @@ pub(crate) fn collect(adapter: &TsrsAdapter, root: &Path, discriminants: &[Strin
             exports.sort_by(|a, b| (&a.0.file, &a.0.export).cmp(&(&b.0.file, &b.0.export)));
             let primary = exports
                 .iter()
-                .position(|(source, _)| source.file == file)
+                .position(|(source, _, _)| source.file == file)
                 .unwrap_or(0);
-            let (source, tags) = exports.remove(primary);
+            let (source, tags, external) = exports.remove(primary);
             Candidate {
                 source,
                 tags,
+                external,
                 reexports: exports
                     .into_iter()
-                    .map(|(s, _)| Export {
+                    .map(|(s, _, _)| Export {
                         file: s.file,
                         export: s.export,
                     })
