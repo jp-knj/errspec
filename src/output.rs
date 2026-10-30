@@ -181,7 +181,7 @@ fn write_coverage(
     use errspec::coverage::TagStatus;
     // An unreadable, foreign or unwritable baseline is a usage error, like a failed scan.
     let baseline_error = report.diagnostics.iter().any(|d| d.code == "EC_BASELINE");
-    let code = if !report.tests_executed || baseline_error {
+    let code = if !report.tests_executed || !report.evaluation_complete || baseline_error {
         2
     } else if !report.runner_ok
         || fail_on_missing && report.summary.missing > 0

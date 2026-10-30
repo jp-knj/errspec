@@ -268,5 +268,6 @@ fn execute(
     let (types, summary) = coverage::judge(types, &records, &test_sources);
     report.types = types;
     report.summary = summary;
+    report.evaluation_complete = true;
     Ok(())
 }

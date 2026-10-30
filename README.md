@@ -57,6 +57,8 @@ errspec coverage --project apps/api/tsconfig.json -- --project api   # vitest ru
 
 最も近い`vitest.config.*`と`node_modules/.bin/vitest`を親ディレクトリへ探します。利用者の設定とテストは変更せず、一時設定で記録用のsetup fileを追加して実行します。
 `--fail-on-missing`で`missing`があれば終了コード1にします。現在はVitestだけに対応します。
+集計は識別プロパティとタグの値の組で行います。同じ値でも`code`と`kind`は別々に数えます。
+テスト成功後に記録用ファイルを検証できない場合は、`EC_RUNNER`と終了コード2を返します。
 既存の漏れを認めたまま後退だけを止めるには、`--save-baseline coverage-baseline.json`で現在の状態を保存し、CIで`--baseline coverage-baseline.json`を付けて実行します。確認が弱くなったタグと、新しく現れた`missing`のタグがあれば終了コード1になります。
 `--format markdown`は表形式で出力します。GitHub Actionsでは`errspec coverage --format markdown >> "$GITHUB_STEP_SUMMARY"`でジョブの概要に表示できます。
 

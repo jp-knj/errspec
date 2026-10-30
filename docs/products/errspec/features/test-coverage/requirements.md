@@ -50,6 +50,18 @@ Scenario: どのテストにも現れない場合、漏れとして示す
 - When: `errspec coverage --fail-on-missing`を実行する。
 - Then: そのタグを`missing`とし、終了コード1にする。
 
+Scenario: 識別プロパティが違う同じ値のタグを、それぞれ集計する
+
+- Given: `code: "Shared"`と`kind: "Shared"`の型があり、テストが前者だけを確かめている。テスト本文にはタグの値を直接書いていない。
+- When: `errspec coverage --fail-on-missing`を実行する。
+- Then: 前者は`asserted`、後者は`missing`として別々に集計し、終了コード1にする。
+
+Scenario: テスト成功後に記録を検証できない場合、集計を成功としない
+
+- Given: テストは成功したが、記録用ファイルに不正なJSONがある、またはファイルを取得できない。
+- When: `errspec coverage`を実行する。
+- Then: `EC_RUNNER`と終了コード2を返す。テストの実行済み状態とランナーの成否は実際の結果で報告する。
+
 Scenario: 失敗・否定のアサーションは証拠にしない
 
 - Given: 失敗したアサーション、または`.not`のアサーションがタグを含む値を受け取る。

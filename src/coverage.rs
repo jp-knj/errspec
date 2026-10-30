@@ -80,6 +80,9 @@ pub struct CoverageReport {
     pub schema_version: u32,
     pub tests_executed: bool,
     pub runner_ok: bool,
+    /// Internal completion state, separate from the test runner's result.
+    #[serde(skip)]
+    pub evaluation_complete: bool,
     pub summary: Summary,
     pub types: Vec<TypeCoverage>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -103,6 +106,7 @@ impl Default for CoverageReport {
             schema_version: 1,
             tests_executed: false,
             runner_ok: false,
+            evaluation_complete: false,
             summary: Summary::default(),
             types: vec![],
             delta: None,
@@ -177,17 +181,19 @@ pub fn judge(
             }
         })
         .collect();
-    // A tag shared by several types (e.g. a store failure) counts once.
+    // A discriminant/value pair shared by several types counts once.
     let mut counted = BTreeSet::new();
-    for t in types.iter().flat_map(|t| &t.tags) {
-        if !counted.insert(&t.tag) {
-            continue;
-        }
-        summary.tags += 1;
-        match t.status {
-            TagStatus::Asserted => summary.asserted += 1,
-            TagStatus::Mentioned => summary.mentioned += 1,
-            TagStatus::Missing => summary.missing += 1,
+    for ty in &types {
+        for tag in &ty.tags {
+            if !counted.insert((&ty.source.discriminant, &tag.tag)) {
+                continue;
+            }
+            summary.tags += 1;
+            match tag.status {
+                TagStatus::Asserted => summary.asserted += 1,
+                TagStatus::Mentioned => summary.mentioned += 1,
+                TagStatus::Missing => summary.missing += 1,
+            }
         }
     }
     summary.types = types.len();
