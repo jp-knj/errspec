@@ -6,6 +6,7 @@
 
 errspecは、TypeScriptのエラー型と、失敗時に期待する振る舞いの検証を対応付ける開発ツールです。
 開発者とAIが変更を進めるとき、増えたエラー種別や抜けた失敗ケース、実行されなかった検証に気づけるようにします。
+既存テストが要求しているエラーの確認に加え、利用者が指定した障害を操作へ差し込み、失敗時に業務状態が部分更新される不具合を再現します。
 機能の条件は[失敗シナリオ検証のRequirements](features/failure-verification/requirements.md)に定めます。
 [エラー候補と伝播経路の調査](features/discovery/requirements.md)で登録対象を探し、[配布と初期生成](features/distribution/requirements.md)で導入を進められるようにします。
 

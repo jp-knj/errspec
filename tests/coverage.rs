@@ -189,6 +189,29 @@ fn coverage_without_vitest_reports_where_it_looked() {
 }
 
 #[test]
+fn assertions_in_failed_skipped_or_ambiguous_tests_are_not_evidence() {
+    for status in ["failed", "skipped"] {
+        let dir = fixture();
+        let path = dir.path().join("runner.sh");
+        let runner = fs::read_to_string(&path)
+            .unwrap()
+            .replace("\"status\":\"passed\"", &format!("\"status\":\"{status}\""));
+        fs::write(path, runner).unwrap();
+        let (_, report) = coverage(&dir, &[]);
+        assert_eq!(report["summary"]["asserted"], 0, "{report}");
+    }
+    let dir = fixture();
+    let path = dir.path().join("runner.sh");
+    let runner = fs::read_to_string(&path).unwrap().replace(
+        "[{\"fullName\":\"t\",\"status\":\"passed\"}]",
+        "[{\"fullName\":\"t\",\"status\":\"passed\"},{\"fullName\":\"t\",\"status\":\"passed\"}]",
+    );
+    fs::write(path, runner).unwrap();
+    let (_, report) = coverage(&dir, &[]);
+    assert_eq!(report["summary"]["asserted"], 0, "{report}");
+}
+
+#[test]
 fn markdown_lists_unasserted_tags_per_type() {
     let dir = fixture();
     let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
@@ -212,7 +235,7 @@ fn markdown_lists_unasserted_tags_per_type() {
             "\n",
             "| Tag | Status | Note |\n",
             "|---|---|---|\n",
-            "| `B` | mentioned | Written in a test, but no assertion received it |\n",
+            "| `B` | mentioned | Written in a test, but no passing assertion required it |\n",
             "| `C` | missing | No test refers to it |\n",
         )
     );

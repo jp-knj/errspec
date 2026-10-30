@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { collect } from "../src/coverage/vitest-recorder.mjs";
+import { checkedValues, collect } from "../src/coverage/vitest-recorder.mjs";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const recorder = join(project, "src/coverage/vitest-recorder.mjs");
@@ -25,6 +25,23 @@ test("collect keeps discriminant values and bare strings only", () => {
   assert.deepEqual(collect(Object.assign(new Error("x"), { code: "E_DOWN" }), keys), [["code", "E_DOWN"]]);
 });
 
+test("partial assertions credit only tags required by their expectations", () => {
+  const keys = new Set(["_tag", "code"]);
+  const actual = { ok: false, error: { _tag: "Declined" } };
+  assert.deepEqual(checkedValues("toMatchObject", actual, [{ ok: false }], keys), []);
+  assert.deepEqual(checkedValues("toHaveProperty", actual, ["error._tag"], keys), []);
+  assert.deepEqual(checkedValues("toBe", actual, [actual], keys), []);
+  assert.deepEqual(checkedValues("toContain", [actual], [actual], keys), []);
+  assert.deepEqual(checkedValues("toHaveProperty", actual, ["error._tag", "Declined"], keys), [["_tag", "Declined"]]);
+  assert.deepEqual(checkedValues("toHaveProperty", actual, ["message", "Declined"], keys), []);
+  assert.deepEqual(checkedValues("toMatchObject", actual, [{ error: { asymmetricMatch() {}, sample: { _tag: "Declined" } } }], keys), []);
+  let reads = 0;
+  const getter = { get _tag() { reads++; return "Declined"; } };
+  assert.deepEqual(collect(getter, keys), []);
+  assert.equal(reads, 0);
+  assert.deepEqual(collect(Object.defineProperty({}, "_tag", { value: "Declined" }), keys), []);
+});
+
 test("records only passing positive assertions from real Vitest runs", { skip: !existsSync(vitest) && "run npm ci in examples/checkout" }, () => {
   const work = mkdtempSync(join(example, ".recorder-"));
   try {
@@ -40,6 +57,11 @@ test("asserted", async () => {
   await expect(Promise.resolve({ kind: "late" })).resolves.toMatchObject({ kind: "late" });
   await expect(Promise.reject(fail("E_DOWN"))).rejects.toMatchObject({ code: "E_DOWN" });
   expect("RateLimited").toBe("RateLimited");
+  expect({ ok: false, error: { _tag: "Unchecked" } }).toMatchObject({ ok: false });
+  expect({ _tag: "Present" }).toHaveProperty("_tag");
+  expect({ _tag: "Asymmetric" }).toEqual(expect.objectContaining({ _tag: "Asymmetric" }));
+  const same = { _tag: "Identity" };
+  expect(same).toBe(same);
 });
 `);
     writeFileSync(join(work, "vitest.config.mjs"), `export default { test: { include: ["*.test.ts"], setupFiles: [${JSON.stringify(recorder)}] } };`);

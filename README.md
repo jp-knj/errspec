@@ -76,7 +76,7 @@ errspec coverage --project apps/api/tsconfig.json -- --project api   # vitest ru
 
 | 状態 | 意味 |
 |---|---|
-| `asserted` | 成功したアサーション（`toEqual`、`toMatchObject`、`toBe`など）が、そのタグを持つ値を受け取った |
+| `asserted` | 成功したテストの比較が、期待値としてそのタグの一致を要求した |
 | `mentioned` | テストファイルにタグが書かれているが、値として確かめていない（モックの入力だけなど） |
 | `missing` | どのテストにも現れない |
 
@@ -87,6 +87,41 @@ errspec coverage --project apps/api/tsconfig.json -- --project api   # vitest ru
 テスト成功後に記録用ファイルを検証できない場合は、`EC_RUNNER`と終了コード2を返します。
 既存の漏れを認めたまま後退だけを止めるには、`--save-baseline coverage-baseline.json`で現在の状態を保存し、CIで`--baseline coverage-baseline.json`を付けて実行します。確認が弱くなったタグと、新しく現れた`missing`のタグがあれば終了コード1になります。
 `--format markdown`は表形式で出力します。GitHub Actionsでは`errspec coverage --format markdown >> "$GITHUB_STEP_SUMMARY"`でジョブの概要に表示できます。
+
+`expect(result).toMatchObject({ ok: false })`は、`result.error`にタグがあってもそのタグの検証には数えません。タグを指定しない`toHaveProperty`、オブジェクトの参照一致、非対称マッチャーも証拠にしません。比較の後にテストが失敗した場合も確認済みにはしません。判定が厳しくなるため、既存のbaselineでは回帰として表示される場合があります。`asserted`は期待値にタグがあることの確認であり、製品コードから来た値であることや、エラー処理の正しさの証明ではありません。
+
+## 障害時の部分更新を再現する
+
+`checkFailureAtomicity`は、正常系で通った依存呼び出しを一回ずつ失敗させ、操作が失敗を返したときに業務状態が元のままか検査します。エラーごとにテスト本体を複製する代わりに、操作・有効な障害値・保護する状態を一度定義します。Vitest、Bun、Nodeの普通のテストから呼べます。
+
+```ts
+import { test } from "vitest";
+import { checkFailureAtomicity } from "@errspec/testkit";
+import { submitOrder } from "./submit-order";
+
+test("保存失敗で部分更新を残さない", async () => {
+  await checkFailureAtomicity({
+    faults: [{
+      id: "StoreDown", dependency: "save",
+      inject: () => ({ ok: false, error: { code: "store_down" } }),
+    }],
+    isFailure: result => !result.ok,
+    setup() {
+      const state = { credits: 100, orders: [] as string[] };
+      return {
+        snapshot: () => state,
+        run: scope => submitOrder(state, {
+          save: scope.wrap("save", async () => ({ ok: true as const })),
+        }),
+      };
+    },
+  });
+});
+```
+
+部分更新が残ると、`StoreDown at save call 1: Failed operation changed the protected state`で失敗し、`FailureAtomicityError.report`に操作前後の状態が入ります。`only: { fault: "StoreDown", call: 1 }`でそのケースだけ再実行できます。各実行は新しいfixtureを使い、任意の`dispose()`で後処理します。途中で書き込んでも最終状態が戻れば成功です。
+
+再試行で操作が成功した場合は`recovered`とし、失敗時の状態維持を確認した`preserved`とは区別します。正常系で通らない経路や、複数障害の組合せは探索しません。有効な障害値、失敗の判定、業務状態の範囲は利用者が決めます。実プロジェクトでmutatorを上回る効果は未計測です。
 障害が本当に呼ばれたか、必須の比較がそろっているかまで保証したい箇所は、次の`scenarioTest`と`verify`を使います。
 
 coverageの注意点:
