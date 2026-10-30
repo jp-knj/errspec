@@ -244,17 +244,23 @@ fn markdown_lists_unasserted_tags_per_type() {
 #[test]
 fn markdown_is_rejected_outside_coverage() {
     let dir = fixture();
-    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
-        .current_dir(dir.path())
-        .args(["scan", "--format", "markdown"])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("supported only by coverage"),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    for command in ["scan", "mutate"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+            .current_dir(dir.path())
+            .args([command, "--format", "markdown"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            diagnostic.contains("supported only by coverage"),
+            "{command}: {diagnostic}"
+        );
+    }
 }
 
 fn types(tags: &[(&str, TagStatus)]) -> Vec<TypeCoverage> {

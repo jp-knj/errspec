@@ -101,7 +101,7 @@ pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
 fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCode {
     let output = match format {
         Format::Json => serde_json::to_string_pretty(report).unwrap(),
-        Format::Text => {
+        Format::Text | Format::Markdown => {
             let mut lines = vec![format!(
                 "mutate: {} (complete: {}, tests executed: {})",
                 if report.ok { "pass" } else { "fail" },

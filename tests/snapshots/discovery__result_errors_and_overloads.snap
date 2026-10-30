@@ -14,6 +14,9 @@ expression: r
   ],
   "candidates": [
     {
+      "flows": [
+        "result"
+      ],
       "source": {
         "discriminant": "kind",
         "export": "Failure",

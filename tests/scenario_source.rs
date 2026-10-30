@@ -420,12 +420,7 @@ fn scenarios_inside_describe_are_matched_like_top_level_ones() {
             1,
         );
         let invalid = check_source(&broken);
-        assert_reports(
-            &invalid,
-            "EC016",
-            "check id \"code\"",
-            wrapper,
-        );
+        assert_reports(&invalid, "EC016", "check id \"code\"", wrapper);
         outcomes.push(json!({"wrapper":wrapper,"valid":{"status":valid.status,"findings":valid.findings},"invalid":{"status":invalid.status,"findings":invalid.findings}}));
     }
     insta::assert_json_snapshot!("nested_scenario_registrations", outcomes);

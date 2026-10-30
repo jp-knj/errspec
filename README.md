@@ -129,7 +129,7 @@ coverageの注意点:
 - 毎回テストを全件実行します。大きいプロジェクトでは`--`の後に`vitest run`の引数（ファイルや`--project`）を渡して絞れます。
 - 実行中のVitestの表示はJSONレポートに置き換わります。テストのログはstderrに出ます。
 - 識別プロパティの既定は`_tag,kind,type,code`です。`reason`や`status`で分かれるエラーは`--discriminant type,reason`のように指定してください。
-- テストが途中で失敗しても、それまでに成功したアサーションは数えます。ランナーの失敗は`runnerOk: false`と終了コード1で示します。
+- 成功した比較でも、テスト全体が失敗・スキップ・重複していれば確認済みには数えません。ランナーの失敗は`runnerOk: false`と終了コード1で示します。
 - `mentioned`はテストファイルに引用符付きの同じ文字列があるかで判定します。コメントや無関係な文字列も数えるため、`asserted`より弱い目安です。
 - `toThrow`は対象の関数を再実行しないため、投げたErrorの値は記録しません。`rejects`で受け取った値は記録します。
 
@@ -351,9 +351,7 @@ import、再export、paths、具体化したgeneric、union/intersectionをtsrs�
 型エラーや`noCheck: true`を無視して合格にはしません。
 型検査はTypeScript 7に合わせたtsrsで行います。TypeScript 7で廃止された`moduleResolution: node`（`node10`）は、TypeScript 7が未指定のCommonJSプロジェクトに使う`bundler`の解決として解析し、レポートの`assumptions`に記録します。この置き換えは合否に影響しません。
 
-型検査はTypeScript 7の動作に合わせたtsrsで行います。TypeScript 5.xの`tsc`で通るtsconfigでも、TypeScript 7で変わった既定値や廃止された設定で失敗することがあります。
-たとえば`outDir`があり`rootDir`を省略した設定では、`rootDir`がtsconfigのディレクトリになり、ワークスペースの別パッケージのソースを参照すると`TS6059`になります。
-`moduleResolution: node10`は`TS5108`になります。tsconfigに`rootDir`などを明示するか、それを補うtsconfigを`project`に指定してください。
+TypeScript 5.xの`tsc`で通るtsconfigでも、その他の廃止設定や型検査の違いで失敗することがあります。`rootDir`は出力範囲の設定として扱い、範囲外のソースを参照することだけを理由とする`TS6059`では解析を停止しません。
 
 ## CLIと診断
 

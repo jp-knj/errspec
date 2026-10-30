@@ -10,5 +10,5 @@ TestRun {
             name: "rejects A",
         }: Ambiguous,
     },
-    full_names: {},
+    sdk_names: {},
 }
