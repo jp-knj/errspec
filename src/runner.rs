@@ -165,3 +165,41 @@ pub(crate) fn run(
         },
     })
 }
+
+/// Run only the SDK scenarios of the registered files with Bun line coverage.
+/// Observation variables are not passed, so the testkit runs as plain tests and
+/// this execution never contributes to the verification verdict.
+pub(crate) fn bun_coverage(
+    root: &Path,
+    bun: Option<&Path>,
+    test_files: &[PathBuf],
+) -> Result<errspec::reach::LineHits, Finding> {
+    let executable = match bun {
+        Some(path) => path
+            .canonicalize()
+            .map_err(|e| Finding::new("EC_RUNNER", format!("Bun coverage: {e}")))?,
+        None => PathBuf::from("bun"),
+    };
+    let temp = tempfile::tempdir().map_err(|e| Finding::new("EC_RUNNER", e.to_string()))?;
+    let output = Command::new(executable)
+        .current_dir(root)
+        .env_remove("ERRSPEC_OBSERVATIONS")
+        .env_remove("ERRSPEC_RUN_ID")
+        .args([
+            "test",
+            "--coverage",
+            "--coverage-reporter=lcov",
+            "--coverage-dir",
+        ])
+        .arg(temp.path())
+        .args(["-t", r"errspec \["])
+        .args(test_files)
+        .output()
+        .map_err(|e| Finding::new("EC_RUNNER", format!("Bun coverage: {e}")))?;
+    let mut stderr = io::stderr().lock();
+    let _ = stderr.write_all(&output.stdout);
+    let _ = stderr.write_all(&output.stderr);
+    let text = fs::read_to_string(temp.path().join("lcov.info"))
+        .map_err(|e| Finding::new("EC_RUNNER", format!("Bun coverage report: {e}")))?;
+    errspec::reach::parse_lcov(&text).map_err(|e| Finding::new("EC_RUNNER", e))
+}

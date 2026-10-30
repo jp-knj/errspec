@@ -32,6 +32,7 @@ jobs:
       - run: node scripts/demo-scenarios.mjs
       - run: node scripts/demo-init.mjs
       - run: node scripts/demo-module-mock.mjs
+      - run: node scripts/demo-failure-paths.mjs
       - uses: actions/checkout@v4
         with:
           repository: open-circle/valibot

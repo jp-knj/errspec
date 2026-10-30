@@ -35,7 +35,7 @@ pub(crate) fn line_at(text: &str, offset: usize) -> usize {
         .count()
         + 1
 }
-fn key(root: &Path, node: P<Node>) -> String {
+pub(crate) fn key(root: &Path, node: P<Node>) -> String {
     let loc = location(root, node);
     format!("{}:{}:{:?}", loc.file, loc.byte_offset, node.kind())
 }
@@ -62,7 +62,7 @@ pub(crate) fn walk(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
         false
     });
 }
-fn walk_body(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
+pub(crate) fn walk_body(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
     if is_function_like_declaration(node) {
         return;
     }
@@ -252,6 +252,11 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
             };
         }
     };
+    collect(&adapter, root, discriminants)
+}
+
+/// Collect and propagate facts for source files under `root` in an already checked program.
+pub(crate) fn collect(adapter: &TsrsAdapter, root: &Path, discriminants: &[String]) -> ScanReport {
     let files: Vec<P<SourceFile>> = adapter
         .program
         .get_source_files()
@@ -328,7 +333,7 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
     }
     let mut inspector = Inspector {
         root,
-        adapter: &adapter,
+        adapter,
         bodies: &bodies,
         facts: &mut facts,
     };

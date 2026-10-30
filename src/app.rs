@@ -1,8 +1,9 @@
 use crate::{
+    failure_paths,
     input::{existing_tests, read_json},
     onboard,
-    request::{ContractAction, ContractRequest, Request},
-    scan, scenario_source, tsrs_adapter, verification,
+    request::{ContractAction, ContractRequest, Request, Runner},
+    runner, scan, scenario_source, tsrs_adapter, verification,
 };
 use errspec::{config::ValidatedConfig, contract, model::*, report::ReportData, snapshot};
 use std::{
@@ -63,6 +64,31 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
         }
         data.diagnostics
             .extend(scenario_source::inspect(&adapter, root, &config));
+        // Propagation is computed once, and only when some contract names an entry function.
+        let mut propagation = None;
+        for registration in &data.registrations {
+            let contract = registration.contract;
+            let Some(entry) = contract.entry() else {
+                continue;
+            };
+            let facts = propagation.get_or_insert_with(|| scan::collect(&adapter, root, &[]));
+            match failure_paths::analyze(&adapter, root, contract, &registration.tags, facts) {
+                Ok(analysis) => {
+                    data.paths.insert(contract.id().to_owned(), analysis.paths);
+                    data.diagnostics.extend(analysis.findings);
+                }
+                Err(error) => {
+                    data.analysis_complete = false;
+                    let mut f = Finding::new("EC002", error);
+                    f.contract_id = Some(contract.id().into());
+                    f.file = Some(entry.file.as_str().into());
+                    data.diagnostics.push(f);
+                }
+            }
+        }
+        if !data.analysis_complete {
+            return Ok(());
+        }
         if let Some(baseline) = &request.baseline {
             let previous: Snapshot = read_json(baseline, "EC_BASELINE")?;
             if request.strict_baseline
@@ -146,6 +172,9 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
                 let (observations, findings) = verification.observations?;
                 data.observations = Some(observations);
                 data.diagnostics.extend(findings);
+                if matches!(runner, Runner::Bun) && !data.paths.is_empty() {
+                    record_reach(&mut data, &config, root, bun.as_deref())?;
+                }
             }
             ContractAction::Snapshot { out } => {
                 // A snapshot inventories declared tags; registration gaps remain in the report.
@@ -166,6 +195,35 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
         data.fail(finding);
     }
     Ok(data.finish(mode))
+}
+
+/// Mark failure paths reached by any SDK scenario in a separate Bun coverage run.
+fn record_reach(
+    data: &mut ReportData<'_>,
+    config: &ValidatedConfig,
+    root: &std::path::Path,
+    bun: Option<&std::path::Path>,
+) -> Result<(), Finding> {
+    let files: Vec<_> = config
+        .contracts()
+        .iter()
+        .flat_map(|c| c.cases())
+        .map(|c| root.join(&c.test().file))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let lcov = runner::bun_coverage(root, bun, &files)?;
+    let resolve = |file: &str| root.join(file).canonicalize().ok();
+    let resolve_owned = |file: String| root.join(file).canonicalize().ok();
+    let hits = lcov
+        .into_iter()
+        .filter_map(|(file, lines)| Some((resolve_owned(file)?, lines)))
+        .collect();
+    for (contract, paths) in &mut data.paths {
+        let findings = errspec::reach::judge(contract, paths, &hits, resolve);
+        data.diagnostics.extend(findings);
+    }
+    Ok(())
 }
 
 /// Results crossing the execution/output boundary contain no compiler handles.

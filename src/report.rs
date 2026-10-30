@@ -14,6 +14,8 @@ pub struct ReportData<'a> {
     pub observations: Option<ObservationJudgments>,
     pub diagnostics: Vec<Finding>,
     pub delta: Option<Delta>,
+    /// Failure paths by contract id, for contracts with an entry function.
+    pub paths: std::collections::BTreeMap<String, Vec<FailurePath>>,
 }
 
 impl ReportData<'_> {
@@ -39,6 +41,8 @@ impl ReportData<'_> {
                     source: contract.source().clone(),
                     declared_boundaries: contract.boundaries().to_vec(),
                     tags: registration.tags.clone(),
+                    entry: contract.entry().cloned(),
+                    paths: self.paths.get(contract.id()).cloned().unwrap_or_default(),
                     cases: registration
                         .cases
                         .iter()

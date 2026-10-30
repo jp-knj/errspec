@@ -171,6 +171,21 @@ JSON出力schemaVersionは2です。ケースには`testStatus`と`observationSt
 
 **`passed`は、その実行で登録した観測・比較が成立したという意味です。アプリケーション全体の正しさの証明ではありません。**
 
+### 失敗の経路
+
+契約に`entry`（エラー型を返す関数）を書くと、「コードの失敗 → エラー型 → シナリオ」を一続きに照合します。
+
+```json
+"entry": { "file": "src/submit.ts", "export": "submit" }
+```
+
+- `check`は`entry`の本体で、タグを返す`return`を経路として一覧にします（レポートの`paths`）。
+- `check`は、`entry`からcatchを通らずに外へ出る明示的な`throw`／`Promise.reject`を`EC018`で報告します。エラー型に表れない失敗です。catchが再throwし得る場合や、外部の関数・動的な呼出は報告しません。
+- Bunでの`verify`は、通常の実行の後にerrspecのシナリオだけをカバレッジ付きで1回実行します。どのシナリオも到達しなかった`return`を`EC019`で報告します。同じタグのシナリオがあっても、通っていない経路が分かります。
+
+到達は行単位で判定します。`if (x) return ...`のように条件と`return`を1行に書くと、条件の評価だけで到達と数えるため、未到達を見逃すことがあります。到達は、期待値の確認が正しいことを意味しません。
+Vitestでは経路の一覧だけを出し、到達は記録しません。例は[examples/failure-paths](examples/failure-paths)です。
+
 ## 保証の境界
 
 - `fault`は開発者が指定した関数の実行を観測します。その戻り値が業務上のエラーであること、対象コードがそれを正しく消費したことまでは自動判定しません。
@@ -263,6 +278,8 @@ Bunは起動前に`--version`で版を確認し、1.2.19未満なら実行しま
 | EC014 | strictモードでbaselineにあったシナリオが変更された |
 | EC015 | テストが未登録のシナリオを登録している、タグ・テストファイル・`withoutFaults`が設定と食い違う（実行前の静的照合） |
 | EC016 | シナリオ本体が、設定にない障害IDや比較IDを使っている（実行前の静的照合） |
+| EC018 | `entry`からエラー型に表れない失敗（catchされないthrow／reject）が外へ出る |
+| EC019 | `entry`のタグを返す`return`に、どのシナリオも到達しなかった（Bun） |
 | EC_EVIDENCE | 観測プロトコル・run ID・ファイルが不正 |
 | EC_CONFIG / EC_BASELINE / EC_RUNNER / EC_SNAPSHOT / EC_INTERNAL | 設定・比較対象・実行器・保存・内部処理のエラー |
 | TS… | tsrsによるコンパイラ診断 |
@@ -296,10 +313,12 @@ node scripts/demo-bun.mjs
 node scripts/demo-scenarios.mjs
 node scripts/demo-init.mjs
 node scripts/demo-module-mock.mjs
+node scripts/demo-failure-paths.mjs
 ```
 
 `demo-scenarios.mjs`は実際のBun/Vitestを起動し、一時コピーだけに変更を加えます。
 `demo-init.mjs`は初期生成したテストを両ランナーで実行し、未記入のTODOが通常実行でもverifyでも失敗することを確認します。
+`demo-failure-paths.mjs`は、実際のBunで経路の到達を記録し、未テストの経路（EC019）とエラー型の外へ出るthrow（EC018）を確認します。
 `demo-module-mock.mjs`は、依存を直接importするコードへモジュールのmockから障害を差し込めること、mockを外すと`EC009`になることを両ランナーで確認します。
 必要なら`node scripts/demo-scenarios.mjs /path/to/errspec /path/to/bun`で実行ファイルを指定できます。
 `demo-init.mjs`も同じ引数で実行ファイルを指定できます。
