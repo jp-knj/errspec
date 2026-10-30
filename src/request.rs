@@ -5,6 +5,7 @@ pub(crate) enum Request {
     Contract(ContractRequest),
     Scan(ScanRequest),
     Init(InitRequest),
+    Coverage(CoverageRequest),
 }
 
 pub(crate) struct ContractRequest {
@@ -49,6 +50,15 @@ pub(crate) struct ScanRequest {
     pub project: PathBuf,
     pub discriminants: Vec<String>,
     pub fail_on_unknown: bool,
+}
+
+pub(crate) struct CoverageRequest {
+    pub project: PathBuf,
+    pub discriminants: Vec<String>,
+    pub vitest: Option<PathBuf>,
+    pub vitest_config: Option<PathBuf>,
+    pub fail_on_missing: bool,
+    pub runner_args: Vec<String>,
 }
 
 pub(crate) struct InitRequest {

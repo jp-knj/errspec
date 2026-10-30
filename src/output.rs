@@ -87,6 +87,10 @@ pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
             fail_on_unknown,
         } => write_scan(&report, fail_on_unknown, format),
         Outcome::Init(result) => write_init(result, format),
+        Outcome::Coverage {
+            report,
+            fail_on_missing,
+        } => write_coverage(&report, fail_on_missing, format),
     }
 }
 
@@ -199,6 +203,56 @@ fn write_scan(
                 eprintln!("{} {}", d.code, d.message);
             }
             println!("Conservative scan; all runtime errors known: false.");
+        }
+    }
+    ExitCode::from(code)
+}
+
+fn write_coverage(
+    report: &errspec::coverage::CoverageReport,
+    fail_on_missing: bool,
+    format: Format,
+) -> ExitCode {
+    use errspec::coverage::TagStatus;
+    let code = if !report.tests_executed || !report.evaluation_complete {
+        2
+    } else if !report.runner_ok || fail_on_missing && report.summary.missing > 0 {
+        1
+    } else {
+        0
+    };
+    match format {
+        Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
+        Format::Text => {
+            let s = &report.summary;
+            println!(
+                "coverage: {} error types, {} tags: {} asserted, {} mentioned only, {} missing",
+                s.types, s.tags, s.asserted, s.mentioned, s.missing
+            );
+            for t in &report.types {
+                let open: Vec<_> = t
+                    .tags
+                    .iter()
+                    .filter(|tag| tag.status != TagStatus::Asserted)
+                    .collect();
+                if open.is_empty() {
+                    continue;
+                }
+                println!(
+                    "{} {} [{}]: {}/{} asserted",
+                    t.source.file,
+                    t.source.export,
+                    t.source.discriminant,
+                    t.tags.len() - open.len(),
+                    t.tags.len()
+                );
+                for tag in open {
+                    println!("  {:<9} {}", tag.status.as_str(), tag.tag);
+                }
+            }
+            for d in &report.diagnostics {
+                eprintln!("{} {}", d.code, d.message);
+            }
         }
     }
     ExitCode::from(code)

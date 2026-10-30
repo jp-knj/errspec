@@ -1,5 +1,7 @@
 //! Command-line syntax and its conversion to internal requests.
-use crate::request::{ContractAction, ContractRequest, InitRequest, Request, Runner, ScanRequest};
+use crate::request::{
+    ContractAction, ContractRequest, CoverageRequest, InitRequest, Request, Runner, ScanRequest,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
@@ -61,6 +63,25 @@ enum Action {
         discriminant: Vec<String>,
         #[arg(long)]
         fail_on_unknown: bool,
+    },
+    /// Run existing Vitest tests and report which scanned error tags they assert.
+    Coverage {
+        #[arg(long, default_value = "tsconfig.json")]
+        project: PathBuf,
+        #[arg(long, value_delimiter = ',', default_value = "_tag,kind,type,code")]
+        discriminant: Vec<String>,
+        /// Vitest executable; defaults to the nearest node_modules/.bin/vitest.
+        #[arg(long)]
+        vitest: Option<PathBuf>,
+        /// Vitest config; defaults to the nearest vitest.config.* or vite.config.*.
+        #[arg(long)]
+        vitest_config: Option<PathBuf>,
+        /// Exit 1 when a tag is neither asserted nor mentioned by any test.
+        #[arg(long)]
+        fail_on_missing: bool,
+        /// Extra arguments for `vitest run`, after `--` (e.g. `-- --project backend`).
+        #[arg(last = true)]
+        runner_args: Vec<String>,
     },
     /// Resolve error tags and check registrations. Does not execute tests.
     Check,
@@ -137,6 +158,29 @@ impl Cli {
                         project,
                         discriminants: discriminant,
                         fail_on_unknown,
+                    }),
+                    self.format,
+                ));
+            }
+            Action::Coverage {
+                project,
+                discriminant,
+                vitest,
+                vitest_config,
+                fail_on_missing,
+                runner_args,
+            } => {
+                if self.baseline.is_some() || self.strict_baseline {
+                    return Err("coverage does not accept baseline options".into());
+                }
+                return Ok((
+                    Request::Coverage(CoverageRequest {
+                        project,
+                        discriminants: discriminant,
+                        vitest,
+                        vitest_config,
+                        fail_on_missing,
+                        runner_args,
                     }),
                     self.format,
                 ));
