@@ -55,6 +55,17 @@ pub(crate) fn text(node: P<Node>) -> String {
         .trim()
         .to_owned()
 }
+/// Unknown call expressions can span a whole callback body; keep enough to recognize the call.
+fn excerpt(text: &str) -> String {
+    const LIMIT: usize = 120;
+    let line = text.lines().next().unwrap_or("").trim_end();
+    if line.len() == text.len() && line.chars().count() <= LIMIT {
+        return line.into();
+    }
+    let mut short: String = line.chars().take(LIMIT).collect();
+    short.push('…');
+    short
+}
 pub(crate) fn walk(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
     callback(node);
     node.for_each_child(&mut |child| {
@@ -354,7 +365,7 @@ impl Inspector<'_> {
         self.facts.unknowns.push(Unknown {
             function: owner.into(),
             location: location(self.root, node),
-            expression: text(node),
+            expression: excerpt(&text(node)),
             reason: reason.into(),
         });
     }
