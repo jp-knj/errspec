@@ -58,7 +58,7 @@ export function scenarioTestName(contract: string, id: string): string {
   return `errspec ${JSON.stringify([contract, id])}`;
 }
 
-/** Register at the top level. Each invocation owns its observations, including in concurrent tests. */
+/** Register at the top level or inside describe. Each invocation owns its observations, including in concurrent tests. */
 export function scenarioTest(
   test: RegisterTest,
   file: string | URL,
