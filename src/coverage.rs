@@ -2,7 +2,7 @@
 //! Pure: callers supply candidates, records and test sources; nothing here reads files.
 use crate::{model::Finding, model::Source};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A type to judge. Kept apart from scan candidates so their reporting fields can grow.
 #[derive(Clone, Debug)]
@@ -20,7 +20,7 @@ pub struct AssertionRecord {
     pub values: Vec<(String, String)>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TagStatus {
     /// A passing assertion received a value carrying the tag.
@@ -36,6 +36,15 @@ impl TagStatus {
             Self::Asserted => "asserted",
             Self::Mentioned => "mentioned",
             Self::Missing => "missing",
+        }
+    }
+
+    /// Stronger evidence ranks higher; a lower rank than the baseline is a regression.
+    fn rank(self) -> u8 {
+        match self {
+            Self::Asserted => 2,
+            Self::Mentioned => 1,
+            Self::Missing => 0,
         }
     }
 }
@@ -76,7 +85,18 @@ pub struct CoverageReport {
     pub evaluation_complete: bool,
     pub summary: Summary,
     pub types: Vec<TypeCoverage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta: Option<CoverageDelta>,
     pub diagnostics: Vec<Finding>,
+}
+
+impl CoverageReport {
+    /// Regressions and new missing tags fail; improvements and unchanged gaps do not.
+    pub fn regressed(&self) -> bool {
+        self.delta
+            .as_ref()
+            .is_some_and(|d| !d.regressed.is_empty() || !d.new_missing.is_empty())
+    }
 }
 
 impl Default for CoverageReport {
@@ -89,6 +109,7 @@ impl Default for CoverageReport {
             evaluation_complete: false,
             summary: Summary::default(),
             types: vec![],
+            delta: None,
             diagnostics: vec![],
         }
     }
@@ -177,4 +198,104 @@ pub fn judge(
     }
     summary.types = types.len();
     (types, summary)
+}
+
+/// Per-tag statuses saved for gradual adoption, keyed by `file#export#discriminant`.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CoverageBaseline {
+    pub kind: String,
+    pub schema_version: u32,
+    pub types: BTreeMap<String, BTreeMap<String, TagStatus>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct TagChange {
+    #[serde(rename = "type")]
+    pub type_key: String,
+    pub tag: String,
+    pub from: TagStatus,
+    pub to: TagStatus,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct TagRef {
+    #[serde(rename = "type")]
+    pub type_key: String,
+    pub tag: String,
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverageDelta {
+    pub regressed: Vec<TagChange>,
+    pub new_missing: Vec<TagRef>,
+    pub improved: Vec<TagChange>,
+}
+
+const BASELINE_KIND: &str = "errspec/coverage-baseline";
+
+pub fn type_key(source: &Source) -> String {
+    format!("{}#{}#{}", source.file, source.export, source.discriminant)
+}
+
+pub fn capture(types: &[TypeCoverage]) -> CoverageBaseline {
+    CoverageBaseline {
+        kind: BASELINE_KIND.into(),
+        schema_version: 1,
+        types: types
+            .iter()
+            .map(|t| {
+                let tags = t
+                    .tags
+                    .iter()
+                    .map(|tag| (tag.tag.clone(), tag.status))
+                    .collect();
+                (type_key(&t.source), tags)
+            })
+            .collect(),
+    }
+}
+
+pub fn compare(
+    previous: &CoverageBaseline,
+    types: &[TypeCoverage],
+) -> Result<CoverageDelta, Finding> {
+    if previous.kind != BASELINE_KIND || previous.schema_version != 1 {
+        return Err(Finding::new(
+            "EC_BASELINE",
+            format!(
+                "Not a coverage baseline: {} v{}",
+                previous.kind, previous.schema_version
+            ),
+        ));
+    }
+    let mut delta = CoverageDelta::default();
+    for t in types {
+        let key = type_key(&t.source);
+        let before = previous.types.get(&key);
+        for tag in &t.tags {
+            match before.and_then(|tags| tags.get(&tag.tag)) {
+                Some(&from) if tag.status.rank() < from.rank() => delta.regressed.push(TagChange {
+                    type_key: key.clone(),
+                    tag: tag.tag.clone(),
+                    from,
+                    to: tag.status,
+                }),
+                Some(&from) if tag.status.rank() > from.rank() => delta.improved.push(TagChange {
+                    type_key: key.clone(),
+                    tag: tag.tag.clone(),
+                    from,
+                    to: tag.status,
+                }),
+                // A tag the baseline never saw must not arrive untested.
+                None if tag.status == TagStatus::Missing => delta.new_missing.push(TagRef {
+                    type_key: key.clone(),
+                    tag: tag.tag.clone(),
+                }),
+                _ => {}
+            }
+        }
+    }
+    Ok(delta)
 }

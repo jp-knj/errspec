@@ -81,6 +81,9 @@ enum Action {
         /// Exit 1 when a tag is neither asserted nor mentioned by any test.
         #[arg(long)]
         fail_on_missing: bool,
+        /// Write the current per-tag statuses for --baseline. Refuses to overwrite.
+        #[arg(long, conflicts_with = "baseline")]
+        save_baseline: Option<PathBuf>,
         /// Extra arguments for `vitest run`, after `--` (e.g. `-- --project backend`).
         #[arg(last = true)]
         runner_args: Vec<String>,
@@ -175,10 +178,11 @@ impl Cli {
                 vitest,
                 vitest_config,
                 fail_on_missing,
+                save_baseline,
                 runner_args,
             } => {
-                if self.baseline.is_some() || self.strict_baseline {
-                    return Err("coverage does not accept baseline options".into());
+                if self.strict_baseline {
+                    return Err("coverage does not accept --strict-baseline".into());
                 }
                 return Ok((
                     Request::Coverage(CoverageRequest {
@@ -188,6 +192,8 @@ impl Cli {
                         vitest_config,
                         fail_on_missing,
                         runner_args,
+                        baseline: self.baseline,
+                        save_baseline,
                     }),
                     self.format,
                 ));

@@ -56,6 +56,30 @@ Scenario: 失敗・否定のアサーションは証拠にしない
 - When: `errspec coverage`を実行する。
 - Then: その値を`asserted`の根拠にしない。
 
+### 今ある漏れを認めたまま、後退だけを止める
+
+開発者として、既存の漏れをすぐには直せなくても、新しい漏れや確認の後退をCIで止めたい。
+
+**受け入れ条件:**
+
+Scenario: 保存した状態から後退した場合、失敗にする
+
+- Given: `errspec coverage --save-baseline coverage-baseline.json`で現在のタグの状態を保存した。
+- When: テストの変更で、`asserted`だったタグが`mentioned`か`missing`に、または`mentioned`だったタグが`missing`になり、`--baseline coverage-baseline.json`で実行する。
+- Then: 後退したタグを示し、終了コード1にする。
+
+Scenario: 保存時になかったタグが未確認で現れた場合、失敗にする
+
+- Given: 型に新しいタグが加わり、どのテストにも現れない。
+- When: `--baseline`付きで実行する。
+- Then: 新しい`missing`として示し、終了コード1にする。
+
+Scenario: 改善や変わらない漏れは通す
+
+- Given: 保存時から漏れが残っている、または確認が強くなった。
+- When: `--baseline`付きで実行する。
+- Then: 改善を示し、終了コードは後退がなければ0にする。既存のbaselineファイルは上書きしない。
+
 ## 機能要件
 
 **入力:** tsconfig、識別プロパティ、Vitestの実行ファイル・設定（省略時は探索）、`vitest run`への追加引数。

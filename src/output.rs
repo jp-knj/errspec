@@ -217,9 +217,14 @@ fn write_coverage(
     format: Format,
 ) -> ExitCode {
     use errspec::coverage::TagStatus;
-    let code = if !report.tests_executed || !report.evaluation_complete {
+    // An unreadable, foreign or unwritable baseline is a usage error, like a failed scan.
+    let baseline_error = report.diagnostics.iter().any(|d| d.code == "EC_BASELINE");
+    let code = if !report.tests_executed || !report.evaluation_complete || baseline_error {
         2
-    } else if !report.runner_ok || fail_on_missing && report.summary.missing > 0 {
+    } else if !report.runner_ok
+        || fail_on_missing && report.summary.missing > 0
+        || report.regressed()
+    {
         1
     } else {
         0
@@ -254,6 +259,11 @@ fn write_coverage(
                     println!("  {:<9} {}", tag.status.as_str(), tag.tag);
                 }
             }
+            if let Some(delta) = &report.delta {
+                for line in delta_lines(delta) {
+                    println!("{line}");
+                }
+            }
             for d in &report.diagnostics {
                 eprintln!("{} {}", d.code, d.message);
             }
@@ -272,6 +282,15 @@ fn coverage_markdown(report: &errspec::coverage::CoverageReport) -> String {
     );
     for d in &report.diagnostics {
         out.push_str(&format!("\n> {} {}\n", d.code, d.message));
+    }
+    if let Some(delta) = &report.delta {
+        let lines = delta_lines(delta);
+        if !lines.is_empty() {
+            out.push_str("\n**Changes from baseline**\n\n");
+            for line in lines {
+                out.push_str(&format!("- {}\n", line.replace('|', "\\|")));
+            }
+        }
     }
     let cell = |text: &str| text.replace('|', "\\|");
     for t in &report.types {
@@ -304,4 +323,28 @@ fn coverage_markdown(report: &errspec::coverage::CoverageReport) -> String {
         }
     }
     out
+}
+
+fn delta_lines(delta: &errspec::coverage::CoverageDelta) -> Vec<String> {
+    let change = |label: &str, c: &errspec::coverage::TagChange| {
+        format!(
+            "{label}: {} {} {} -> {}",
+            c.type_key,
+            c.tag,
+            c.from.as_str(),
+            c.to.as_str()
+        )
+    };
+    delta
+        .regressed
+        .iter()
+        .map(|c| change("regressed", c))
+        .chain(
+            delta
+                .new_missing
+                .iter()
+                .map(|t| format!("new missing: {} {}", t.type_key, t.tag)),
+        )
+        .chain(delta.improved.iter().map(|c| change("improved", c)))
+        .collect()
 }
