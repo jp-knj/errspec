@@ -14,8 +14,11 @@
 - [エラー発見・伝播のRequirements](products/errspec/features/discovery/requirements.md) / [Design](products/errspec/features/discovery/design.md)
 - [配布・初期生成のRequirements](products/errspec/features/distribution/requirements.md) / [Design](products/errspec/features/distribution/design.md)
 - [既存テストによる網羅確認のRequirements](products/errspec/features/test-coverage/requirements.md) / [Design](products/errspec/features/test-coverage/design.md)
+- [Vitestによる変異の生成・実行・判定のRequirements](products/errspec/features/mutation-testing/requirements.md) / [Design](products/errspec/features/mutation-testing/design.md)（`mutate`として実装）
 
-CLIの責任分離は実装済みです。検証済み入力の型と判定・レポートの分離は、既存の入出力と合否を保つ次の改善としてDesignへ残しています。
+全機能提供の目標と、目標に対する実装済みの範囲は[mutator 0.2.0との機能対応表](products/errspec/mutator-coverage.md)を参照してください。最初のミューテーション機能は、Vitestによる生成・実行・判定です。差分実行や永続キャッシュなどは後続の機能です。
+
+CLIの責任分離、検証済み入力の型、判定とレポートの分離は実装済みです。共通機能の配置と期待値の確認は[Rustコードとsnaptestの基準](engineering/guidelines/rust-code.md)に従います。
 機能追加や出力の意味の変更は、別の要件として判断します。
 
 [仕様を共有する進め方](engineering/guidelines/specification-workflow.md)に従って更新します。

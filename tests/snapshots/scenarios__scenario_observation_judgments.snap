@@ -1,0 +1,705 @@
+---
+source: tests/scenarios.rs
+expression: reports
+---
+[
+  {
+    "case": "complete",
+    "report": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "passed",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "writes"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "observedAssertions": [
+                {
+                  "id": "status",
+                  "status": "passed"
+                },
+                {
+                  "id": "writes",
+                  "status": "passed"
+                }
+              ],
+              "observedFaults": [
+                {
+                  "calls": 1,
+                  "completed": 1,
+                  "id": "gateway"
+                }
+              ],
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "passed"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "e.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "diagnostics": [],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "verify",
+      "ok": true,
+      "schemaVersion": 2,
+      "testRunner": "vitest",
+      "testsExecuted": true
+    }
+  },
+  {
+    "case": "missing",
+    "report": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "missing",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "writes"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "passed"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "e.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "diagnostics": [
+        {
+          "code": "EC008",
+          "contractId": "checkout",
+          "message": "No SDK observation from this execution",
+          "scenarioId": "first",
+          "tag": "A"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "verify",
+      "ok": false,
+      "schemaVersion": 2,
+      "testRunner": "vitest",
+      "testsExecuted": true
+    }
+  },
+  {
+    "field": "faults",
+    "report": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "incomplete",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "writes"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "observedAssertions": [
+                {
+                  "id": "status",
+                  "status": "passed"
+                },
+                {
+                  "id": "writes",
+                  "status": "passed"
+                }
+              ],
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "passed"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "e.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "diagnostics": [
+        {
+          "code": "EC009",
+          "contractId": "checkout",
+          "message": "Required fault was not observed to complete: gateway",
+          "scenarioId": "first",
+          "tag": "A"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "verify",
+      "ok": false,
+      "schemaVersion": 2,
+      "testRunner": "vitest",
+      "testsExecuted": true
+    },
+    "value": []
+  },
+  {
+    "field": "faults",
+    "report": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "incomplete",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "writes"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "observedAssertions": [
+                {
+                  "id": "status",
+                  "status": "passed"
+                },
+                {
+                  "id": "writes",
+                  "status": "passed"
+                }
+              ],
+              "observedFaults": [
+                {
+                  "calls": 0,
+                  "completed": 0,
+                  "id": "gateway"
+                }
+              ],
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "passed"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "e.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "diagnostics": [
+        {
+          "code": "EC009",
+          "contractId": "checkout",
+          "message": "Required fault was not observed to complete: gateway",
+          "scenarioId": "first",
+          "tag": "A"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "verify",
+      "ok": false,
+      "schemaVersion": 2,
+      "testRunner": "vitest",
+      "testsExecuted": true
+    },
+    "value": [
+      {
+        "calls": 0,
+        "completed": 0,
+        "id": "gateway"
+      }
+    ]
+  },
+  {
+    "field": "faults",
+    "report": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "incomplete",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "writes"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "observedAssertions": [
+                {
+                  "id": "status",
+                  "status": "passed"
+                },
+                {
+                  "id": "writes",
+                  "status": "passed"
+                }
+              ],
+              "observedFaults": [
+                {
+                  "calls": 2,
+                  "completed": 1,
+                  "id": "gateway"
+                }
+              ],
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "passed"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "e.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "diagnostics": [
+        {
+          "code": "EC009",
+          "contractId": "checkout",
+          "message": "Required fault was not observed to complete: gateway",
+          "scenarioId": "first",
+          "tag": "A"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "verify",
+      "ok": false,
+      "schemaVersion": 2,
+      "testRunner": "vitest",
+      "testsExecuted": true
+    },
+    "value": [
+      {
+        "calls": 2,
+        "completed": 1,
+        "id": "gateway"
+      }
+    ]
+  },
+  {
+    "field": "assertions",
+    "report": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "incomplete",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "writes"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "observedAssertions": [
+                {
+                  "id": "status",
+                  "status": "passed"
+                }
+              ],
+              "observedFaults": [
+                {
+                  "calls": 1,
+                  "completed": 1,
+                  "id": "gateway"
+                }
+              ],
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "passed"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "e.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "diagnostics": [
+        {
+          "code": "EC010",
+          "contractId": "checkout",
+          "message": "Required assertion did not pass: writes",
+          "scenarioId": "first",
+          "tag": "A"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "verify",
+      "ok": false,
+      "schemaVersion": 2,
+      "testRunner": "vitest",
+      "testsExecuted": true
+    },
+    "value": [
+      {
+        "id": "status",
+        "status": "passed"
+      }
+    ]
+  },
+  {
+    "field": "assertions",
+    "report": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "incomplete",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "writes"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "observedAssertions": [
+                {
+                  "id": "status",
+                  "status": "failed"
+                },
+                {
+                  "id": "writes",
+                  "status": "passed"
+                }
+              ],
+              "observedFaults": [
+                {
+                  "calls": 1,
+                  "completed": 1,
+                  "id": "gateway"
+                }
+              ],
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "passed"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "e.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "diagnostics": [
+        {
+          "code": "EC010",
+          "contractId": "checkout",
+          "message": "Required assertion did not pass: status",
+          "scenarioId": "first",
+          "tag": "A"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "verify",
+      "ok": false,
+      "schemaVersion": 2,
+      "testRunner": "vitest",
+      "testsExecuted": true
+    },
+    "value": [
+      {
+        "id": "status",
+        "status": "failed"
+      },
+      {
+        "id": "writes",
+        "status": "passed"
+      }
+    ]
+  },
+  {
+    "field": "state",
+    "report": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "incomplete",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "writes"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "observedAssertions": [
+                {
+                  "id": "status",
+                  "status": "passed"
+                },
+                {
+                  "id": "writes",
+                  "status": "passed"
+                }
+              ],
+              "observedFaults": [
+                {
+                  "calls": 1,
+                  "completed": 1,
+                  "id": "gateway"
+                }
+              ],
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "passed"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "e.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "diagnostics": [
+        {
+          "code": "EC012",
+          "contractId": "checkout",
+          "message": "Scenario did not finish successfully: running",
+          "scenarioId": "first",
+          "tag": "A"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "verify",
+      "ok": false,
+      "schemaVersion": 2,
+      "testRunner": "vitest",
+      "testsExecuted": true
+    },
+    "value": "running"
+  },
+  {
+    "field": "state",
+    "report": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "failed",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "writes"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "observedAssertions": [
+                {
+                  "id": "status",
+                  "status": "passed"
+                },
+                {
+                  "id": "writes",
+                  "status": "passed"
+                }
+              ],
+              "observedFaults": [
+                {
+                  "calls": 1,
+                  "completed": 1,
+                  "id": "gateway"
+                }
+              ],
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "passed"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "e.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "diagnostics": [
+        {
+          "code": "EC012",
+          "contractId": "checkout",
+          "message": "Scenario did not finish successfully: failed",
+          "scenarioId": "first",
+          "tag": "A"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "verify",
+      "ok": false,
+      "schemaVersion": 2,
+      "testRunner": "vitest",
+      "testsExecuted": true
+    },
+    "value": "failed"
+  }
+]

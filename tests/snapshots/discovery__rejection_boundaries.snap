@@ -1,0 +1,444 @@
+---
+source: tests/discovery.rs
+expression: r
+---
+{
+  "allRuntimeErrorsKnown": false,
+  "assumptions": [
+    "May-propagate analysis, not a proof of runtime reachability or exhaustiveness.",
+    "Dependencies in node_modules and declaration-only implementations are not traversed.",
+    "Implicit exceptions, getters/proxies, eval and arbitrary callback execution are not modeled.",
+    "Return error properties and finite discriminants are candidates; their domain meaning requires review.",
+    "Conditional catches/rethrows and finally overrides are conservatively approximated.",
+    "Static calls assume function declarations and built-in globals are not reassigned or monkey-patched; mutable aliases and callbacks are unresolved."
+  ],
+  "candidates": [],
+  "diagnostics": [],
+  "edges": [
+    {
+      "awaited": true,
+      "callee": "async.ts:1:FunctionDeclaration",
+      "caller": "async.ts:146:FunctionDeclaration",
+      "catches": true,
+      "location": {
+        "byteOffset": 206,
+        "file": "async.ts",
+        "line": 4
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "async.ts:1:FunctionDeclaration",
+      "caller": "async.ts:229:FunctionDeclaration",
+      "catches": true,
+      "location": {
+        "byteOffset": 271,
+        "file": "async.ts",
+        "line": 5
+      },
+      "mayRethrow": false,
+      "returned": true
+    },
+    {
+      "awaited": false,
+      "callee": "async.ts:1:FunctionDeclaration",
+      "caller": "async.ts:321:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 369,
+        "file": "async.ts",
+        "line": 6
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": true,
+      "callee": "async.ts:1:FunctionDeclaration",
+      "caller": "async.ts:321:FunctionDeclaration",
+      "catches": true,
+      "location": {
+        "byteOffset": 369,
+        "file": "async.ts",
+        "line": 6
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "async.ts:1:FunctionDeclaration",
+      "caller": "async.ts:407:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 457,
+        "file": "async.ts",
+        "line": 7
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "async.ts:1:FunctionDeclaration",
+      "caller": "async.ts:407:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 457,
+        "file": "async.ts",
+        "line": 7
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "async.ts:1:FunctionDeclaration",
+      "caller": "async.ts:407:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 457,
+        "file": "async.ts",
+        "line": 7
+      },
+      "mayRethrow": false,
+      "returned": true
+    },
+    {
+      "awaited": false,
+      "callee": "async.ts:1:FunctionDeclaration",
+      "caller": "async.ts:565:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 594,
+        "file": "async.ts",
+        "line": 9
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "async.ts:719:FunctionDeclaration",
+      "caller": "async.ts:606:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 707,
+        "file": "async.ts",
+        "line": 10
+      },
+      "mayRethrow": false,
+      "returned": true
+    },
+    {
+      "awaited": true,
+      "callee": "async.ts:606:FunctionDeclaration",
+      "caller": "async.ts:719:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 773,
+        "file": "async.ts",
+        "line": 11
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": true,
+      "callee": "async.ts:1:FunctionDeclaration",
+      "caller": "async.ts:79:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 134,
+        "file": "async.ts",
+        "line": 3
+      },
+      "mayRethrow": false,
+      "returned": false
+    }
+  ],
+  "files": [
+    "async.ts"
+  ],
+  "functions": [
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "async.ts:1:SourceFile",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 1,
+        "file": "async.ts",
+        "line": 2
+      },
+      "name": "<module>"
+    },
+    {
+      "effects": [
+        {
+          "channel": "rejection",
+          "origin": "async.ts:49:ThrowStatement:Rejection",
+          "via": [
+            "async.ts:1:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "async.ts:1:FunctionDeclaration",
+      "isAsync": true,
+      "location": {
+        "byteOffset": 1,
+        "file": "async.ts",
+        "line": 2
+      },
+      "name": "source"
+    },
+    {
+      "effects": [
+        {
+          "channel": "rejection",
+          "origin": "async.ts:49:ThrowStatement:Rejection",
+          "via": [
+            "async.ts:79:FunctionDeclaration",
+            "async.ts:1:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "async.ts:79:FunctionDeclaration",
+      "isAsync": true,
+      "location": {
+        "byteOffset": 79,
+        "file": "async.ts",
+        "line": 3
+      },
+      "name": "outward"
+    },
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "async.ts:146:FunctionDeclaration",
+      "isAsync": true,
+      "location": {
+        "byteOffset": 146,
+        "file": "async.ts",
+        "line": 4
+      },
+      "name": "caught"
+    },
+    {
+      "effects": [
+        {
+          "channel": "rejection",
+          "origin": "async.ts:49:ThrowStatement:Rejection",
+          "via": [
+            "async.ts:229:FunctionDeclaration",
+            "async.ts:1:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": true,
+      "id": "async.ts:229:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 229,
+        "file": "async.ts",
+        "line": 5
+      },
+      "name": "returned"
+    },
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "async.ts:321:FunctionDeclaration",
+      "isAsync": true,
+      "location": {
+        "byteOffset": 321,
+        "file": "async.ts",
+        "line": 6
+      },
+      "name": "aliasCaught"
+    },
+    {
+      "effects": [
+        {
+          "channel": "rejection",
+          "origin": "async.ts:49:ThrowStatement:Rejection",
+          "via": [
+            "async.ts:407:FunctionDeclaration",
+            "async.ts:1:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "async.ts:407:FunctionDeclaration",
+      "isAsync": true,
+      "location": {
+        "byteOffset": 407,
+        "file": "async.ts",
+        "line": 7
+      },
+      "name": "aliasReturned"
+    },
+    {
+      "effects": [
+        {
+          "channel": "rejection",
+          "origin": "async.ts:526:CallExpression:Rejection",
+          "via": [
+            "async.ts:492:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "async.ts:492:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 492,
+        "file": "async.ts",
+        "line": 8
+      },
+      "name": "reject"
+    },
+    {
+      "effects": [],
+      "hasUnknown": true,
+      "id": "async.ts:565:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 565,
+        "file": "async.ts",
+        "line": 9
+      },
+      "name": "dangling"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "async.ts:674:ThrowStatement:Throw",
+          "via": [
+            "async.ts:606:FunctionDeclaration"
+          ]
+        },
+        {
+          "channel": "rejection",
+          "origin": "async.ts:674:ThrowStatement:Throw",
+          "via": [
+            "async.ts:606:FunctionDeclaration",
+            "async.ts:719:FunctionDeclaration",
+            "async.ts:606:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": true,
+      "id": "async.ts:606:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 606,
+        "file": "async.ts",
+        "line": 10
+      },
+      "name": "recursive"
+    },
+    {
+      "effects": [
+        {
+          "channel": "rejection",
+          "origin": "async.ts:674:ThrowStatement:Throw",
+          "via": [
+            "async.ts:719:FunctionDeclaration",
+            "async.ts:606:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": true,
+      "id": "async.ts:719:FunctionDeclaration",
+      "isAsync": true,
+      "location": {
+        "byteOffset": 719,
+        "file": "async.ts",
+        "line": 11
+      },
+      "name": "bounce"
+    }
+  ],
+  "kind": "errspec/scan",
+  "origins": [
+    {
+      "caught": false,
+      "channel": "rejection",
+      "errorType": "Error",
+      "escapes": true,
+      "function": "async.ts:1:FunctionDeclaration",
+      "id": "async.ts:49:ThrowStatement:Rejection",
+      "location": {
+        "byteOffset": 49,
+        "file": "async.ts",
+        "line": 2
+      }
+    },
+    {
+      "caught": false,
+      "channel": "rejection",
+      "errorType": "Error",
+      "escapes": true,
+      "function": "async.ts:492:FunctionDeclaration",
+      "id": "async.ts:526:CallExpression:Rejection",
+      "location": {
+        "byteOffset": 526,
+        "file": "async.ts",
+        "line": 8
+      }
+    },
+    {
+      "caught": false,
+      "channel": "throw",
+      "errorType": "Error",
+      "escapes": true,
+      "function": "async.ts:606:FunctionDeclaration",
+      "id": "async.ts:674:ThrowStatement:Throw",
+      "location": {
+        "byteOffset": 674,
+        "file": "async.ts",
+        "line": 10
+      }
+    }
+  ],
+  "scanComplete": true,
+  "schemaVersion": 1,
+  "unknowns": [
+    {
+      "expression": "Promise.resolve()",
+      "function": "async.ts:229:FunctionDeclaration",
+      "location": {
+        "byteOffset": 298,
+        "file": "async.ts",
+        "line": 5
+      },
+      "reason": "implementation_outside_scan_or_dynamic_signature"
+    },
+    {
+      "expression": "source()",
+      "function": "async.ts:565:FunctionDeclaration",
+      "location": {
+        "byteOffset": 594,
+        "file": "async.ts",
+        "line": 9
+      },
+      "reason": "promise_use_not_resolved_to_await_or_return"
+    },
+    {
+      "expression": "Math.random()",
+      "function": "async.ts:606:FunctionDeclaration",
+      "location": {
+        "byteOffset": 655,
+        "file": "async.ts",
+        "line": 10
+      },
+      "reason": "implementation_outside_scan_or_dynamic_signature"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+---
+source: tests/cli.rs
+expression: "snapshots::project(&report, dir.path())"
+---
+{
+  "analysisComplete": false,
+  "contracts": [],
+  "diagnostics": [
+    {
+      "byteOffset": 24,
+      "code": "TS2304",
+      "file": "<project>/errors.ts",
+      "line": 1,
+      "message": "Cannot find name 'MissingType'."
+    }
+  ],
+  "engine": {
+    "name": "tsrs",
+    "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+  },
+  "mode": "check",
+  "ok": false,
+  "schemaVersion": 2,
+  "testsExecuted": false
+}

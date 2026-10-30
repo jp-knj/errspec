@@ -1,0 +1,62 @@
+---
+source: tests/coverage.rs
+expression: "json!({\"types\": types, \"summary\": summary})"
+---
+{
+  "summary": {
+    "asserted": 2,
+    "mentioned": 1,
+    "missing": 1,
+    "tags": 4,
+    "types": 2
+  },
+  "types": [
+    {
+      "source": {
+        "discriminant": "_tag",
+        "export": "Failure",
+        "file": "errors.ts"
+      },
+      "tags": [
+        {
+          "status": "asserted",
+          "tag": "A",
+          "tests": [
+            "a.test.ts > t"
+          ]
+        },
+        {
+          "status": "mentioned",
+          "tag": "B"
+        },
+        {
+          "status": "missing",
+          "tag": "C"
+        },
+        {
+          "status": "asserted",
+          "tag": "D",
+          "tests": [
+            "a.test.ts > t"
+          ]
+        }
+      ]
+    },
+    {
+      "source": {
+        "discriminant": "_tag",
+        "export": "StoreFailure",
+        "file": "store.ts"
+      },
+      "tags": [
+        {
+          "status": "asserted",
+          "tag": "A",
+          "tests": [
+            "a.test.ts > t"
+          ]
+        }
+      ]
+    }
+  ]
+}

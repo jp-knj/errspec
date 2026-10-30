@@ -18,6 +18,8 @@
 
 ## 実装方針
 
+ASTの位置・本文・再帰走査は、複数機能が同じ規則を使うためtsrs adapterに集約します。関数本体の走査と伝播規則はこの機能が担当します。`Location`は共通モデルで定義し、`discovery::Location`も再公開します。配置と互換性の確認は[Rustコードとsnaptestの基準](../../../../engineering/guidelines/rust-code.md)に従います。
+
 既存のtsrs adapterでtsconfigを開き、コンパイラのソース一覧とASTを走査します。正規表現や名前の一致で呼出先を決めず、シンボルから実際の関数宣言とconstの初期化式をたどります。型のsignatureが一致しても同じ実装とは扱わず、引数や可変の別名は未解決として残します。メンバー呼出ではsignatureに対応する実装を候補として結び、動的dispatchの不明も必ず記録します。型候補は公開type alias/interface/classについて識別プロパティの有限文字列を抽出します。
 
 Promise.rejectは標準ライブラリの宣言と受信側の値の束縛を確認します。PromiseConstructor型の引数は組み込みPromiseとみなしません。関数宣言と組み込みグローバルが実行中に差し替えられない前提をレポートへ明記します。Promiseのawait・returnへの別名追跡もconstだけを対象にします。

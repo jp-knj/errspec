@@ -1,0 +1,107 @@
+---
+source: tests/scenarios.rs
+expression: "json!({\"before\": before, \"after\": after, \"delta\": delta})"
+---
+{
+  "after": {
+    "contracts": {
+      "checkout": {
+        "scenarios": {
+          "first": {
+            "expect": "reject without writing",
+            "observe": {
+              "assertions": [
+                "status"
+              ],
+              "faults": [
+                "gateway"
+              ]
+            },
+            "tag": "A",
+            "test": {
+              "file": "case.test.ts",
+              "name": "errspec [\"checkout\",\"first\"]"
+            }
+          }
+        },
+        "source": {
+          "discriminant": "tag",
+          "export": "E",
+          "file": "e.ts"
+        },
+        "tags": [
+          "A"
+        ]
+      }
+    },
+    "kind": "errspec/snapshot",
+    "schemaVersion": 2
+  },
+  "before": {
+    "contracts": {
+      "checkout": {
+        "scenarios": {
+          "first": {
+            "expect": "reject without writing",
+            "observe": {
+              "assertions": [
+                "status",
+                "writes"
+              ],
+              "faults": [
+                "gateway"
+              ]
+            },
+            "tag": "A",
+            "test": {
+              "file": "case.test.ts",
+              "name": "errspec [\"checkout\",\"first\"]"
+            }
+          },
+          "retry": {
+            "expect": "stop after retry",
+            "observe": {
+              "assertions": [
+                "attempts"
+              ],
+              "faults": [
+                "gateway"
+              ]
+            },
+            "tag": "A",
+            "test": {
+              "file": "case.test.ts",
+              "name": "errspec [\"checkout\",\"retry\"]"
+            }
+          }
+        },
+        "source": {
+          "discriminant": "tag",
+          "export": "E",
+          "file": "e.ts"
+        },
+        "tags": [
+          "A"
+        ]
+      }
+    },
+    "kind": "errspec/snapshot",
+    "schemaVersion": 2
+  },
+  "delta": {
+    "added": {},
+    "addedScenarios": {},
+    "changedScenarios": {
+      "checkout": [
+        "first"
+      ]
+    },
+    "removed": {},
+    "removedContracts": [],
+    "removedScenarios": {
+      "checkout": [
+        "retry"
+      ]
+    }
+  }
+}

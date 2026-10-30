@@ -1,6 +1,8 @@
 use serde_json::Value;
 use std::{fs, process::Command};
 use tempfile::TempDir;
+#[path = "support/snapshots.rs"]
+mod snapshots;
 
 fn project(files: &[(&str, &str)]) -> TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -89,6 +91,7 @@ export function shadow(renamed: () => void): void { renamed(); }
     assert_eq!(function(&r, "shadow")["hasUnknown"], true);
     assert_eq!(r["allRuntimeErrorsKnown"], false);
     assert_eq!(scan(&dir, &["--fail-on-unknown"]).0, 1);
+    insta::assert_json_snapshot!("imported_aliases_recursion_and_catches", r);
 }
 
 #[test]
@@ -141,6 +144,7 @@ export async function bounce(): Promise<void> { await recursive(); }
             );
         }
     }
+    insta::assert_json_snapshot!("rejection_boundaries", r);
 }
 
 #[test]
@@ -181,6 +185,7 @@ export function caller() { overload(''); }
             .len(),
         1
     );
+    insta::assert_json_snapshot!("result_errors_and_overloads", r);
 }
 
 #[test]
@@ -228,6 +233,7 @@ export async function mutablePromise() { let p = nativeAlias(); try { await p; }
             "{name}: {r}"
         );
     }
+    insta::assert_json_snapshot!("unresolved_runtime_bindings", r);
 }
 
 #[test]
@@ -237,4 +243,5 @@ fn invalid_types_fail_without_claiming_a_complete_scan() {
     assert_eq!(status, 2);
     assert_eq!(r["scanComplete"], false);
     assert!(!r["diagnostics"].as_array().unwrap().is_empty());
+    insta::assert_json_snapshot!("compiler_diagnostics", snapshots::project(&r, dir.path()));
 }

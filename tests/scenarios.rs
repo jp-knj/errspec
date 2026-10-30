@@ -79,7 +79,10 @@ fn check_runner(config: Value, runner_names: &[&str], values: Vec<Value>) -> Rep
 fn multiple_scenarios_share_a_tag_but_ids_are_unique() {
     let cfg: Config = serde_json::from_value(config()).unwrap();
     let cfg = ValidatedConfig::try_from(cfg).unwrap();
-    let report = support::register(&cfg, &["A", "B"]).finish("check");
+    let data = support::register(&cfg, &["A", "B"]);
+    insta::assert_debug_snapshot!("scenario_registrations", data.registrations);
+    let report = data.finish("check");
+    insta::assert_json_snapshot!("registered_and_missing_scenarios", report);
     let result = &report.contracts[0];
     let gaps = &report.diagnostics;
     assert_eq!(result.cases.len(), 3);
@@ -122,14 +125,17 @@ fn version_two_cannot_omit_observation_requirements_or_use_old_names() {
 
 #[test]
 fn passing_test_requires_actual_complete_observations() {
+    let mut reports = Vec::new();
     let report = check(vec![record()]);
     assert!(report.diagnostics.is_empty());
     assert_eq!(
         report.contracts[0].cases[0].observation_status,
         ObservationStatus::Passed
     );
+    reports.push(json!({"case": "complete", "report": report}));
     let report = check(vec![]);
     assert_eq!(report.diagnostics[0].code, "EC008");
+    reports.push(json!({"case": "missing", "report": report}));
     for (field, value, code) in [
         ("faults", json!([]), "EC009"),
         (
@@ -175,7 +181,9 @@ fn passing_test_requires_actual_complete_observations() {
             report.contracts[0].cases[0].observation_status,
             ObservationStatus::Passed
         );
+        reports.push(json!({"field": field, "value": value, "report": report}));
     }
+    insta::assert_json_snapshot!("scenario_observation_judgments", reports);
 }
 
 #[test]
@@ -259,6 +267,7 @@ fn wrong_identity_extra_ids_and_repeated_execution_are_rejected() {
         report.contracts[0].cases[0].observation_status,
         ObservationStatus::Invalid
     );
+    insta::assert_json_snapshot!("duplicate_scenario_execution", report);
 }
 
 #[test]
@@ -316,4 +325,8 @@ fn baseline_tracks_scenario_removal_and_requirement_changes_with_unchanged_tags(
     assert!(delta.added.is_empty() && delta.removed.is_empty());
     assert_eq!(delta.removed_scenarios["checkout"], ["retry"]);
     assert_eq!(delta.changed_scenarios["checkout"], ["first"]);
+    insta::assert_json_snapshot!(
+        "scenario_history_delta",
+        json!({"before": before, "after": after, "delta": delta})
+    );
 }

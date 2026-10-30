@@ -1,0 +1,33 @@
+---
+source: tests/discovery.rs
+expression: "snapshots::project(&r, dir.path())"
+---
+{
+  "allRuntimeErrorsKnown": false,
+  "assumptions": [
+    "May-propagate analysis, not a proof of runtime reachability or exhaustiveness.",
+    "Dependencies in node_modules and declaration-only implementations are not traversed.",
+    "Implicit exceptions, getters/proxies, eval and arbitrary callback execution are not modeled.",
+    "Return error properties and finite discriminants are candidates; their domain meaning requires review.",
+    "Conditional catches/rethrows and finally overrides are conservatively approximated.",
+    "Static calls assume function declarations and built-in globals are not reassigned or monkey-patched; mutable aliases and callbacks are unresolved."
+  ],
+  "candidates": [],
+  "diagnostics": [
+    {
+      "byteOffset": 13,
+      "code": "TS2322",
+      "file": "<project>/bad.ts",
+      "line": 1,
+      "message": "Type 'string' is not assignable to type 'number'."
+    }
+  ],
+  "edges": [],
+  "files": [],
+  "functions": [],
+  "kind": "errspec/scan",
+  "origins": [],
+  "scanComplete": false,
+  "schemaVersion": 1,
+  "unknowns": []
+}

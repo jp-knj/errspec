@@ -6,6 +6,7 @@ pub mod coverage;
 pub mod discovery;
 pub mod evidence;
 pub mod model;
+pub mod mutation;
 pub mod observation;
 pub mod observation_io;
 pub mod report;

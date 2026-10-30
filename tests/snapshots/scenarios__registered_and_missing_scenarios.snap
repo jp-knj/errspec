@@ -1,0 +1,87 @@
+---
+source: tests/scenarios.rs
+expression: report
+---
+{
+  "schemaVersion": 2,
+  "engine": {
+    "name": "tsrs",
+    "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+  },
+  "mode": "check",
+  "ok": false,
+  "analysisComplete": true,
+  "testsExecuted": false,
+  "contracts": [
+    {
+      "id": "checkout",
+      "source": {
+        "file": "e.ts",
+        "export": "E",
+        "discriminant": "tag"
+      },
+      "declaredBoundaries": [],
+      "tags": [
+        "A",
+        "B"
+      ],
+      "cases": [
+        {
+          "id": "first",
+          "tag": "A",
+          "registration": "registered",
+          "testStatus": "not_run",
+          "test": {
+            "file": "case.test.ts",
+            "name": "errspec [\"checkout\",\"first\"]"
+          },
+          "expect": "reject without writing",
+          "observe": {
+            "faults": [
+              "gateway"
+            ],
+            "assertions": [
+              "status",
+              "writes"
+            ]
+          },
+          "observationStatus": "not_run"
+        },
+        {
+          "id": "retry",
+          "tag": "A",
+          "registration": "registered",
+          "testStatus": "not_run",
+          "test": {
+            "file": "case.test.ts",
+            "name": "errspec [\"checkout\",\"retry\"]"
+          },
+          "expect": "stop after retry",
+          "observe": {
+            "faults": [
+              "gateway"
+            ],
+            "assertions": [
+              "attempts"
+            ]
+          },
+          "observationStatus": "not_run"
+        },
+        {
+          "tag": "B",
+          "registration": "missing",
+          "testStatus": "not_run",
+          "observationStatus": "not_required"
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "EC001",
+      "message": "Error variant has no registered failure contract and test",
+      "contractId": "checkout",
+      "tag": "B"
+    }
+  ]
+}

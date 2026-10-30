@@ -1,0 +1,45 @@
+---
+source: tests/scenario_source.rs
+expression: outcomes
+---
+[
+  {
+    "findings": [
+      {
+        "byteOffset": 614,
+        "code": "EC017",
+        "file": "case.test.ts",
+        "line": 15,
+        "message": "scenarioTest is registered inside describe; its full test name cannot match"
+      }
+    ],
+    "status": 1,
+    "wrapper": "describe('group', "
+  },
+  {
+    "findings": [
+      {
+        "byteOffset": 619,
+        "code": "EC017",
+        "file": "case.test.ts",
+        "line": 15,
+        "message": "scenarioTest is registered inside describe; its full test name cannot match"
+      }
+    ],
+    "status": 1,
+    "wrapper": "describe.only('group', "
+  },
+  {
+    "findings": [
+      {
+        "byteOffset": 624,
+        "code": "EC017",
+        "file": "case.test.ts",
+        "line": 15,
+        "message": "scenarioTest is registered inside describe; its full test name cannot match"
+      }
+    ],
+    "status": 1,
+    "wrapper": "describe.each([1])('group', "
+  }
+]

@@ -1,0 +1,76 @@
+---
+source: tests/baseline.rs
+expression: report
+---
+{
+  "analysisComplete": true,
+  "contracts": [
+    {
+      "cases": [
+        {
+          "expect": "reject without writing",
+          "id": "retry",
+          "observationStatus": "not_run",
+          "observe": {
+            "assertions": [
+              "status",
+              "orders"
+            ],
+            "faults": [
+              "gateway"
+            ]
+          },
+          "registration": "registered",
+          "tag": "A",
+          "test": {
+            "file": "case.test.ts",
+            "name": "errspec [\"checkout\",\"retry\"]"
+          },
+          "testStatus": "not_run"
+        }
+      ],
+      "declaredBoundaries": [],
+      "id": "checkout",
+      "source": {
+        "discriminant": "tag",
+        "export": "E",
+        "file": "errors.ts"
+      },
+      "tags": [
+        "A"
+      ]
+    }
+  ],
+  "delta": {
+    "added": {},
+    "addedScenarios": {
+      "checkout": [
+        "retry"
+      ]
+    },
+    "changedScenarios": {},
+    "removed": {},
+    "removedContracts": [],
+    "removedScenarios": {
+      "checkout": [
+        "first"
+      ]
+    }
+  },
+  "diagnostics": [
+    {
+      "code": "EC013",
+      "contractId": "checkout",
+      "message": "Scenario removed from baseline; review before creating a new baseline",
+      "scenarioId": "first"
+    }
+  ],
+  "engine": {
+    "name": "tsrs",
+    "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+  },
+  "mode": "check",
+  "ok": false,
+  "schemaVersion": 2,
+  "testsExecuted": false
+}

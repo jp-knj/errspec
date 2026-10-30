@@ -1,0 +1,14 @@
+---
+source: tests/evidence.rs
+expression: tests
+---
+TestRun {
+    runner: "vitest",
+    statuses: {
+        TestRef {
+            file: "case.test.ts",
+            name: "rejects A",
+        }: Ambiguous,
+    },
+    full_names: {},
+}
