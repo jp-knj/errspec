@@ -238,6 +238,12 @@ fn write_coverage(
                 "coverage: {} error types, {} tags: {} asserted, {} mentioned only, {} missing",
                 s.types, s.tags, s.asserted, s.mentioned, s.missing
             );
+            if report.skipped_external > 0 {
+                println!(
+                    "skipped {} types declared only in dependencies",
+                    report.skipped_external
+                );
+            }
             for t in &report.types {
                 let open: Vec<_> = t
                     .tags
@@ -248,12 +254,17 @@ fn write_coverage(
                     continue;
                 }
                 println!(
-                    "{} {} [{}]: {}/{} asserted",
+                    "{} {} [{}]: {}/{} asserted{}",
                     t.source.file,
                     t.source.export,
                     t.source.discriminant,
                     t.tags.len() - open.len(),
-                    t.tags.len()
+                    t.tags.len(),
+                    if t.flows.is_empty() {
+                        " (never seen returned or thrown)"
+                    } else {
+                        ""
+                    }
                 );
                 for tag in open {
                     println!("  {:<9} {}", tag.status.as_str(), tag.tag);
@@ -280,6 +291,12 @@ fn coverage_markdown(report: &errspec::coverage::CoverageReport) -> String {
         "**errspec coverage**: {} error types, {} tags: {} asserted, {} mentioned only, {} missing\n",
         s.types, s.tags, s.asserted, s.mentioned, s.missing
     );
+    if report.skipped_external > 0 {
+        out.push_str(&format!(
+            "\nSkipped {} types declared only in dependencies.\n",
+            report.skipped_external
+        ));
+    }
     for d in &report.diagnostics {
         out.push_str(&format!("\n> {} {}\n", d.code, d.message));
     }

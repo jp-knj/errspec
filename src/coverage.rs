@@ -1,6 +1,6 @@
 //! Judge which error tags existing tests assert, from recorded assertion values.
 //! Pure: callers supply candidates, records and test sources; nothing here reads files.
-use crate::{model::Finding, model::Source};
+use crate::{discovery::Channel, model::Finding, model::Source};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct ErrorType {
     pub source: Source,
     pub tags: Vec<String>,
+    /// How scan saw the type leave a function; empty when it never did (e.g. a consumed port error or a data union).
+    pub flows: Vec<Channel>,
 }
 
 /// One passing, non-negated assertion written by the Vitest recorder.
@@ -61,6 +63,7 @@ pub struct TagCoverage {
 #[derive(Debug, Serialize)]
 pub struct TypeCoverage {
     pub source: Source,
+    pub flows: Vec<Channel>,
     pub tags: Vec<TagCoverage>,
 }
 
@@ -84,6 +87,8 @@ pub struct CoverageReport {
     #[serde(skip)]
     pub evaluation_complete: bool,
     pub summary: Summary,
+    /// Types whose tags are all declared in dependencies; their tests belong to those packages.
+    pub skipped_external: usize,
     pub types: Vec<TypeCoverage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delta: Option<CoverageDelta>,
@@ -107,6 +112,7 @@ impl Default for CoverageReport {
             tests_executed: false,
             runner_ok: false,
             evaluation_complete: false,
+            skipped_external: 0,
             summary: Summary::default(),
             types: vec![],
             delta: None,
@@ -177,6 +183,7 @@ pub fn judge(
                 .collect();
             TypeCoverage {
                 source: candidate.source.clone(),
+                flows: candidate.flows.clone(),
                 tags,
             }
         })
