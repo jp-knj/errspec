@@ -95,7 +95,8 @@ fn read_records(directory: &Path) -> Result<Vec<AssertionRecord>, Finding> {
 
 pub(crate) fn run(request: &CoverageRequest) -> CoverageReport {
     let mut report = CoverageReport::default();
-    let scanned = scan::run(&request.project, &request.discriminants);
+    let scanned = scan::run(&request.project, &request.discriminants, &request.analysis);
+    report.analysis = scanned.analysis;
     if !scanned.scan_complete {
         report.diagnostics = scanned.diagnostics;
         return report;

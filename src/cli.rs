@@ -23,6 +23,15 @@ pub(crate) struct Cli {
     /// Fail when an existing v2 scenario changes from the baseline (check/verify).
     #[arg(long, global = true, requires = "baseline")]
     strict_baseline: bool,
+    /// Analysis backend: use the project's TypeScript 6/7 API when installed.
+    #[arg(long, global = true, value_enum)]
+    analysis_engine: Option<CliAnalysisEngine>,
+    /// Installed TypeScript package directory (relative to the invoking directory).
+    #[arg(long, global = true)]
+    typescript_package: Option<PathBuf>,
+    /// Node executable used only by the TypeScript analysis backend.
+    #[arg(long, global = true)]
+    analysis_node: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -35,6 +44,23 @@ pub(crate) enum Format {
 enum CliRunner {
     Vitest,
     Bun,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum CliAnalysisEngine {
+    Auto,
+    Tsrs,
+    Typescript,
+}
+
+impl From<CliAnalysisEngine> for crate::analysis_backend::Engine {
+    fn from(engine: CliAnalysisEngine) -> Self {
+        match engine {
+            CliAnalysisEngine::Auto => Self::Auto,
+            CliAnalysisEngine::Tsrs => Self::Tsrs,
+            CliAnalysisEngine::Typescript => Self::Typescript,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -142,6 +168,17 @@ impl From<CliRunner> for Runner {
 impl Cli {
     /// Translate CLI syntax once. Execution code never receives clap argument types.
     pub(crate) fn into_request(self, explicit_config: bool) -> Result<(Request, Format), String> {
+        let explicit_analysis = self.analysis_engine.is_some()
+            || self.typescript_package.is_some()
+            || self.analysis_node.is_some();
+        let analysis = crate::analysis_backend::Options {
+            engine: self.analysis_engine.map(Into::into).unwrap_or_default(),
+            package: self.typescript_package,
+            node: self.analysis_node.unwrap_or_else(|| "node".into()),
+        };
+        if analysis.engine == crate::analysis_backend::Engine::Tsrs && analysis.package.is_some() {
+            return Err("--typescript-package conflicts with --analysis-engine tsrs".into());
+        }
         let command = match self.command {
             Action::MutationSource => return Ok((Request::MutationSource, self.format)),
             Action::Mutate {
@@ -155,8 +192,14 @@ impl Cli {
                 node,
                 fail_on_undetected,
             } => {
-                if explicit_config || self.baseline.is_some() || self.strict_baseline {
-                    return Err("mutate does not accept --config or baseline options".into());
+                if explicit_config
+                    || self.baseline.is_some()
+                    || self.strict_baseline
+                    || explicit_analysis
+                {
+                    return Err(
+                        "mutate does not accept --config, baseline, or analysis options".into(),
+                    );
                 }
                 return Ok((
                     Request::Mutation(MutationRequest {
@@ -187,6 +230,7 @@ impl Cli {
                 }
                 return Ok((
                     Request::Init(InitRequest {
+                        analysis,
                         project,
                         source,
                         export,
@@ -209,6 +253,7 @@ impl Cli {
                 }
                 return Ok((
                     Request::Scan(ScanRequest {
+                        analysis,
                         project,
                         discriminants: discriminant,
                         fail_on_unknown,
@@ -229,6 +274,7 @@ impl Cli {
                 }
                 return Ok((
                     Request::Coverage(CoverageRequest {
+                        analysis,
                         project,
                         discriminants: discriminant,
                         vitest,
@@ -255,6 +301,7 @@ impl Cli {
         };
         Ok((
             Request::Contract(ContractRequest {
+                analysis,
                 command,
                 config: self.config,
                 baseline: self.baseline,

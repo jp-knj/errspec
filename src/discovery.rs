@@ -1,16 +1,16 @@
 //! Owned, compiler-independent facts and a finite may-propagate analysis.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 mod propagation;
 
 pub use crate::model::Location;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Candidate {
     pub source: crate::model::Source,
     pub tags: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum Channel {
     Throw,
@@ -18,7 +18,7 @@ pub enum Channel {
     Result,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Origin {
     pub id: String,
@@ -39,7 +39,8 @@ pub struct Effect {
 }
 
 /// Collected function identity, before propagation has computed any effects.
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FunctionFacts {
     pub id: String,
     pub name: String,
@@ -48,7 +49,8 @@ pub struct FunctionFacts {
 }
 
 /// Owned facts collected by a frontend. No compiler handles or derived summaries.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScanFacts {
     pub files: Vec<String>,
     pub candidates: Vec<Candidate>,
@@ -113,7 +115,7 @@ pub struct Function {
     pub has_unknown: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Edge {
     pub caller: String,
@@ -125,7 +127,7 @@ pub struct Edge {
     pub may_rethrow: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Unknown {
     pub function: String,
     pub location: Location,
@@ -136,6 +138,8 @@ pub struct Unknown {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<crate::model::AnalysisInfo>,
     pub kind: &'static str,
     pub schema_version: u32,
     pub scan_complete: bool,
@@ -153,6 +157,7 @@ pub struct ScanReport {
 impl Default for ScanReport {
     fn default() -> Self {
         Self {
+            analysis: None,
             kind: "errspec/scan",
             schema_version: 1,
             scan_complete: false,

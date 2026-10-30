@@ -9,6 +9,8 @@ errspecは、TypeScriptのエラー型と、失敗時に期待する振る舞い
 機能の条件は[失敗シナリオ検証のRequirements](features/failure-verification/requirements.md)に定めます。
 [エラー候補と伝播経路の調査](features/discovery/requirements.md)で登録対象を探し、[配布と初期生成](features/distribution/requirements.md)で導入を進められるようにします。
 
+利用先のTypeScriptの設定と型解釈を維持して検証できることを重視します。[TypeScript 6・7の解析backend選択](features/typescript-compatibility/requirements.md)で、対応条件を定めます。
+
 製品目標は、[mutator 0.2.0](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/README.md)の全機能を包含し、errspecのエラー型・失敗シナリオ検証を併せて提供することです。
 [機能対応表](mutator-coverage.md)で、目標と実装済みの範囲を区別します。追加機能として個別のRequirements・Designで具体化します。
 最初の提供単位である[Vitestによる変異の生成・実行・判定](features/mutation-testing/requirements.md)は、`mutate`で提供します。差分実行や永続キャッシュなど、全機能提供へ向けた後続の機能とは区別します。

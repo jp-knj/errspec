@@ -25,6 +25,7 @@ pub(crate) struct MutationRequest {
 }
 
 pub(crate) struct ContractRequest {
+    pub analysis: crate::analysis_backend::Options,
     pub command: ContractAction,
     pub config: PathBuf,
     pub baseline: Option<PathBuf>,
@@ -63,12 +64,14 @@ pub(crate) enum Runner {
 }
 
 pub(crate) struct ScanRequest {
+    pub analysis: crate::analysis_backend::Options,
     pub project: PathBuf,
     pub discriminants: Vec<String>,
     pub fail_on_unknown: bool,
 }
 
 pub(crate) struct CoverageRequest {
+    pub analysis: crate::analysis_backend::Options,
     pub project: PathBuf,
     pub discriminants: Vec<String>,
     pub vitest: Option<PathBuf>,
@@ -78,6 +81,7 @@ pub(crate) struct CoverageRequest {
 }
 
 pub(crate) struct InitRequest {
+    pub analysis: crate::analysis_backend::Options,
     pub project: PathBuf,
     pub source: String,
     pub export: String,

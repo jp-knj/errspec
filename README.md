@@ -3,7 +3,7 @@
 **エラー型と、失敗時に期待する振る舞いをつなぐ。**
 
 TypeScriptのエラー型・失敗シナリオ・テスト結果を対応付け、検証漏れを検出するRust製CLIです。
-型の解決には[oxc-project/tsrs](https://github.com/oxc-project/tsrs/tree/1bfd1e65be95131f9242a03687d37006214a96f6)を使用します。
+型の解決には[oxc-project/tsrs](https://github.com/oxc-project/tsrs/tree/1bfd1e65be95131f9242a03687d37006214a96f6)と、利用先に導入済みのTypeScript 6・7の公式APIを使用します。
 既存のResult型を使い続けられます。エディタ拡張は不要です。npm/crates.ioには未公開です。
 
 `scan`でプロジェクトからエラー候補と伝播経路を調べ、`init`で選んだ型の設定・テストを生成できます。
@@ -44,6 +44,23 @@ Vitest版も同じ仕組みです。
 ./target/debug/errspec verify --runner vitest \
   --config examples/scenarios-vitest/errspec.json --format json
 ```
+
+## 型解析のbackend
+
+`scan`、`init`、`check`、`verify`、`snapshot`、`coverage`は、プロジェクトと親の`node_modules/typescript`から版を確認します。TS 6・7があれば利用先の公式API、未導入または他の版なら同梱のtsrsを使います。TS 6の`node10`や`baseUrl`も元のtsconfigで解析します。
+
+```sh
+errspec check --analysis-engine auto
+errspec scan --analysis-engine tsrs
+errspec check --analysis-engine typescript \
+  --typescript-package ./node_modules/typescript --analysis-node /path/to/node
+```
+
+公式APIを使う場合はNode.js 22以降が必要です。パッケージとNodeの明示パスは、コマンドを実行したディレクトリから解決します。TS 6.0.3・7.0.2とNode.js 24で、タグ、伝播、静的照合、Vitestの実行を確認しています。TS 7は変更の可能性がある`unstable/sync` APIを使います。
+
+切替時にはJSONの`analysis`へengine・版・パッケージ・選択理由を記録し、textにも表示します。tsrsの既定経路のJSONは従来の形式を維持します。選択したAPIの欠落、型エラー、`noCheck`は解析未完了の終了コード2です。異なるengineによる再試行で成功へ変更しません。
+
+この指定は意味解析に適用します。`mutate`の変異後の型検査は未提供であり、`mutate`はこれらの指定を受け付けません。詳しくは[要件・設計](docs/products/errspec/features/typescript-compatibility/requirements.md)を参照してください。
 
 ## 既存テストで確かめる
 
@@ -186,7 +203,7 @@ scenarioTest(test, import.meta.url, {
 ### 実行前の静的照合
 
 `check`と`verify`は、登録したテストファイルがtsconfigのプロジェクトに含まれていれば、テストを実行する前に設定と照合します。
-tsrsの型情報で、`scenarioTest`と`s.fault`／`s.check`を名前ではなく宣言から特定します。IDやタグは各値の型から読むため、`const`の定数や`as const`の配列をループで回す書き方でも照合できます。
+選択したコンパイラの型情報で、`scenarioTest`と`s.fault`／`s.check`を名前ではなく宣言から特定します。IDやタグは各値の型から取得するため、`const`の定数や`as const`の配列をループで回す書き方でも照合できます。
 
 報告するのは、実行すれば必ず失敗する食い違いだけです。
 - 未登録のシナリオ、登録と違うタグやテストファイル、`withoutFaults`と`"faults": []`の不一致（EC015）
@@ -267,7 +284,7 @@ CLIと補助APIは同じ版を使ってください。実行環境変数は`ERRS
 初回の比較では`changedScenarios`に表示されます。
 
 `source.export`は公開されたtype alias、interface、class（インスタンス型）を対象にします。
-import、再export、paths、具体化したgeneric、union/intersectionをtsrsで解決します。
+import、再export、paths、具体化したgeneric、union/intersectionを選択したコンパイラで解決します。
 `any`、`unknown`、広いstring、optionalな識別子は解析不能として報告します。`never`は0件です。
 型エラーや`noCheck: true`を無視して合格にはしません。
 
@@ -315,7 +332,8 @@ Bunは起動前に`--version`で版を確認し、1.2.19未満なら実行しま
 | EC017 | `scenarioTest`を`describe`の中で登録している（実行前の静的照合） |
 | EC_EVIDENCE | 観測プロトコル・run ID・ファイルが不正 |
 | EC_CONFIG / EC_BASELINE / EC_RUNNER / EC_SNAPSHOT / EC_INTERNAL | 設定・比較対象・実行器・保存・内部処理のエラー |
-| TS… | tsrsによるコンパイラ診断 |
+| TS… | 選択したコンパイラの診断 |
+| EC_ANALYSIS_BACKEND | 公式APIの起動・機能・応答の検証に失敗 |
 
 終了コードは0=成功、1=登録・テスト・観測の不足、2=設定・解析・レポート処理などのエラーです。
 現行の`analysisComplete: false`は型解析失敗以外にワークフロー処理失敗も含みます。理由はdiagnosticsを参照してください。
@@ -344,6 +362,8 @@ node --test tests/testkit.test.mjs
 TESTKIT_ENTRY=../packages/testkit/index.ts node --test tests/testkit.test.mjs
 (cd examples/checkout && npm ci --ignore-scripts --no-audit --no-fund)
 (cd packages/mutation-driver && npm ci --ignore-scripts --no-audit --no-fund)
+(cd packages/analysis-driver && npm ci --ignore-scripts --no-audit --no-fund)
+node --test tests/analysis-driver.test.mjs
 node scripts/build-mutation-driver.mjs --check
 node --test tests/mutation-emitter.test.mjs
 node --test tests/mutation-process.test.mjs

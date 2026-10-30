@@ -8,6 +8,7 @@ use crate::{
 
 #[derive(Default)]
 pub struct ReportData<'a> {
+    pub analysis: Option<AnalysisInfo>,
     pub analysis_complete: bool,
     pub registrations: Vec<Registration<'a>>,
     pub tests: Option<TestRun>,
@@ -24,6 +25,13 @@ impl ReportData<'_> {
 
     pub fn finish(self, mode: &str) -> Report {
         let mut report = Report::new(mode);
+        if let Some(info) = self.analysis {
+            report.engine = Engine {
+                name: info.engine.clone(),
+                revision: info.version.clone(),
+            };
+            report.analysis = Some(info);
+        }
         report.analysis_complete = self.analysis_complete;
         report.tests_executed = self.tests.is_some();
         report.test_runner = self.tests.as_ref().map(|tests| tests.runner);

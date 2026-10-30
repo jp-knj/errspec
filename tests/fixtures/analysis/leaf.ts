@@ -1,0 +1,1 @@
+export type Failure = { _tag: 'Offline' } | { _tag: 'Denied' }; export function leaf(): never { throw new Error('offline'); }

@@ -1,9 +1,10 @@
 use crate::{
+    analysis_backend::{self, Backend, Plan},
     coverage_runner,
     input::{existing_tests, read_json},
     onboard,
     request::{ContractAction, ContractRequest, Request},
-    scan, scenario_source, tsrs_adapter, verification,
+    scan, scenario_source, verification,
 };
 use errspec::{config::ValidatedConfig, contract, model::*, report::ReportData, snapshot};
 use std::{
@@ -35,16 +36,28 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
     }
     let mut data = ReportData::default();
     let result = (|| {
-        let adapter = match tsrs_adapter::TsrsAdapter::open(root, config.project()) {
-            Ok(adapter) => adapter,
-            Err(errors) => {
-                data.diagnostics.extend(errors);
+        let plan = Plan {
+            sources: config
+                .contracts()
+                .iter()
+                .map(|c| c.source().clone())
+                .collect(),
+            scenario_files: scenario_source::files(root, &config),
+            ..Plan::default()
+        };
+        let session = match analysis_backend::open(&request.analysis, root, config.project(), plan)
+        {
+            Ok(session) => session,
+            Err(error) => {
+                data.analysis = error.analysis;
+                data.diagnostics.extend(error.diagnostics);
                 return Ok(());
             }
         };
+        data.analysis = session.analysis.clone();
         data.analysis_complete = true;
-        for c in config.contracts() {
-            match adapter.tags(root, c.source()) {
+        for (index, c) in config.contracts().iter().enumerate() {
+            match session.tags(index, root, c.source()) {
                 Ok(tags) => {
                     let (result, findings) = contract::compare(c, tags, &existing_tests(root, c));
                     data.registrations.push(result);
@@ -62,8 +75,12 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
         if !data.analysis_complete {
             return Ok(());
         }
-        data.diagnostics
-            .extend(scenario_source::inspect(&adapter, root, &config));
+        data.diagnostics.extend(match &session.backend {
+            Backend::Native(adapter) => scenario_source::inspect(adapter, root, &config),
+            Backend::Official(response) => {
+                scenario_source::inspect_facts(root, &config, &response.scenarios)
+            }
+        });
         if let Some(baseline) = &request.baseline {
             let previous: Snapshot = read_json(baseline, "EC_BASELINE")?;
             if request.strict_baseline
@@ -177,7 +194,7 @@ pub(crate) enum Outcome {
         report: errspec::discovery::ScanReport,
         fail_on_unknown: bool,
     },
-    Init(Result<onboard::InitReport, String>),
+    Init(Result<onboard::InitReport, onboard::InitError>),
     Coverage {
         report: errspec::coverage::CoverageReport,
         fail_on_missing: bool,
@@ -205,7 +222,7 @@ pub(crate) fn execute(request: Request) -> Outcome {
         Request::Scan(request) => {
             let fail_on_unknown = request.fail_on_unknown;
             let report = worker(None, move || {
-                scan::run(&request.project, &request.discriminants)
+                scan::run(&request.project, &request.discriminants, &request.analysis)
             })
             .unwrap_or_else(|_| {
                 let mut report = errspec::discovery::ScanReport::default();
@@ -236,9 +253,11 @@ pub(crate) fn execute(request: Request) -> Outcome {
         }
         Request::Init(request) => {
             let result = worker(None, move || onboard::run(request))
-                .map_err(|error| match error {
-                    WorkerError::Spawn(error) => error.to_string(),
-                    WorkerError::Panicked => "Init worker failed".into(),
+                .map_err(|error| {
+                    onboard::InitError::from(match error {
+                        WorkerError::Spawn(error) => error.to_string(),
+                        WorkerError::Panicked => "Init worker failed".into(),
+                    })
                 })
                 .and_then(|result| result);
             Outcome::Init(result)

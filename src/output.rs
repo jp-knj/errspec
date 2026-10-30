@@ -5,6 +5,13 @@ use std::{
     process::ExitCode,
 };
 
+fn analysis_line(info: &errspec::model::AnalysisInfo) -> String {
+    format!(
+        "analysis: {} {} ({}; {})",
+        info.engine, info.version, info.reason, info.package
+    )
+}
+
 fn write_contract(report: &Report, format: Format) -> ExitCode {
     let output = match format {
         Format::Json => serde_json::to_string_pretty(report)
@@ -17,6 +24,9 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
                 report.analysis_complete,
                 report.tests_executed
             )];
+            if let Some(info) = &report.analysis {
+                lines.push(analysis_line(info));
+            }
             for c in &report.contracts {
                 lines.push(format!("{}: {}", c.id, c.tags.join(", ")));
                 for case in &c.cases {
@@ -139,7 +149,7 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
     ExitCode::from(report.exit_code())
 }
 
-fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {
+fn write_init(result: Result<InitReport, crate::onboard::InitError>, format: Format) -> ExitCode {
     match result {
         Ok(report) => {
             match format {
@@ -149,6 +159,9 @@ fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {
                     serde_json::to_string_pretty(&serde_json::to_value(&report).unwrap()).unwrap()
                 ),
                 Format::Text => {
+                    if let Some(info) = &report.analysis {
+                        println!("{}", analysis_line(info));
+                    }
                     println!(
                         "Created configuration and tests: {}",
                         serde_json::to_string(&report.files).unwrap()
@@ -162,11 +175,19 @@ fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {
         }
         Err(error) => {
             match format {
-                Format::Json => println!(
-                    "{}",
-                    serde_json::json!({"kind":"errspec/init","schemaVersion":1,"ready":false,"error":error})
-                ),
-                Format::Text => eprintln!("EC_INIT {error}"),
+                Format::Json => {
+                    let mut report = serde_json::json!({"kind":"errspec/init","schemaVersion":1,"ready":false,"error":error.message});
+                    if let Some(info) = &error.analysis {
+                        report["analysis"] = serde_json::to_value(info).unwrap();
+                    }
+                    println!("{report}");
+                }
+                Format::Text => {
+                    if let Some(info) = &error.analysis {
+                        eprintln!("{}", analysis_line(info));
+                    }
+                    eprintln!("EC_INIT {}", error.message);
+                }
             };
             ExitCode::from(2)
         }
@@ -188,6 +209,9 @@ fn write_scan(
     match format {
         Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
         Format::Text => {
+            if let Some(info) = &report.analysis {
+                println!("{}", analysis_line(info));
+            }
             println!(
                 "{} files, {} candidates, {} origins, {} calls, {} unknowns",
                 report.files.len(),
@@ -247,6 +271,9 @@ fn write_coverage(
     match format {
         Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
         Format::Text => {
+            if let Some(info) = &report.analysis {
+                println!("{}", analysis_line(info));
+            }
             let s = &report.summary;
             println!(
                 "coverage: {} error types, {} tags: {} asserted, {} mentioned only, {} missing",

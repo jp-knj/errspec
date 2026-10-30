@@ -188,7 +188,11 @@ fn usages(checker: &mut Checker, expression: P<Node>, body: P<Node>) -> Vec<Usag
     result
 }
 
-pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
+pub(crate) fn run(
+    project: &Path,
+    discriminants: &[String],
+    options: &crate::analysis_backend::Options,
+) -> ScanReport {
     let project = match project.canonicalize() {
         Ok(p) => p,
         Err(e) => {
@@ -199,15 +203,34 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
         }
     };
     let root = project.parent().expect("canonical project parent");
-    let adapter = match TsrsAdapter::open(root, &project.to_string_lossy()) {
-        Ok(a) => a,
-        Err(errors) => {
+    use crate::analysis_backend::{self, Backend, Plan};
+    let session = match analysis_backend::open(
+        options,
+        root,
+        &project.to_string_lossy(),
+        Plan {
+            discriminants: Some(discriminants.to_vec()),
+            ..Plan::default()
+        },
+    ) {
+        Ok(session) => session,
+        Err(error) => {
             return ScanReport {
-                diagnostics: errors,
+                analysis: error.analysis,
+                diagnostics: error.diagnostics,
                 ..ScanReport::default()
             };
         }
     };
+    let mut report = match session.backend {
+        Backend::Native(adapter) => native(&adapter, root, discriminants),
+        Backend::Official(response) => response.facts.expect("validated scan facts").into_report(),
+    };
+    report.analysis = session.analysis;
+    report
+}
+
+fn native(adapter: &TsrsAdapter, root: &Path, discriminants: &[String]) -> ScanReport {
     let files: Vec<P<SourceFile>> = adapter
         .program
         .get_source_files()
@@ -284,7 +307,7 @@ pub(crate) fn run(project: &Path, discriminants: &[String]) -> ScanReport {
     }
     let mut inspector = Inspector {
         root,
-        adapter: &adapter,
+        adapter,
         bodies: &bodies,
         facts: &mut facts,
     };

@@ -11,6 +11,8 @@
 
 追加機能:
 
+- [TypeScript 6・7の解析backend選択のRequirements](products/errspec/features/typescript-compatibility/requirements.md) / [Design](products/errspec/features/typescript-compatibility/design.md)
+
 - [エラー発見・伝播のRequirements](products/errspec/features/discovery/requirements.md) / [Design](products/errspec/features/discovery/design.md)
 - [配布・初期生成のRequirements](products/errspec/features/distribution/requirements.md) / [Design](products/errspec/features/distribution/design.md)
 - [既存テストによる網羅確認のRequirements](products/errspec/features/test-coverage/requirements.md) / [Design](products/errspec/features/test-coverage/design.md)

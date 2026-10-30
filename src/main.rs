@@ -1,3 +1,4 @@
+mod analysis_backend;
 mod app;
 mod cli;
 mod coverage_runner;

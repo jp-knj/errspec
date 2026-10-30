@@ -40,25 +40,12 @@ fn function<'a>(report: &'a Value, name: &str) -> &'a Value {
 #[test]
 fn imported_aliases_recursion_and_catches_keep_origin_witnesses() {
     let dir = project(&[
-        (
-            "leaf.ts",
-            r#"export type Failure = { _tag: 'Offline' } | { _tag: 'Denied' }; export function leaf(): never { throw new Error('offline'); }"#,
-        ),
+        ("leaf.ts", include_str!("fixtures/analysis/leaf.ts")),
         (
             "barrel.ts",
             "export { leaf as renamed } from './leaf'; export type { Failure as PublicFailure } from './leaf';",
         ),
-        (
-            "api.ts",
-            r#"import { renamed } from './barrel'; const alias = renamed;
-export function api(): void { alias(); }
-export function a(n:number): void { if(n>0) b(n-1); else api(); }
-export function b(n:number): void { a(n); }
-export function caught(): void { try { api(); } catch {} }
-export function rethrow(): void { try { api(); } catch(e) { throw e; } }
-export function shadow(renamed: () => void): void { renamed(); }
-"#,
-        ),
+        ("api.ts", include_str!("fixtures/analysis/api.ts")),
     ]);
     let (status, r) = scan(&dir, &[]);
     assert_eq!(status, 0, "{r}");
@@ -96,21 +83,7 @@ export function shadow(renamed: () => void): void { renamed(); }
 
 #[test]
 fn await_return_and_aliases_respect_rejection_catch_boundaries() {
-    let dir = project(&[(
-        "async.ts",
-        r#"
-export async function source(): Promise<void> { throw new Error('offline'); }
-export async function outward(): Promise<void> { await source(); }
-export async function caught(): Promise<void> { try { await source(); } catch {} }
-export function returned() { try { return source(); } catch { return Promise.resolve(); } }
-export async function aliasCaught() { const p = source(); try { await p; } catch {} }
-export async function aliasReturned() { const p = source(); const q = p; return q; }
-export function reject() { return Promise.reject(new Error('reject')); }
-export function dangling() { source(); }
-export function recursive(): Promise<void> { if (Math.random() > 0) throw new Error('cycle'); return bounce(); }
-export async function bounce(): Promise<void> { await recursive(); }
-"#,
-    )]);
+    let dir = project(&[("async.ts", include_str!("fixtures/analysis/async.ts"))]);
     let (status, r) = scan(&dir, &[]);
     assert_eq!(status, 0, "{r}");
     for name in ["outward", "returned", "aliasReturned", "reject"] {
@@ -149,19 +122,7 @@ export async function bounce(): Promise<void> { await recursive(); }
 
 #[test]
 fn structural_result_errors_and_overloaded_implementations_are_found() {
-    let dir = project(&[(
-        "result.ts",
-        r#"
-export type Failure={kind:'Missing'}|{kind:'Invalid'};
-type Result<T,E>={ok:true,value:T}|{ok:false,error:E};
-export function parse(x:string): Result<string,Failure> { return {ok:false,error:{kind:'Missing'}}; }
-export async function wrapper() { return parse(''); }
-export function overload(x:string): void;
-export function overload(x:number): void;
-export function overload(x:string|number): void { throw new TypeError('bad'); }
-export function caller() { overload(''); }
-"#,
-    )]);
+    let dir = project(&[("result.ts", include_str!("fixtures/analysis/result.ts"))]);
     let (status, r) = scan(&dir, &[]);
     assert_eq!(status, 0, "{r}");
     assert!(
@@ -190,25 +151,7 @@ export function caller() { overload(''); }
 
 #[test]
 fn matching_signatures_do_not_prove_runtime_call_targets() {
-    let dir = project(&[(
-        "bindings.ts",
-        r#"
-function leaf(): void { throw new Error('leaf'); }
-function safe(): void {}
-const typedAlias: typeof leaf = safe;
-let mutable = leaf;
-export function typed() { typedAlias(); }
-export function callback(f: typeof leaf) { f(); }
-export function reassigned() { mutable(); }
-export function member(obj: { f: typeof leaf }) { obj.f(); }
-export function customPromise(P: PromiseConstructor) { return P.reject('x'); }
-const NativePromise = Promise;
-export function nativeAlias() { return NativePromise.reject('x'); }
-const arrow = () => { throw new Error('arrow'); };
-export function directArrow() { arrow(); }
-export async function mutablePromise() { let p = nativeAlias(); try { await p; } catch {} }
-"#,
-    )]);
+    let dir = project(&[("bindings.ts", include_str!("fixtures/analysis/bindings.ts"))]);
     let (status, r) = scan(&dir, &[]);
     assert_eq!(status, 0, "{r}");
     for name in [
