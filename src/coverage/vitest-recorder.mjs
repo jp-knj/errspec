@@ -25,11 +25,22 @@ const vitestPackage = process.env.ERRSPEC_VITEST_PACKAGE;
 const keys = new Set((process.env.ERRSPEC_DISCRIMINANTS ?? "").split(",").filter(Boolean));
 
 // Import the same Vitest instance the tests use; this file lives outside the project.
-function entry(packageDirectory) {
+function entry(packageDirectory, subpath = ".") {
   const manifest = JSON.parse(readFileSync(join(packageDirectory, "package.json"), "utf8"));
-  let target = manifest.exports?.["."] ?? manifest.exports;
+  let target = manifest.exports?.[subpath] ?? (subpath === "." ? manifest.exports : undefined);
   while (target && typeof target === "object") target = target.import ?? target.default;
   return join(packageDirectory, typeof target === "string" ? target : (manifest.module ?? manifest.main));
+}
+
+// getState().currentTestName uses " > " on Vitest 4, while its JSON reporter
+// joins task names with spaces. Preserve literal separators inside user titles.
+export function testFullName(task, fallback) {
+  if (!task) return fallback;
+  const names = [];
+  for (let current = task; current && current !== task.file; current = current.suite) {
+    names.unshift(current.name);
+  }
+  return names.join(" ");
 }
 
 /** Discriminant [key, value] pairs, plus bare strings as ["", value]. */
@@ -91,7 +102,13 @@ export function checkedValues(matcher, received, args, discriminants) {
 }
 
 if (directory && vitestPackage) {
-  const { chai, expect } = await import(pathToFileURL(entry(vitestPackage)).href);
+  const { chai, expect, TestRunner } = await import(pathToFileURL(entry(vitestPackage)).href);
+  let currentTest = TestRunner?.getCurrentTest;
+  if (typeof currentTest !== "function") {
+    // Vitest 3 exposes the same task API from its suite subpath.
+    try { currentTest = (await import(pathToFileURL(entry(vitestPackage, "./suite")).href)).getCurrentTest; }
+    catch { /* Older runners retain the conservative state-name fallback. */ }
+  }
   const output = join(directory, `${process.pid}-${threadId}.jsonl`);
   chai.use((api, utils) => {
     for (const name of MATCHERS) {
@@ -105,7 +122,8 @@ if (directory && vitestPackage) {
           catch { return result; } // Uninspectable expectations are not evidence.
           if (values.length) {
             const { testPath, currentTestName } = expect.getState();
-            appendFileSync(output, `${JSON.stringify({ file: testPath, test: currentTestName, matcher: name, values })}\n`);
+            const test = testFullName(currentTest?.(), currentTestName);
+            appendFileSync(output, `${JSON.stringify({ file: testPath, test, matcher: name, values })}\n`);
           }
         }
         return result;
