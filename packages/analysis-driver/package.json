@@ -10,6 +10,7 @@
     "test": "node --test ../../tests/analysis-driver.test.mjs"
   },
   "devDependencies": {
+    "typescript5": "npm:typescript@5.9.3",
     "typescript6": "npm:typescript@6.0.3",
     "typescript7": "npm:typescript@7.0.2"
   }

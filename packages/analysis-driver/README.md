@@ -2,7 +2,7 @@
 
 The Rust CLI embeds these ESM sources and writes them to a temporary directory for each analysis request. No build step or installed driver package is required by consumers. The compiler is loaded from the user's installed package; it is neither bundled nor downloaded.
 
-TypeScript 6 uses its Compiler API. TypeScript 7 uses `unstable/sync` and `unstable/ast`; those interfaces may change. The development aliases pin 6.0.3 and 7.0.2 for comparisons against the same native fixtures. Use Node.js 24 for development; the analysis driver requires Node.js 22 or later.
+TypeScript 6 uses its Compiler API. TypeScript 7 uses `unstable/sync` and `unstable/ast`; those interfaces may change. The development aliases pin 6.0.3 and 7.0.2 for comparisons against the same native fixtures, plus 5.9.3 for mutant typechecking tests. Use Node.js 24 for development; the analysis driver requires Node.js 22 or later.
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund

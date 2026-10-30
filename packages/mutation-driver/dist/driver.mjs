@@ -1,7 +1,7 @@
 // driver.mjs
-import { readFileSync, writeFileSync, realpathSync, existsSync, globSync, statSync } from "node:fs";
-import { dirname, resolve, relative, join, isAbsolute } from "node:path";
-import { pathToFileURL } from "node:url";
+import { readFileSync as readFileSync2, writeFileSync, realpathSync as realpathSync2, existsSync as existsSync2, globSync, statSync } from "node:fs";
+import { dirname as dirname2, resolve as resolve2, relative as relative2, join as join2, isAbsolute, matchesGlob } from "node:path";
+import { pathToFileURL as pathToFileURL2 } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -1660,12 +1660,32 @@ function instrument(source, candidates, file, runId) {
     stack.push(group);
   }
   const runtime = `globalThis[Symbol.for(${JSON.stringify(`errspec.mutation.${runId}`)})]`;
-  function render(group) {
-    let original = source.slice(group.start, group.end);
+  function slice(group, start, end) {
+    let original = source.slice(start, end);
     for (const child of [...group.children].reverse()) {
-      original = original.slice(0, child.start - group.start) + render(child) + original.slice(child.end - group.start);
+      if (child.end <= start || child.start >= end)
+        continue;
+      if (child.start < start || child.end > end)
+        throw new Error(`Weak operands cross a mutation placement in ${file}`);
+      original = original.slice(0, child.start - start) + render(child) + original.slice(child.end - start);
+    }
+    return original;
+  }
+  function render(group) {
+    let original = slice(group, group.start, group.end);
+    const weak = group.candidates.filter((c) => c.weak);
+    if (weak.length) {
+      const layout = weak[0].weak;
+      const leftEnd = indices.get(layout.leftEnd), rightStart = indices.get(layout.rightStart);
+      if (leftEnd === undefined || rightStart === undefined || leftEnd < group.start || rightStart > group.end || leftEnd > rightStart || weak.some((c) => c.weak.leftEnd !== layout.leftEnd || c.weak.rightStart !== layout.rightStart || c.weak.operator !== layout.operator))
+        throw new Error(`Invalid weak mutation range in ${file}`);
+      const changes = JSON.stringify(weak.map((c) => [c.key, c.weak.replacementOperator]));
+      const left = slice(group, group.start, leftEnd), right = slice(group, rightStart, group.end);
+      original = `(${runtime}?.binary?${runtime}.binary(${JSON.stringify(layout.operator)},${changes},(${left}),(${right})):(${original}))`;
     }
     for (const c of [...group.candidates].reverse()) {
+      if (c.weak)
+        continue;
       const check = `${runtime}?.(${JSON.stringify(c.key)})`;
       if (c.placement === "emptyCondition")
         original = `(${check}?false:true)`;
@@ -1695,6 +1715,266 @@ if(${check}){${branch}}${original.slice(prefixLength)}`;
   return { code: magic.toString(), map: magic.generateMap({ source: file, includeContent: true, hires: true }) };
 }
 
+// typecheck.mjs
+import { createRequire } from "node:module";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
+import { dirname, join, resolve, relative } from "node:path";
+import { pathToFileURL } from "node:url";
+function packageDirectory(root, explicit) {
+  if (explicit)
+    return realpathSync(explicit);
+  for (let current = root;; current = dirname(current)) {
+    const candidate = join(current, "node_modules/typescript");
+    if (existsSync(join(candidate, "package.json")))
+      return realpathSync(candidate);
+    if (dirname(current) === current)
+      break;
+  }
+  throw new Error("Cannot find TypeScript; use --typecheck-package");
+}
+async function open(root, project, packageDir) {
+  const metadata = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+  const load = createRequire(join(packageDir, "package.json"));
+  const overrides = new Map, versions = new Map;
+  let compiler, api, snapshot, service, parsed;
+  const close = () => {
+    try {
+      service?.dispose();
+      snapshot?.dispose();
+    } finally {
+      api?.close();
+    }
+  };
+  try {
+    const major = Number(metadata.version.split(".")[0]);
+    if (major <= 6 && major > 0) {
+      compiler = load(packageDir);
+      parsed = compiler.getParsedCommandLineOfConfigFile(project, {}, {
+        ...compiler.sys,
+        onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
+          throw new Error(compiler.flattenDiagnosticMessageText(diagnostic.messageText, `
+`));
+        }
+      });
+      if (!parsed || parsed.errors.length)
+        throw new Error("Cannot parse typecheck project: " + JSON.stringify(parsed?.errors.map((d) => d.messageText)));
+      const host = {
+        getCompilationSettings: () => parsed.options,
+        getScriptFileNames: () => parsed.fileNames,
+        getScriptVersion: (file) => String(versions.get(file) || 0),
+        getScriptSnapshot: (file) => {
+          const text = overrides.get(file) ?? compiler.sys.readFile(file);
+          return text === undefined ? undefined : compiler.ScriptSnapshot.fromString(text);
+        },
+        getCurrentDirectory: () => dirname(project),
+        getDefaultLibFileName: (options) => compiler.getDefaultLibFilePath(options),
+        fileExists: (file) => overrides.has(file) || compiler.sys.fileExists(file),
+        readFile: (file) => overrides.get(file) ?? compiler.sys.readFile(file),
+        readDirectory: compiler.sys.readDirectory,
+        directoryExists: compiler.sys.directoryExists,
+        getDirectories: compiler.sys.getDirectories
+      };
+      service = compiler.createLanguageService(host, compiler.createDocumentRegistry());
+    } else if (major === 7) {
+      compiler = await import(pathToFileURL(load.resolve(`${metadata.name}/unstable/sync`)).href);
+      api = new compiler.API({
+        cwd: root,
+        fs: { readFile: (file) => overrides.get(file) }
+      });
+      snapshot = api.updateSnapshot({ openProjects: [project] });
+    } else
+      throw new Error(`Unsupported mutant typechecker: TypeScript ${metadata.version}`);
+    const context = () => {
+      if (api) {
+        const selected = snapshot.getProject(project);
+        if (!selected)
+          throw new Error("TypeScript API did not open the requested project");
+        return {
+          program: selected.program,
+          checker: selected.checker,
+          options: selected.compilerOptions
+        };
+      }
+      const program = service.getProgram();
+      if (!program)
+        throw new Error("TypeScript did not create a language-service program");
+      return {
+        program,
+        checker: program.getTypeChecker(),
+        options: parsed.options
+      };
+    };
+    if (context().options.noCheck)
+      throw new Error("noCheck must be false for mutant typechecking");
+    const diagnose = () => {
+      const { program } = context();
+      const diagnostics = api ? [
+        ...program.getConfigFileParsingDiagnostics(),
+        ...program.getProgramDiagnostics(),
+        ...program.getGlobalDiagnostics(),
+        ...program.getSyntacticDiagnostics(),
+        ...program.getSemanticDiagnostics()
+      ] : compiler.getPreEmitDiagnostics(program);
+      return diagnostics.filter((d) => d.category === 1).map((d) => {
+        const message = api ? nativeMessage(d) : compiler.flattenDiagnosticMessageText(d.messageText, `
+`);
+        const file = d.file?.fileName ?? d.fileName;
+        return `${file ? relative(root, file) : "<project>"}: TS${d.code} ${message}`;
+      });
+    };
+    const change = (file, text) => {
+      if (text === undefined)
+        overrides.delete(file);
+      else
+        overrides.set(file, text);
+      versions.set(file, (versions.get(file) || 0) + 1);
+      if (api) {
+        const next = api.updateSnapshot({ fileChanges: { changed: [file] } });
+        snapshot.dispose();
+        snapshot = next;
+      }
+    };
+    return {
+      version: metadata.version,
+      compiler,
+      context,
+      diagnose,
+      change,
+      close
+    };
+  } catch (error) {
+    close();
+    throw error;
+  }
+}
+function nativeMessage(diagnostic) {
+  if (!Number.isInteger(diagnostic.code) || typeof diagnostic.text !== "string")
+    throw new Error("Unsupported TypeScript diagnostic format");
+  return [
+    diagnostic.text,
+    ...(diagnostic.messageChain || []).map(nativeMessage)
+  ].join(`
+`);
+}
+function newDiagnostic(before, after) {
+  const counts = new Map;
+  for (const message of before)
+    counts.set(message, (counts.get(message) || 0) + 1);
+  for (const message of after) {
+    const count = counts.get(message) || 0;
+    if (!count)
+      return message;
+    counts.set(message, count - 1);
+  }
+}
+function applyCandidate(source, candidate) {
+  const indices = byteIndices(source), start = indices.get(candidate.byteOffset), end = indices.get(candidate.end);
+  if (start === undefined || end === undefined || start > end || source.slice(start, end) !== candidate.original)
+    throw new Error(`Invalid original text or UTF-8 range for ${candidate.key}`);
+  return source.slice(0, start) + candidate.replacement + source.slice(end);
+}
+function equivalents(checker, file, source, candidates) {
+  const { program, checker: types, options } = checker.context(), T = checker.compiler.TypeFlags;
+  if (!options.noUncheckedIndexedAccess || types.isTypeAssignableTo(types.getUndefinedType(), types.getStringType()))
+    return new Map;
+  const ast = program.getSourceFile(file);
+  if (!ast)
+    throw new Error(`Typecheck source is outside the project: ${file}`);
+  const chains = new Map;
+  const visit = (node) => {
+    if (node.questionDotToken && node.expression)
+      chains.set(node.questionDotToken.getStart(ast), node.expression);
+    node.forEachChild((child) => {
+      visit(child);
+    });
+  };
+  visit(ast);
+  const primitive = [
+    "String",
+    "Number",
+    "BigInt",
+    "Boolean",
+    "ESSymbol",
+    "StringLiteral",
+    "NumberLiteral",
+    "BigIntLiteral",
+    "BooleanLiteral",
+    "UniqueESSymbol",
+    "EnumLiteral",
+    "Enum",
+    "NonPrimitive",
+    "Object",
+    "TemplateLiteral",
+    "StringMapping"
+  ].reduce((mask, name) => mask | T[name], 0);
+  const excludesNull = (type) => {
+    if (type.flags & (T.Union | T.Intersection)) {
+      const members = type.getTypes ? type.getTypes() : type.types;
+      return type.flags & T.Union ? members.every(excludesNull) : members.some(excludesNull);
+    }
+    return !!(type.flags & primitive);
+  };
+  const result = new Map, indices = byteIndices(source);
+  for (const candidate of candidates.filter((c) => c.mutator === "OptionalChaining")) {
+    let prefix = 0;
+    while (prefix < candidate.original.length && candidate.original[prefix] === candidate.replacement[prefix])
+      prefix++;
+    if (candidate.original.slice(prefix, prefix + 2) !== "?.")
+      continue;
+    const target = chains.get(indices.get(candidate.byteOffset) + prefix - (source.startsWith("\uFEFF") ? 1 : 0));
+    if (target && excludesNull(types.getTypeAtLocation(target)))
+      result.set(candidate.key, `equivalent: ${target.getText(ast)} excludes null and undefined`);
+  }
+  return result;
+}
+async function typecheckMutants(options, inventory, progress = () => {}) {
+  const root = options.root;
+  const project = realpathSync(options.typecheckProject || join(root, "tsconfig.json"));
+  const packageDir = packageDirectory(root, options.typecheckPackage);
+  const checker = await open(root, project, packageDir);
+  try {
+    const baseline = checker.diagnose(), outcomes = [];
+    for (const [file, entry] of inventory) {
+      if (!/\.[cm]?tsx?$/.test(file))
+        continue;
+      const candidates = entry.candidates.filter((c) => !c.ignored);
+      if (!candidates.length)
+        continue;
+      if (!checker.context().program.getSourceFile(file))
+        throw new Error(`Typecheck source is outside the project: ${file}`);
+      const equivalent = equivalents(checker, file, entry.source, candidates);
+      for (const candidate of candidates) {
+        let reason = equivalent.get(candidate.key), status = reason ? "Ignored" : "checked";
+        if (!reason) {
+          try {
+            checker.change(file, applyCandidate(entry.source, candidate));
+            reason = newDiagnostic(baseline, checker.diagnose());
+          } finally {
+            checker.change(file, undefined);
+          }
+          if (reason)
+            status = "CompileError";
+        }
+        outcomes.push({ key: candidate.key, status, reason: reason ?? null });
+        progress(candidate.key);
+      }
+    }
+    return {
+      info: {
+        version: checker.version,
+        package: packageDir,
+        project,
+        checked: outcomes.length,
+        compileErrors: outcomes.filter((r) => r.status === "CompileError").length,
+        equivalent: outcomes.filter((r) => r.status === "Ignored").length
+      },
+      outcomes
+    };
+  } finally {
+    checker.close();
+  }
+}
+
 // driver.mjs
 var protocolWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = (chunk, encoding, cb) => process.stderr.write(chunk, encoding, cb);
@@ -1717,7 +1997,7 @@ var configFiles = new Set;
 var current;
 var infrastructureFailure;
 var normalize = (s) => s.replaceAll("\\", "/");
-var rel = (file) => normalize(relative(root, file));
+var rel = (file) => normalize(relative2(root, file));
 var hash = (data) => createHash("sha256").update(data).digest("hex");
 function failure(code, message) {
   const e = new Error(message);
@@ -1725,23 +2005,23 @@ function failure(code, message) {
   return e;
 }
 function remember(file) {
-  if (!existsSync(file) || !statSync(file).isFile())
+  if (!existsSync2(file) || !statSync(file).isFile())
     return;
-  file = realpathSync(file);
-  const next = hash(readFileSync(file));
+  file = realpathSync2(file);
+  const next = hash(readFileSync2(file));
   if (fingerprints.has(file) && fingerprints.get(file) !== next)
     throw failure("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
   fingerprints.set(file, next);
 }
 function verifyInputs() {
   for (const [file, digest] of fingerprints) {
-    if (!existsSync(file) || hash(readFileSync(file)) !== digest)
+    if (!existsSync2(file) || hash(readFileSync2(file)) !== digest)
       throw failure("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
   }
 }
 function native(source, file, validateOnly = false) {
   const result = spawnSync(options.binary, ["__mutation-source"], {
-    input: JSON.stringify({ source, file, validateOnly, excludeMutators: options.excludeMutator }),
+    input: JSON.stringify({ source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation }),
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     timeout: 60000
@@ -1756,15 +2036,15 @@ function native(source, file, validateOnly = false) {
 }
 function packagePath(explicit) {
   if (explicit) {
-    if (!existsSync(join(explicit, "package.json")))
+    if (!existsSync2(join2(explicit, "package.json")))
       throw failure("EC_MUTATION_CONFIG", `Vitest package not found: ${explicit}`);
-    return realpathSync(explicit);
+    return realpathSync2(explicit);
   }
-  for (let dir = root;; dir = dirname(dir)) {
-    const candidate = join(dir, "node_modules/vitest");
-    if (existsSync(join(candidate, "package.json")))
-      return realpathSync(candidate);
-    if (dirname(dir) === dir)
+  for (let dir = root;; dir = dirname2(dir)) {
+    const candidate = join2(dir, "node_modules/vitest");
+    if (existsSync2(join2(candidate, "package.json")))
+      return realpathSync2(candidate);
+    if (dirname2(dir) === dir)
       break;
   }
   throw failure("EC_MUTATION_CONFIG", "Cannot find Vitest; use --vitest-package");
@@ -1774,7 +2054,7 @@ function candidateFiles(excluded) {
   const files = new Set;
   for (const pattern of patterns)
     for (const entry of globSync(pattern, { cwd: root, exclude: ["**/node_modules/**", ...options.exclude] })) {
-      const absolute = realpathSync(resolve(root, entry));
+      const absolute = realpathSync2(resolve2(root, entry));
       const name = rel(absolute);
       if (name.startsWith("../") || isAbsolute(name) || name.split("/").includes("node_modules") || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(name) || /\.d\.(?:[cm]?ts)$/.test(name) || excluded.has(absolute) || !statSync(absolute).isFile())
         continue;
@@ -1785,13 +2065,13 @@ function candidateFiles(excluded) {
 function plugin(phase) {
   return { name: "errspec-mutation", enforce: "pre", configResolved(config) {
     if (config.configFile)
-      configFiles.add(realpathSync(config.configFile));
+      configFiles.add(realpathSync2(config.configFile));
     for (const file of config.configFileDependencies || [])
-      configFiles.add(realpathSync(file));
+      configFiles.add(realpathSync2(file));
   }, transform(code, id) {
     let file = id.split("?")[0];
-    if (existsSync(file))
-      file = realpathSync(file);
+    if (existsSync2(file))
+      file = realpathSync2(file);
     const entry = inventory.get(file);
     if (!entry || phase === "plain")
       return;
@@ -1824,13 +2104,16 @@ function recordModule(module, execution, request) {
       started: request.started.has(test.id),
       duration: test.diagnostic()?.duration || 0,
       errors: (result.errors || []).map((e) => `${e.name || "Error"}: ${e.message || e}`),
-      hits: meta?.hits || {}
+      hits: meta?.hits || {},
+      infected: Object.keys(meta?.infected || {})
     });
   }
   const meta = module.meta().__errspecMutation;
   if (!meta && execution.tests.some((t) => t.file === moduleFile && t.started))
     throw failure("EC_MUTATION_PROTOCOL", "Test worker did not install the mutation runtime");
   if (meta) {
+    if (options.weakMutation && meta.weakVersion !== 1)
+      throw failure("EC_MUTATION_PROTOCOL", "Worker does not support weak mutation");
     if (meta.runId !== runId || meta.requestId !== request.requestId)
       throw failure("EC_MUTATION_PROTOCOL", "Stale module metadata");
     for (const [key, count] of Object.entries(meta.hits))
@@ -1923,7 +2206,8 @@ async function execute(phase, request) {
       runId,
       requestId: request.requestId,
       activeKey: request.key || null,
-      hitLimit: request.hitLimit || Number.MAX_SAFE_INTEGER
+      hitLimit: request.hitLimit || Number.MAX_SAFE_INTEGER,
+      weakMutation: options.weakMutation
     } };
     project.provide("__errspecMutation", config.provide.__errspecMutation);
     if (request.multiplier === 3) {
@@ -1932,27 +2216,27 @@ async function execute(phase, request) {
     }
     await ctx.standalone();
     const specs = await ctx.globTestSpecifications();
-    const excluded = new Set([...configFiles, ...config.setupFiles, ...config.globalSetup || [], ...specs.map((s) => s.moduleId)].filter((f) => existsSync(f)).map((f) => realpathSync(f)));
+    const excluded = new Set([...configFiles, ...config.setupFiles, ...config.globalSetup || [], ...specs.map((s) => s.moduleId)].filter((f) => existsSync2(f)).map((f) => realpathSync2(f)));
     for (const file of globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", { cwd: root, exclude: ["**/node_modules/**"] }))
-      excluded.add(realpathSync(resolve(root, file)));
+      excluded.add(realpathSync2(resolve2(root, file)));
     for (const file of excluded)
       remember(file);
     if (phase === "plain") {
       const files = candidateFiles(excluded);
       for (const file of files) {
-        const source = readFileSync(file, "utf8");
+        const source = readFileSync2(file, "utf8");
         inventory.set(file, { source, candidates: [] });
         remember(file);
       }
       testSpecs = specs.map((s) => ({ file: s.moduleId, project: s.project.config.name || "" }));
       for (const file of [...globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", { cwd: root, exclude: ["**/node_modules/**"] })])
-        remember(resolve(root, file));
+        remember(resolve2(root, file));
       for (const file of globSync("**/*.snap", { cwd: root, exclude: ["**/node_modules/**"] }))
-        remember(resolve(root, file));
-      for (let dir = root;; dir = dirname(dir)) {
+        remember(resolve2(root, file));
+      for (let dir = root;; dir = dirname2(dir)) {
         for (const name of ["package.json", "package-lock.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json"])
-          remember(join(dir, name));
-        if (dirname(dir) === dir)
+          remember(join2(dir, name));
+        if (dirname2(dir) === dir)
           break;
       }
     } else {
@@ -1967,7 +2251,7 @@ async function execute(phase, request) {
         const base = baseline.tests.find((t) => t.id === id);
         if (!base)
           throw failure("EC_MUTATION_PROTOCOL", `Unknown test ID: ${id}`);
-        const file = resolve(root, base.file);
+        const file = resolve2(root, base.file);
         (grouped.get(file) || grouped.set(file, []).get(file)).push(base.taskId);
       }
       planned = specs.filter((s) => grouped.has(s.moduleId));
@@ -1981,7 +2265,7 @@ async function execute(phase, request) {
       for (const environment of Object.values(project.vite.environments))
         for (const module of environment.moduleGraph?.idToModuleMap?.values() || []) {
           const file = module.file;
-          if (file && !file.includes("/node_modules/") && !file.startsWith(options.temp) && existsSync(file))
+          if (file && !file.includes("/node_modules/") && !file.startsWith(options.temp) && existsSync2(file))
             remember(file);
         }
     verifyInputs();
@@ -2012,17 +2296,17 @@ async function handle(request) {
     options = request.options;
     if (Number(process.versions.node.split(".")[0]) < 24)
       throw failure("EC_MUTATION_CONFIG", "mutate requires Node 24 or newer");
-    root = realpathSync(options.root);
+    root = realpathSync2(options.root);
     packageDir = packagePath(options.vitestPackage);
-    const pkg = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
-    remember(join(packageDir, "package.json"));
+    const pkg = JSON.parse(readFileSync2(join2(packageDir, "package.json"), "utf8"));
+    remember(join2(packageDir, "package.json"));
     if (!/^5\./.test(pkg.version))
       throw failure("EC_MUTATION_CONFIG", `mutate requires Vitest 5.x; found ${pkg.version}`);
-    api = await import(pathToFileURL(join(packageDir, "dist/node.js")).href);
-    const setup = readFileSync(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join(packageDir, "dist/index.js"))));
+    api = await import(pathToFileURL2(join2(packageDir, "dist/node.js")).href);
+    const setup = readFileSync2(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join2(packageDir, "dist/index.js"))));
     writeFileSync(options.setup, setup);
     if (request.restore) {
-      const saved = JSON.parse(readFileSync(options.state, "utf8"));
+      const saved = JSON.parse(readFileSync2(options.state, "utf8"));
       baseline = saved.baseline;
       plain = saved.plain;
       testSpecs = saved.testSpecs;
@@ -2043,7 +2327,9 @@ async function handle(request) {
       throw failure("EC_MUTATION_BASELINE", "Unmodified baseline failed or executed no tests");
     let count = 0;
     for (const [file, entry] of inventory) {
-      entry.candidates = native(entry.source, rel(file)).candidates;
+      const generated = native(entry.source, rel(file));
+      entry.candidates = generated.candidates;
+      entry.critical = generated.critical || [];
       for (const c of entry.candidates)
         if (c.regex) {
           try {
@@ -2066,7 +2352,8 @@ async function handle(request) {
         entry.emitted = instrument(entry.source, entry.candidates, file, runId);
         native(entry.emitted.code, rel(file), true);
       }
-      send(request, "file", { file: rel(file), candidates: entry.candidates });
+      const critical = options.policy?.critical.some((pattern) => matchesGlob(rel(file), pattern)) ? entry.candidates.map((c) => c.key) : entry.critical;
+      send(request, "file", { file: rel(file), candidates: entry.candidates, critical });
       count++;
     }
     baseline = await execute("probe", request);
@@ -2087,6 +2374,22 @@ async function handle(request) {
     send(request, "attempt", { key: request.key, execution });
     send(request, "done", { count: 1 });
     return;
+  }
+  if (request.op === "typecheck") {
+    if (!baseline)
+      throw failure("EC_MUTATION_PROTOCOL", "Missing baseline");
+    verifyInputs();
+    try {
+      const keys = new Set(request.keys);
+      const selected = new Map([...inventory].map(([file, entry]) => [file, { ...entry, candidates: entry.candidates.filter((c) => keys.has(c.key)) }]));
+      const result = await typecheckMutants(options, selected, (key) => send(request, "progress", { event: "typecheck", key }));
+      verifyInputs();
+      send(request, "typechecked", result);
+      send(request, "done", { count: result.outcomes.length });
+      return;
+    } catch (error) {
+      throw failure("EC_MUTATION_TYPECHECK", error.stack || String(error));
+    }
   }
   if (request.op === "close") {
     verifyInputs();

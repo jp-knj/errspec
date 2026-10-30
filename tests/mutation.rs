@@ -6,6 +6,10 @@ use std::{
 };
 
 fn generate(source: &str) -> Value {
+    generate_options(source, json!({}))
+}
+
+fn generate_options(source: &str, options: Value) -> Value {
     let mut child = Command::new(env!("CARGO_BIN_EXE_errspec"))
         .arg("__mutation-source")
         .stdin(Stdio::piped())
@@ -13,15 +17,16 @@ fn generate(source: &str) -> Value {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    let mut request = json!({"file":"src/rules.ts","source":source});
+    request
+        .as_object_mut()
+        .unwrap()
+        .extend(options.as_object().unwrap().clone());
     child
         .stdin
         .take()
         .unwrap()
-        .write_all(
-            json!({"file":"src/rules.ts","source":source})
-                .to_string()
-                .as_bytes(),
-        )
+        .write_all(request.to_string().as_bytes())
         .unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(
@@ -30,6 +35,59 @@ fn generate(source: &str) -> Value {
         String::from_utf8_lossy(&output.stderr)
     );
     serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn owned_syntax_facts_keep_scope_hashes_stable_across_position_changes() {
+    let source = "export function a(x:number){return x+1;}\nexport function b(){return 1;}";
+    let original = generate_options(source, json!({"facts":true}));
+    let moved = generate_options(
+        "// moved\n\nexport function a(x: number) { return x + 1; }\nexport function b(){return 1;}",
+        json!({"facts":true}),
+    );
+    let changed = generate_options(
+        &source.replace("b(){return 1", "b(){return 2"),
+        json!({"facts":true}),
+    );
+    let a = "module/FunctionDeclaration:a#0";
+    let b = "module/FunctionDeclaration:b#0";
+    assert_eq!(original["metadata"]["version"], 1);
+    assert_eq!(
+        original["metadata"]["scopes"][a]["hash"],
+        moved["metadata"]["scopes"][a]["hash"]
+    );
+    assert_eq!(
+        original["metadata"]["scopes"][a]["hash"],
+        changed["metadata"]["scopes"][a]["hash"]
+    );
+    assert_ne!(
+        original["metadata"]["scopes"][b]["hash"],
+        changed["metadata"]["scopes"][b]["hash"]
+    );
+    assert_eq!(
+        original["metadata"]["scopes"]["module"]["effectHash"],
+        changed["metadata"]["scopes"]["module"]["effectHash"]
+    );
+    assert_ne!(
+        original["metadata"]["scopes"][a]["start"],
+        moved["metadata"]["scopes"][a]["start"]
+    );
+    for node in original["metadata"]["nodes"].as_array().unwrap() {
+        assert!(node["start"].as_u64().unwrap() <= node["end"].as_u64().unwrap());
+        assert!(node["end"].as_u64().unwrap() <= source.len() as u64);
+    }
+    let jsx = generate_options(
+        "export function view(){return <div>Hello</div>;}",
+        json!({"file":"src/view.tsx","facts":true}),
+    );
+    let changed_jsx = generate_options(
+        "export function view(){return <div>World</div>;}",
+        json!({"file":"src/view.tsx","facts":true}),
+    );
+    assert_ne!(
+        jsx["metadata"]["scopes"]["module/FunctionDeclaration:view#0"]["hash"],
+        changed_jsx["metadata"]["scopes"]["module/FunctionDeclaration:view#0"]["hash"]
+    );
 }
 
 #[test]
@@ -243,6 +301,10 @@ fn score_and_gate_depend_on_completion() {
         killed_by: vec![],
         failed_modules: vec![],
         attempts: vec![],
+        reason: None,
+        accepted: None,
+        critical: false,
+        infected_by: None,
     });
     report.finish();
     assert!(report.summary.score.is_none());

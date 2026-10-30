@@ -11,6 +11,8 @@
 
 追加機能:
 
+- [全機能提供に向けた追加ワークフローのRequirements](products/errspec/features/mutation-workflows/requirements.md) / [Design](products/errspec/features/mutation-workflows/design.md)
+
 - [TypeScript 6・7の解析backend選択のRequirements](products/errspec/features/typescript-compatibility/requirements.md) / [Design](products/errspec/features/typescript-compatibility/design.md)
 
 - [エラー発見・伝播のRequirements](products/errspec/features/discovery/requirements.md) / [Design](products/errspec/features/discovery/design.md)

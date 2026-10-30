@@ -4,6 +4,7 @@ mod cli;
 mod coverage_runner;
 mod input;
 mod mutate;
+mod mutation_actions;
 mod mutation_source;
 mod onboard;
 mod output;
@@ -35,7 +36,7 @@ fn main() -> ExitCode {
                     .get_one::<cli::Format>("format")
                     .copied()
                     .unwrap_or(cli::Format::Text);
-                return output::write(app::Outcome::Mutation(report), format);
+                return output::write(app::Outcome::Mutation(Box::new(report)), format);
             }
             eprintln!("{error}");
             return ExitCode::from(2);

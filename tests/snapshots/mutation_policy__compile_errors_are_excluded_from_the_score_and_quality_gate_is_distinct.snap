@@ -1,0 +1,125 @@
+---
+source: tests/mutation_policy.rs
+expression: report
+---
+{
+  "kind": "errspec/mutation",
+  "schemaVersion": 1,
+  "engine": {
+    "tsrsRevision": "1bfd1e65be95131f9242a03687d37006214a96f6",
+    "rulesVersion": "1",
+    "node": null,
+    "vitest": null,
+    "typecheck": "not_run",
+    "coverageScope": "vitest_vite_workers"
+  },
+  "runComplete": true,
+  "ok": false,
+  "testsExecuted": false,
+  "baseline": [],
+  "summary": {
+    "total": 3,
+    "killed": 1,
+    "survived": 1,
+    "noCoverage": 0,
+    "timeout": 0,
+    "runtimeError": 0,
+    "compileError": 1,
+    "ignored": 0,
+    "pending": 0,
+    "score": 0.5
+  },
+  "mutants": [
+    {
+      "key": "invalid",
+      "file": "src/value.ts",
+      "byteOffset": 0,
+      "line": 1,
+      "end": 1,
+      "mutator": "BlockStatement",
+      "original": "x",
+      "replacement": "y",
+      "placement": "expression",
+      "ignored": null,
+      "regex": null,
+      "guardOffset": null,
+      "status": "CompileError",
+      "coveredBy": [],
+      "killedBy": [],
+      "failedModules": [],
+      "attempts": []
+    },
+    {
+      "key": "killed",
+      "file": "src/value.ts",
+      "byteOffset": 0,
+      "line": 1,
+      "end": 1,
+      "mutator": "BooleanLiteral",
+      "original": "x",
+      "replacement": "y",
+      "placement": "expression",
+      "ignored": null,
+      "regex": null,
+      "guardOffset": null,
+      "status": "Killed",
+      "coveredBy": [],
+      "killedBy": [],
+      "failedModules": [],
+      "attempts": []
+    },
+    {
+      "key": "survived",
+      "file": "src/value.ts",
+      "byteOffset": 0,
+      "line": 1,
+      "end": 1,
+      "mutator": "BooleanLiteral",
+      "original": "x",
+      "replacement": "y",
+      "placement": "expression",
+      "ignored": null,
+      "regex": null,
+      "guardOffset": null,
+      "status": "Survived",
+      "coveredBy": [],
+      "killedBy": [],
+      "failedModules": [],
+      "attempts": []
+    }
+  ],
+  "gate": {
+    "enabled": true,
+    "passed": false
+  },
+  "diagnostics": [
+    {
+      "code": "EC_MUTATION_QUALITY",
+      "message": "Mutation score 50.00% is below 60%"
+    }
+  ],
+  "policy": {
+    "options": {
+      "only": [],
+      "mutantsPerLine": null,
+      "timeBudget": null,
+      "failOnSurvived": false,
+      "thresholdHigh": null,
+      "thresholdLow": null,
+      "thresholdBreak": 60.0,
+      "critical": [],
+      "acceptedFile": null
+    },
+    "sampled": 0,
+    "budget": 0,
+    "acceptance": {
+      "applied": [],
+      "detected": [],
+      "stale": []
+    },
+    "scoreLevel": "danger",
+    "qualityFailures": [
+      "Mutation score 50.00% is below 60%"
+    ]
+  }
+}

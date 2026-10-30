@@ -78,6 +78,19 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
 
 pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
     match outcome {
+        Outcome::MutationAction(result) => {
+            match format {
+                Format::Json => println!("{}", serde_json::to_string_pretty(&result.json).unwrap()),
+                Format::Text => {
+                    if result.code == 0 {
+                        println!("{}", result.text);
+                    } else {
+                        eprintln!("{}", result.text);
+                    }
+                }
+            }
+            ExitCode::from(result.code)
+        }
         Outcome::Mutation(report) => write_mutation(&report, format),
         Outcome::Contract(report) => write_contract(&report, format),
         Outcome::Scan {
@@ -103,6 +116,12 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                 report.tests_executed
             )];
             let s = &report.summary;
+            if let Some(info) = &report.typecheck {
+                lines.push(format!(
+                    "typecheck: TypeScript {}: {} checked, {} compile errors, {} equivalent",
+                    info.version, info.checked, info.compile_errors, info.equivalent
+                ));
+            }
             lines.push(format!("{} mutants: {} killed, {} survived, {} uncovered, {} timeout, {} runtime errors, {} ignored, {} pending",
                 s.total,s.killed,s.survived,s.no_coverage,s.timeout,s.runtime_error,s.ignored,s.pending));
             if let Some(score) = s.score {
@@ -120,6 +139,9 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                 ));
                 if let Some(reason) = &m.candidate.ignored {
                     lines.push(format!("  ignored: {reason}"));
+                }
+                if let Some(reason) = &m.reason {
+                    lines.push(format!("  {reason}"));
                 }
                 if !m.covered_by.is_empty() {
                     lines.push(format!("  covered by: {}", m.covered_by.join(", ")));

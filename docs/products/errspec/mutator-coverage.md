@@ -1,6 +1,6 @@
 # mutator 0.2.0との機能対応
 
-[Product](product.md)の目標は、mutatorの全機能を包含し、errspecのエラー型・失敗シナリオ検証を併せて提供することです。この表は目標と実装済みの範囲を区別するために使います。Vitestによる生成・実行・判定を`mutate`で提供します。後続の機能は未実装として示します。
+[Product](product.md)の目標は、mutatorの全機能を包含し、errspecのエラー型・失敗シナリオ検証を併せて提供することです。この表は目標と実装済みの範囲を区別するために使います。Vitestによる生成・実行・判定を`mutate`で提供します。追加ワークフローの実装状況も下表に示します。全機能の条件は[追加のRequirements](features/mutation-workflows/requirements.md)に定めます。
 
 比較対象は[mutatorのREADME](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/README.md)と同じcommitの[CLI package.json](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/cli/package.json)で確認した0.2.0です。commitは`025870640d46e93e97285d67e4c265074cf8b295`に固定します。コマンドと設定は[options.ts](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/cli/src/options.ts)、組み込みmutatorは[mutators.ts](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/core/src/mutators.ts)も確認しています。
 
@@ -22,18 +22,18 @@
 | Vitest/Vite内のメモリ上の変換とセッション再利用 | メモリ上の変換と検証内での変換コード再利用を提供。Vitestセッションは基準実行・各試行で作成 |
 | 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 未実装。CLIの`snapshot`はタグとシナリオの履歴であり、実行結果キャッシュではない |
 | `--since`によるGit差分の限定、`node`/`scope`単位の選択、検出テストの削除による再検査、未収集の変更テストの警告 | 未実装。`--baseline`は宣言したタグ・シナリオを比較 |
-| `--only`で指定したmutantだけの再検査 | 未実装。`--only-contract-tests`は登録されたテストファイルの選択 |
+| `--only`で指定したmutantだけの再検査 | `mutate --only`で提供。未知のIDはエラー |
 | `--full-dry-run`による到達記録の再取得 | 未実装 |
 | `--experimental-callgraph`による生存mutantの再検査範囲の限定 | 未実装。`scan`はエラーの伝播先を調査し、テストの省略には使わない |
-| weak mutation、値の差によるテストの絞り込み、`not infected`の判定、無効化 | 未実装 |
-| 利用先のTypeScript 6以前／7以降でのmutantの型検査、`CompileError`、無効化 | 未実装。tsrsは元のプロジェクトの型エラーを診断 |
-| 型で同値と分かるoptional chaining mutantの除外と理由の提示 | 未実装 |
+| weak mutation、値の差によるテストの絞り込み、`not infected`の判定、無効化 | 比較・算術演算を`--weak-mutation`で提供。適用できない式と初期化・concurrentは全到達テストへ広げる |
+| 利用先のTypeScript 6以前／7以降でのmutantの型検査、`CompileError`、無効化 | `--typecheck` / `--no-typecheck`で提供。TS 5.9.3・6.0.3・7.0.2で検証 |
+| 型で同値と分かるoptional chaining mutantの除外と理由の提示 | 型検査で提供。strictNullChecksとnoUncheckedIndexedAccessを必要とする |
 | aridなログ専用コードの除外、calleeパターンの追加、無効化 | 未実装 |
 | disableコメントとStrykerコメントによる除外 | 未実装 |
-| `accept`、理由付きの同値mutant承認、古くなった承認の案内 | 未実装 |
+| `accept`、理由付きの同値mutant承認、古くなった承認の案内 | `accept --reason`と`errspec.accepted.json`で提供 |
 | custom mutator／ignorer plugin、モジュール・パッケージからの読取、mutator単位の除外、plugin変更時のキャッシュ無効化 | `--exclude-mutator`を提供。custom pluginとキャッシュは未実装 |
 | `-j`による並列実行、長い実行の分割 | 未実装 |
-| `--mutants-per-line`の決定的な標本選択、`--time-budget`、未実行の`Pending`表示 | 未実装 |
+| `--mutants-per-line`の決定的な標本選択、`--time-budget`、未実行の`Pending`表示 | 同名の指定と、理由付きの`Pending`で提供 |
 | hit limit、stall／total timeout、予算を延長した再実行、RuntimeErrorの再確認 | `mutate`で提供。再試行は一候補につき一度まで |
 | SIGINT／SIGTERM時の子プロセス終了、前回の孤立プロセスの検査と終了 | 今回所有するプロセス群の終了を提供。前回のプロセス探索は未実装 |
 
@@ -63,8 +63,8 @@
 | `--reporter simplify`で削除してもテストが失敗しないコードを一覧化 | 未実装 |
 | `select-tests`で変更に関係するテストを順位付けし、files／JSONで出力 | 未実装 |
 | `--kill-matrix`による全検出テスト、検出なし・包含・重複テストの一覧、各実行方式での結果再利用 | 未実装 |
-| high／low／breakの閾値、`--fail-on-survived`、baseline失敗とquality gate失敗の区別 | `--fail-on-undetected`で生存・未到達を不合格にし、基準実行の失敗とは区別。スコア閾値は未実装 |
-| critical領域のglob／コメント指定、全mutantの検出または承認の要求 | 未実装 |
+| high／low／breakの閾値、`--fail-on-survived`、baseline失敗とquality gate失敗の区別 | `--threshold-high/low/break`と`--fail-on-survived`を提供。quality gateは終了1、基準実行の異常は終了2 |
+| critical領域のglob／コメント指定、全mutantの検出または承認の要求 | `--critical`と直前の`// errspec-critical` / `// mutator-critical`で提供 |
 | GitHub Actionsの差分上のwarning annotation | 未実装 |
 
 ## 設定・配布・開発支援

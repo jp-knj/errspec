@@ -53,6 +53,44 @@ enum CliAnalysisEngine {
     Typescript,
 }
 
+#[derive(clap::Args)]
+struct MutationPolicyArgs {
+    #[arg(long)]
+    only: Vec<String>,
+    #[arg(long)]
+    mutants_per_line: Option<usize>,
+    #[arg(long)]
+    time_budget: Option<f64>,
+    #[arg(long)]
+    fail_on_survived: bool,
+    #[arg(long)]
+    threshold_high: Option<f64>,
+    #[arg(long)]
+    threshold_low: Option<f64>,
+    #[arg(long)]
+    threshold_break: Option<f64>,
+    #[arg(long)]
+    critical: Vec<String>,
+    #[arg(long)]
+    accepted_file: Option<String>,
+}
+
+impl From<MutationPolicyArgs> for errspec::mutation::policy::Policy {
+    fn from(args: MutationPolicyArgs) -> Self {
+        Self {
+            only: args.only,
+            mutants_per_line: args.mutants_per_line,
+            time_budget: args.time_budget,
+            fail_on_survived: args.fail_on_survived,
+            threshold_high: args.threshold_high,
+            threshold_low: args.threshold_low,
+            threshold_break: args.threshold_break,
+            critical: args.critical,
+            accepted_file: args.accepted_file,
+        }
+    }
+}
+
 impl From<CliAnalysisEngine> for crate::analysis_backend::Engine {
     fn from(engine: CliAnalysisEngine) -> Self {
         match engine {
@@ -65,6 +103,17 @@ impl From<CliAnalysisEngine> for crate::analysis_backend::Engine {
 
 #[derive(Subcommand)]
 enum Action {
+    /// Record reasoned approval of equivalent or intentionally untested mutants.
+    Accept {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long, default_value = "errspec.accepted.json")]
+        accepted_file: PathBuf,
+        #[arg(required = true)]
+        keys: Vec<String>,
+        #[arg(long)]
+        reason: String,
+    },
     /// Generate mutations, run Vitest, and report detected and undetected changes.
     Mutate {
         #[arg(long, default_value = ".")]
@@ -85,6 +134,22 @@ enum Action {
         node: PathBuf,
         #[arg(long)]
         fail_on_undetected: bool,
+        /// Check each mutant with the project's TypeScript before running it.
+        #[arg(long, conflicts_with = "no_typecheck")]
+        typecheck: bool,
+        /// Disable mutant typechecking explicitly.
+        #[arg(long)]
+        no_typecheck: bool,
+        #[arg(long, conflicts_with = "no_weak_mutation")]
+        weak_mutation: bool,
+        #[arg(long)]
+        no_weak_mutation: bool,
+        #[arg(long, requires = "typecheck")]
+        typecheck_project: Option<PathBuf>,
+        #[arg(long, requires = "typecheck")]
+        typecheck_package: Option<PathBuf>,
+        #[command(flatten)]
+        policy: Box<MutationPolicyArgs>,
     },
     #[command(name = "__mutation-source", hide = true)]
     MutationSource,
@@ -180,6 +245,29 @@ impl Cli {
             return Err("--typescript-package conflicts with --analysis-engine tsrs".into());
         }
         let command = match self.command {
+            Action::Accept {
+                root,
+                accepted_file,
+                keys,
+                reason,
+            } => {
+                if explicit_config
+                    || self.baseline.is_some()
+                    || self.strict_baseline
+                    || explicit_analysis
+                {
+                    return Err("accept does not accept contract or analysis options".into());
+                }
+                return Ok((
+                    Request::Accept {
+                        root,
+                        file: accepted_file,
+                        keys,
+                        reason,
+                    },
+                    self.format,
+                ));
+            }
             Action::MutationSource => return Ok((Request::MutationSource, self.format)),
             Action::Mutate {
                 root,
@@ -191,6 +279,13 @@ impl Cli {
                 vitest_package,
                 node,
                 fail_on_undetected,
+                typecheck,
+                no_typecheck: _,
+                weak_mutation,
+                no_weak_mutation: _,
+                typecheck_project,
+                typecheck_package,
+                policy,
             } => {
                 if explicit_config
                     || self.baseline.is_some()
@@ -212,6 +307,11 @@ impl Cli {
                         vitest_package,
                         node,
                         fail_on_undetected,
+                        typecheck,
+                        weak_mutation,
+                        typecheck_project,
+                        typecheck_package,
+                        policy: (*policy).into(),
                     }),
                     self.format,
                 ));

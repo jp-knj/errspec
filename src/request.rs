@@ -8,6 +8,12 @@ pub(crate) enum Request {
     Coverage(CoverageRequest),
     Mutation(MutationRequest),
     MutationSource,
+    Accept {
+        root: PathBuf,
+        file: PathBuf,
+        keys: Vec<String>,
+        reason: String,
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -22,6 +28,11 @@ pub(crate) struct MutationRequest {
     pub vitest_package: Option<PathBuf>,
     pub node: PathBuf,
     pub fail_on_undetected: bool,
+    pub typecheck: bool,
+    pub weak_mutation: bool,
+    pub typecheck_project: Option<PathBuf>,
+    pub typecheck_package: Option<PathBuf>,
+    pub policy: errspec::mutation::policy::Policy,
 }
 
 pub(crate) struct ContractRequest {
