@@ -217,6 +217,7 @@ fn first_witness_is_stable_and_recomputing_replaces_stale_summaries_only() {
             discriminant: "_tag".into(),
         },
         tags: vec!["Offline".into()],
+        reexports: vec![],
     };
     let mut report = ScanFacts {
         files: vec!["z.ts".into(), "a.ts".into(), "z.ts".into()],

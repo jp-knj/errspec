@@ -14,6 +14,15 @@ pub struct Location {
 pub struct Candidate {
     pub source: crate::model::Source,
     pub tags: Vec<String>,
+    /// Other public paths to the same declaration. `source` names the declaring file when it exports the type.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reexports: Vec<Export>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Export {
+    pub file: String,
+    pub export: String,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
