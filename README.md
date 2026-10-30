@@ -262,6 +262,7 @@ CLIと補助APIは同じ版を使ってください。実行環境変数は`ERRS
 import、再export、paths、具体化したgeneric、union/intersectionをtsrsで解決します。
 `any`、`unknown`、広いstring、optionalな識別子は解析不能として報告します。`never`は0件です。
 型エラーや`noCheck: true`を無視して合格にはしません。
+型検査はTypeScript 7に合わせたtsrsで行います。TypeScript 7で廃止された`moduleResolution: node`（`node10`）は、TypeScript 7が未指定のCommonJSプロジェクトに使う`bundler`の解決として解析し、レポートの`assumptions`に記録します。この置き換えは合否に影響しません。
 
 型検査はTypeScript 7の動作に合わせたtsrsで行います。TypeScript 5.xの`tsc`で通るtsconfigでも、TypeScript 7で変わった既定値や廃止された設定で失敗することがあります。
 たとえば`outDir`があり`rootDir`を省略した設定では、`rootDir`がtsconfigのディレクトリになり、ワークスペースの別パッケージのソースを参照すると`TS6059`になります。

@@ -146,6 +146,9 @@ pub struct Report {
     pub diagnostics: Vec<Finding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delta: Option<Delta>,
+    /// Analysis choices that differ from the project's tsconfig. They do not affect `ok`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub assumptions: Vec<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -170,6 +173,7 @@ impl Report {
             contracts: Vec::new(),
             diagnostics: Vec::new(),
             delta: None,
+            assumptions: Vec::new(),
         }
     }
 }

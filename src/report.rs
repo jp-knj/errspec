@@ -16,6 +16,7 @@ pub struct ReportData<'a> {
     pub delta: Option<Delta>,
     /// Failure paths by contract id, for contracts with an entry function.
     pub paths: std::collections::BTreeMap<String, Vec<FailurePath>>,
+    pub assumptions: Vec<&'static str>,
 }
 
 impl ReportData<'_> {
@@ -31,6 +32,7 @@ impl ReportData<'_> {
         report.test_runner = self.tests.as_ref().map(|tests| tests.runner);
         report.diagnostics = self.diagnostics;
         report.delta = self.delta;
+        report.assumptions = self.assumptions;
         report.contracts = self
             .registrations
             .iter()

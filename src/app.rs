@@ -43,6 +43,7 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
             }
         };
         data.analysis_complete = true;
+        data.assumptions.clone_from(&adapter.assumptions);
         for c in config.contracts() {
             match adapter.tags(root, c.source()) {
                 Ok(tags) => {

@@ -429,7 +429,11 @@ pub(crate) fn collect(adapter: &TsrsAdapter, root: &Path, discriminants: &[Strin
             .collect();
         candidate.flows = channels.into_iter().collect();
     }
-    facts.into_report()
+    let mut report = facts.into_report();
+    report
+        .assumptions
+        .extend(adapter.assumptions.iter().copied());
+    report
 }
 
 struct Inspector<'a> {

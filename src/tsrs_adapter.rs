@@ -5,7 +5,7 @@ use std::{collections::BTreeSet, path::Path, sync::Arc};
 use tsrs_ast::SymbolFlags;
 use tsrs_checker::{Checker, LiteralValue, Type, TypeFlags};
 use tsrs_compiler::{Context, Program, ProgramOptions, new_compiler_host, new_program};
-use tsrs_core::{P, Tristate};
+use tsrs_core::{ModuleResolutionKind, P, Tristate};
 use tsrs_tsoptions::ParseConfigHost;
 use tsrs_vfs::{FS, bundled, osvfs};
 
@@ -25,7 +25,11 @@ impl ParseConfigHost for ConfigHost {
 pub struct TsrsAdapter {
     pub(crate) program: &'static Program,
     pub(crate) context: Context,
+    /// Analysis choices that differ from the project's own tsconfig; reported, never blocking.
+    pub(crate) assumptions: Vec<&'static str>,
 }
+
+pub(crate) const NODE10_AS_BUNDLER: &str = "moduleResolution node/node10 was analysed as bundler: TypeScript 7 removed node10 and resolves unset CommonJS projects the same way";
 
 fn diagnostic(d: P<tsrs_ast::Diagnostic>) -> Finding {
     let mut f = Finding::new(&format!("TS{}", d.code()), d.localize());
@@ -62,8 +66,19 @@ impl TsrsAdapter {
         if !errors.is_empty() {
             return Err(errors.into_iter().map(diagnostic).collect());
         }
-        let parsed = parsed
+        let mut parsed = parsed
             .ok_or_else(|| vec![Finding::new("EC_CONFIG", "tsrs could not parse tsconfig")])?;
+        let mut assumptions = vec![];
+        // TypeScript 7 rejects node10 (TS5108) yet resolves an unset moduleResolution with a
+        // CommonJS module as bundler. Unset it so projects that tsc 5.x accepts can be analysed.
+        if let Some(compiler) = parsed.parsed_config.compiler_options
+            && compiler.module_resolution == ModuleResolutionKind::NODE10
+        {
+            let mut compiler = (*compiler).clone();
+            compiler.module_resolution = ModuleResolutionKind::UNKNOWN;
+            parsed.parsed_config.compiler_options = Some(P::new(compiler));
+            assumptions.push(NODE10_AS_BUNDLER);
+        }
         let host = new_compiler_host(&cwd, fs, &bundled::lib_path(), None, None, None);
         let mut options = ProgramOptions::new(P::new(parsed), host);
         options.single_threaded = Tristate::True;
@@ -85,7 +100,11 @@ impl TsrsAdapter {
         if !errors.is_empty() {
             return Err(errors.into_iter().map(diagnostic).collect());
         }
-        Ok(Self { program, context })
+        Ok(Self {
+            program,
+            context,
+            assumptions,
+        })
     }
 
     pub fn tags(&self, root: &Path, source: &Source) -> Result<Vec<String>, String> {

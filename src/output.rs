@@ -61,6 +61,9 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
                 .join(" ");
                 lines.push(format!("{subject}: {}", d.message));
             }
+            for note in &report.assumptions {
+                lines.push(format!("assumption: {note}"));
+            }
             if let Some(delta) = &report.delta {
                 lines.push(format!("delta: {}", serde_json::to_string(delta).unwrap()));
             }
