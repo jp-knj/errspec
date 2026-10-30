@@ -6,7 +6,7 @@ use errspec::{
     vitest,
 };
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -227,7 +227,7 @@ fn execute(
     report.runner_ok = output.status.success() && evidence.success;
     if !report.runner_ok {
         report.diagnostics.push(runner_error(
-            "vitest run failed; only assertions that passed before the failure count",
+            "vitest run failed; only assertions from uniquely passing tests count",
         ));
     }
     let test_sources: Vec<String> = evidence
@@ -238,7 +238,34 @@ fn execute(
         .into_iter()
         .filter_map(|file| fs::read_to_string(file).ok())
         .collect();
-    let (types, summary) = coverage::judge(types, &read_records(&records)?, &test_sources);
+    let resolve = |file: &str| {
+        let file = Path::new(file);
+        if file.is_absolute() {
+            file.canonicalize().ok()
+        } else {
+            root.join(file).canonicalize().ok()
+        }
+    };
+    let mut outcomes = BTreeMap::new();
+    for test in &evidence.tests {
+        if let Some(file) = resolve(&test.file) {
+            let outcome = outcomes
+                .entry((file, test.name.as_str()))
+                .or_insert((0, true));
+            outcome.0 += 1;
+            outcome.1 &= test.status == "passed";
+        }
+    }
+    let records: Vec<_> = read_records(&records)?
+        .into_iter()
+        .filter(|record| {
+            let (Some(file), Some(name)) = (resolve(&record.file), record.test.as_deref()) else {
+                return false;
+            };
+            outcomes.get(&(file, name)) == Some(&(1, true))
+        })
+        .collect();
+    let (types, summary) = coverage::judge(types, &records, &test_sources);
     report.types = types;
     report.summary = summary;
     Ok(())

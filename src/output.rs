@@ -274,7 +274,7 @@ fn coverage_markdown(report: &errspec::coverage::CoverageReport) -> String {
         ));
         for tag in open {
             let note = match tag.status {
-                TagStatus::Mentioned => "Written in a test, but no assertion received it",
+                TagStatus::Mentioned => "Written in a test, but no passing assertion required it",
                 _ => "No test refers to it",
             };
             out.push_str(&format!(

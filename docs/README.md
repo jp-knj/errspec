@@ -14,6 +14,7 @@
 - [エラー発見・伝播のRequirements](products/errspec/features/discovery/requirements.md) / [Design](products/errspec/features/discovery/design.md)
 - [配布・初期生成のRequirements](products/errspec/features/distribution/requirements.md) / [Design](products/errspec/features/distribution/design.md)
 - [既存テストによる網羅確認のRequirements](products/errspec/features/test-coverage/requirements.md) / [Design](products/errspec/features/test-coverage/design.md)
+- [障害を差し込んだ状態検査のRequirements](products/errspec/features/failure-atomicity/requirements.md) / [Design](products/errspec/features/failure-atomicity/design.md)
 
 CLIの責任分離は実装済みです。検証済み入力の型と判定・レポートの分離は、既存の入出力と合否を保つ次の改善としてDesignへ残しています。
 機能追加や出力の意味の変更は、別の要件として判断します。

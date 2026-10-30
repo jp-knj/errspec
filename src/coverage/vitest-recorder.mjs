@@ -43,9 +43,16 @@ export function collect(received, discriminants) {
   const visit = (value, depth) => {
     if (typeof value === "string") return add("", value);
     if (!value || typeof value !== "object" || depth > MAX_DEPTH || seen.has(value)) return;
+    // Matcher internals (e.g. objectContaining.sample) are not literal expectations.
+    for (let prototype = value; prototype; prototype = Object.getPrototypeOf(prototype)) {
+      if (Object.hasOwn(prototype, "asymmetricMatch")) return;
+    }
     if (++nodes > MAX_NODES) return;
     seen.add(value);
-    for (const [key, child] of Object.entries(value)) {
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+      // Recording must not invoke user getters a second time.
+      if (!descriptor.enumerable || !("value" in descriptor)) continue;
+      const child = descriptor.value;
       if (typeof child !== "string") visit(child, depth + 1);
       else if (discriminants.has(key)) add(key, child);
       // Free-text properties such as messages are not tags; array items may be.
@@ -54,6 +61,33 @@ export function collect(received, discriminants) {
   };
   visit(received, 0);
   return [...found.values()];
+}
+
+// Only literal constraints imposed by the matcher are evidence. Receiving an object
+// carrying a tag does not mean that a partial matcher checked that tag.
+export function checkedValues(matcher, received, args, discriminants) {
+  const expected = args[0];
+  if (matcher === "toBe") {
+    return typeof received === "string" && received === expected ? [["", received]] : [];
+  }
+  if (matcher === "toContain") {
+    return Array.isArray(received) && typeof expected === "string" && received.includes(expected)
+      ? [["", expected]] : [];
+  }
+  if (matcher === "toHaveProperty") {
+    if (args.length < 2) return [];
+    const path = args[0];
+    const key = Array.isArray(path) ? path.at(-1)
+      : typeof path === "string" && /^[\w$]+(?:\.[\w$]+|\[\d+\])*$/.test(path)
+        ? path.split(/[.\[\]]/).filter(Boolean).at(-1) : undefined;
+    return typeof args[1] === "string"
+      ? discriminants.has(key) ? [[key, args[1]]] : []
+      : collect(args[1], discriminants);
+  }
+  if (matcher === "toContainEqual") return collect(expected, discriminants);
+  // A successful equality/partial-equality matcher guarantees these literal
+  // constraints. Never collect extra properties from received.
+  return collect(expected, discriminants);
 }
 
 if (directory && vitestPackage) {
@@ -66,7 +100,9 @@ if (directory && vitestPackage) {
         const result = original.apply(this, args);
         // A throw above means the assertion failed; negated assertions prove absence, not presence.
         if (!utils.flag(this, "negate")) {
-          const values = collect(utils.flag(this, "object"), keys);
+          let values;
+          try { values = checkedValues(name, utils.flag(this, "object"), args, keys); }
+          catch { return result; } // Uninspectable expectations are not evidence.
           if (values.length) {
             const { testPath, currentTestName } = expect.getState();
             appendFileSync(output, `${JSON.stringify({ file: testPath, test: currentTestName, matcher: name, values })}\n`);

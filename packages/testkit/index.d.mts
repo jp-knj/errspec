@@ -28,3 +28,56 @@ export function scenarioTest(
   definition: ScenarioDefinition,
   body: (scope: ScenarioScope) => void | Promise<void>,
 ): unknown;
+
+export interface FailureInjection {
+  readonly id: string;
+  readonly dependency: string;
+  /** Supplies a valid failure for this dependency; may return or throw. */
+  readonly inject: (...args: unknown[]) => unknown;
+}
+
+export interface FailureScope {
+  wrap<Args extends unknown[], R>(dependency: string, implementation: (...args: Args) => R):
+    (...args: Args) => Promise<Awaited<R>>;
+}
+
+export interface AtomicityFixture<R, S> {
+  run(scope: FailureScope): R | Promise<R>;
+  snapshot(): S | Promise<S>;
+  dispose?(): void | Promise<void>;
+}
+
+export interface FailureAtomicityOptions<R, S> {
+  readonly setup: () => AtomicityFixture<R, S> | Promise<AtomicityFixture<R, S>>;
+  readonly faults: readonly FailureInjection[];
+  readonly isFailure: (result: R) => boolean;
+  /** Replays one case reported in FailureAtomicityError.report. */
+  readonly only?: { readonly fault: string; readonly call: number };
+}
+
+export interface AtomicityFault {
+  readonly fault: string;
+  readonly dependency: string;
+  readonly call: number;
+}
+
+export interface AtomicityCase<R, S> {
+  readonly fault: AtomicityFault;
+  status: "preserved" | "recovered" | "violated";
+  before?: S;
+  after?: S;
+  result?: R;
+  message?: string;
+  error?: unknown;
+}
+
+export interface FailureAtomicityReport<R, S> {
+  baseline: { calls: Record<string, number>; message?: string; error?: unknown };
+  cases: AtomicityCase<R, S>[];
+}
+
+export class FailureAtomicityError extends Error {
+  readonly report: FailureAtomicityReport<unknown, unknown>;
+  constructor(message: string, report: FailureAtomicityReport<unknown, unknown>);
+}
+export function checkFailureAtomicity<R, S>(options: FailureAtomicityOptions<R, S>): Promise<FailureAtomicityReport<R, S>>;

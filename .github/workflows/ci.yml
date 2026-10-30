@@ -30,6 +30,10 @@ jobs:
           TESTKIT_ENTRY: ../packages/testkit/index.ts
       - run: node --test tests/package.test.mjs
       - run: node --test tests/vitest-recorder.test.mjs
+      - run: node --test tests/failure-atomicity.test.mjs
+      - run: node --test tests/failure-atomicity.test.mjs
+        env:
+          TESTKIT_ENTRY: ../packages/testkit/index.ts
       - run: node scripts/demo-scenarios.mjs
       - run: node scripts/demo-init.mjs
       - run: node scripts/demo-module-mock.mjs

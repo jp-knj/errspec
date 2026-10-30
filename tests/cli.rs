@@ -31,7 +31,7 @@ export type ErrorType = {_tag:'A'};
 
 /// Minimal declarations for the Node APIs the TypeScript testkit imports; the repository has no @types/node.
 const NODE_STUB: &str = r#"
-declare module "node:assert/strict" { export function deepStrictEqual(actual: unknown, expected: unknown): void; }
+declare module "node:assert/strict" { export function deepStrictEqual(actual: unknown, expected: unknown, message?: string): void; }
 declare module "node:crypto" { export function randomUUID(): string; }
 declare module "node:fs" {
   export function writeFileSync(path: string, data: string, options: { flag: string }): void;
@@ -70,6 +70,61 @@ export type ErrorType = {_tag:'A'};
         .unwrap();
         let (status, report) = run(&dir, &["check"]);
         assert_eq!(status, expected, "{report}");
+    }
+}
+
+#[test]
+fn atomicity_api_infers_fixture_results_state_and_dependency_arguments() {
+    for extension in ["ts", "d.mts"] {
+        let dir = fixture(
+            r#"
+/// <reference path="./sdk/node.d.ts" />
+import { checkFailureAtomicity, type FailureAtomicityReport } from './sdk/index.mjs';
+const report = checkFailureAtomicity({
+  faults: [{ id: 'down', dependency: 'save', inject: () => ({ ok: false, value: 0 }) }],
+  setup: () => ({
+    snapshot: () => ({ balance: 1 }),
+    run(scope) {
+      const save = scope.wrap('save', async (value: number) => ({ ok: true, value }));
+      // @ts-expect-error preserve dependency argument types
+      save('wrong');
+      return save(1);
+    }
+  }),
+  isFailure: result => !result.ok,
+});
+const typed: Promise<FailureAtomicityReport<{ok: boolean; value: number}, {balance: number}>> = report;
+report.then(result => {
+  const balance: number | undefined = result.cases[0]?.before?.balance;
+  // @ts-expect-error preserve snapshot value types
+  const wrong: string = result.cases[0]!.before!.balance;
+});
+export type ErrorType = {_tag:'A'};
+"#,
+            &["A"],
+        );
+        fs::create_dir(dir.path().join("sdk")).unwrap();
+        fs::write(dir.path().join("sdk/node.d.ts"), NODE_STUB).unwrap();
+        fs::write(
+            dir.path().join(format!("sdk/index.{extension}")),
+            if extension == "ts" {
+                include_str!("../packages/testkit/index.ts")
+            } else {
+                include_str!("../packages/testkit/index.d.mts")
+            },
+        )
+        .unwrap();
+        // TypeScript resolves .mjs to .mts/.d.mts; use .ts explicitly for the vendored copy.
+        if extension == "ts" {
+            let source = fs::read_to_string(dir.path().join("errors.ts")).unwrap();
+            fs::write(
+                dir.path().join("errors.ts"),
+                source.replace("./sdk/index.mjs", "./sdk/index"),
+            )
+            .unwrap();
+        }
+        let (status, report) = run(&dir, &["check"]);
+        assert_eq!(status, 0, "{extension}: {report}");
     }
 }
 

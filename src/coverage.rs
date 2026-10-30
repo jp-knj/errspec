@@ -23,9 +23,9 @@ pub struct AssertionRecord {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TagStatus {
-    /// A passing assertion received a value carrying the tag.
+    /// A passing test required this literal tag in a successful assertion.
     Asserted,
-    /// The tag appears in a test file, but no assertion received it (e.g. only a mocked input).
+    /// The tag appears in a test file, but no passing test required its value.
     Mentioned,
     Missing,
 }
