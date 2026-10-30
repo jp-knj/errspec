@@ -1,13 +1,95 @@
 //! Isolate unpublished tsrs APIs. No native handles escape into reports.
 //! Compiler arena allocations live until this one-shot CLI process exits.
-use errspec::model::{Finding, Source};
+use errspec::model::{Finding, Location, Source};
 use std::{collections::BTreeSet, path::Path, sync::Arc};
-use tsrs_ast::SymbolFlags;
+use tsrs_ast::{Kind, Node, SymbolFlags, get_source_file_of_node};
 use tsrs_checker::{Checker, LiteralValue, Type, TypeFlags};
 use tsrs_compiler::{Context, Program, ProgramOptions, new_compiler_host, new_program};
 use tsrs_core::{ModuleResolutionKind, P, Tristate};
 use tsrs_tsoptions::ParseConfigHost;
 use tsrs_vfs::{FS, bundled, osvfs};
+
+/// Parser-only entry for mutation generation. Contract analysis still uses `open`.
+pub(crate) fn parse_source(file: &str, source: String) -> Result<P<tsrs_ast::SourceFile>, String> {
+    let kind = match Path::new(file).extension().and_then(|s| s.to_str()) {
+        Some("jsx") => tsrs_core::ScriptKind::JSX,
+        Some("js" | "mjs" | "cjs") => tsrs_core::ScriptKind::JS,
+        Some("tsx") => tsrs_core::ScriptKind::TSX,
+        _ => tsrs_core::ScriptKind::TS,
+    };
+    let file_name = if Path::new(file).is_absolute() {
+        file.into()
+    } else {
+        format!("/__errspec_mutation__/{file}")
+    };
+    let parsed = tsrs_parser::parse_source_file_owned(
+        tsrs_ast::SourceFileParseOptions {
+            file_name,
+            ..Default::default()
+        },
+        source,
+        kind,
+    );
+    if !parsed.diagnostics().is_empty() {
+        return Err(parsed
+            .diagnostics()
+            .iter()
+            .map(|d| d.localize())
+            .collect::<Vec<_>>()
+            .join("; "));
+    }
+    walk(parsed.as_node(), &mut |n| {
+        tsrs_ast::set_parent_in_children(n)
+    });
+    Ok(parsed)
+}
+
+pub(crate) fn location(root: &Path, node: P<Node>) -> Location {
+    let file = get_source_file_of_node(node).expect("source node");
+    let offset = tsrs_scanner::get_token_pos_of_node(node, file, false) as usize;
+    Location {
+        file: Path::new(file.file_name())
+            .strip_prefix(root)
+            .unwrap_or(Path::new(file.file_name()))
+            .to_string_lossy()
+            .replace('\\', "/"),
+        byte_offset: offset as u32,
+        line: line_at(file.text(), offset),
+    }
+}
+
+pub(crate) fn line_at(text: &str, offset: usize) -> usize {
+    text.as_bytes()[..offset.min(text.len())]
+        .iter()
+        .filter(|&&c| c == b'\n')
+        .count()
+        + 1
+}
+
+pub(crate) fn text(node: P<Node>) -> String {
+    if matches!(
+        node.kind(),
+        Kind::Identifier | Kind::PrivateIdentifier | Kind::StringLiteral
+    ) {
+        return node.text().into();
+    }
+    get_source_file_of_node(node)
+        .and_then(|f| {
+            f.text()
+                .get(node.pos().source_offset()? as usize..node.end().source_offset()? as usize)
+        })
+        .unwrap_or("")
+        .trim()
+        .to_owned()
+}
+
+pub(crate) fn walk(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
+    callback(node);
+    node.for_each_child(&mut |child| {
+        walk(child, callback);
+        false
+    });
+}
 
 struct ConfigHost {
     fs: Arc<dyn FS>,
@@ -38,7 +120,7 @@ fn diagnostic(d: P<tsrs_ast::Diagnostic>) -> Finding {
     f.line = d
         .file()
         .zip(d.pos())
-        .map(|(file, pos)| crate::scan::line_at(file.text(), pos as usize) as u32);
+        .map(|(file, pos)| line_at(file.text(), pos as usize) as u32);
     f
 }
 

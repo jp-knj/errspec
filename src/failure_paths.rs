@@ -1,6 +1,6 @@
 //! Follow a contract's entry function: failures that escape outside the error type (EC018),
 //! and the `return`s that yield each tag, which execution later marks as reached or not.
-use crate::{scan, tsrs_adapter::TsrsAdapter};
+use crate::{scan, tsrs_adapter::{TsrsAdapter, location}};
 use errspec::{
     config::ValidatedContract,
     discovery::{Channel, ScanReport},
@@ -117,7 +117,7 @@ fn return_paths(
         if found.is_empty() {
             continue;
         }
-        let location = scan::location(root, statement);
+        let location = location(root, statement);
         paths.push(FailurePath {
             file: location.file,
             line: location.line,

@@ -5,6 +5,7 @@ use serde_json::json;
 
 #[test]
 fn skipped_missing_ambiguous_or_failed_tests_never_count_as_passed() {
+    let mut reports = Vec::new();
     for (states, wanted) in [
         (vec!["passed"], "passed"),
         (vec!["pending"], "pending"),
@@ -29,12 +30,17 @@ fn skipped_missing_ambiguous_or_failed_tests_never_count_as_passed() {
             vitest::normalize(raw),
             true,
         );
+        if wanted == "ambiguous" {
+            insta::assert_debug_snapshot!("ambiguous_test_judgment", tests);
+        }
         data.tests = Some(tests);
         data.diagnostics.extend(findings);
         let report = data.finish("verify");
         assert_eq!(report.contracts[0].cases[0].test_status, wanted);
         assert_eq!(report.diagnostics.is_empty(), wanted == "passed");
+        reports.push(report);
     }
+    insta::assert_json_snapshot!("test_matching_statuses", reports);
 }
 
 #[test]

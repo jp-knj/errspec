@@ -21,6 +21,13 @@ src/gateway.ts GatewayError [_tag]: 1/3 asserted
 `scan`でプロジェクトからエラー候補と伝播経路を調べ、`init`で選んだ型の設定・テストを生成することもできます。
 npm CLIとLinux/macOS向けバイナリは配布準備中です。[配布物の作成と導入](packages/cli/README.md)を参照してください。
 
+## 製品目標と実装状況
+
+製品目標は、[mutator 0.2.0](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/README.md)の全機能と、errspecのエラー型・失敗シナリオ検証を併せて提供することです。
+現在は`scan`、`init`、`check`、`verify`、`snapshot`、`coverage`と、Vitest用の`mutate`を提供しています。[機能対応表](docs/products/errspec/mutator-coverage.md)に対象の全機能と実装状況をまとめています。差分実行、永続キャッシュ、型検査、追加ランナーなどは後続の機能です。
+
+互換性は機能の包含を基準とし、既存errspecのCLI・終了コード・設定・JSON・testkit APIを維持します。ミューテーション機能は追加機能として個別のRequirements・Designで具体化します。
+
 ## 最初に動かす
 
 必要なものはRust 1.99.1とBun 1.2.19以降です。初回ビルドではGitHub/crates.ioへの接続が必要です。
@@ -90,6 +97,22 @@ coverageの注意点:
 - テストが途中で失敗しても、それまでに成功したアサーションは数えます。ランナーの失敗は`runnerOk: false`と終了コード1で示します。
 - `mentioned`はテストファイルに引用符付きの同じ文字列があるかで判定します。コメントや無関係な文字列も数えるため、`asserted`より弱い目安です。
 - `toThrow`は対象の関数を再実行しないため、投げたErrorの値は記録しません。`rejects`で受け取った値は記録します。
+
+## 既存テストの変更検出
+
+`mutate`は18種類の変異を生成し、一つずつ有効にして既存のVitestテストを実行します。`errspec.json`やtestkitは不要です。Node.js 24以降と、利用先のVitest 5系が必要です。
+
+```sh
+errspec mutate --root .
+errspec mutate --include 'src/**/*.ts' --exclude 'src/generated/**' --format json
+errspec mutate --fail-on-undetected
+```
+
+既定の対象は`src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}`です。型宣言、テスト、設定、setup、依存パッケージを除外します。`--exclude-mutator Regex`のように種別を除外できます。複数のVitestプロジェクトがある場合は`--vitest-project NAME`で一つを選びます。`--vitest-config`、`--vitest-package`、`--node`で設定・パッケージ・Nodeのパスを指定できます。明示した相対パスは呼出元、globはrootを基準にします。
+
+元のコードで成功することと、変換後も同じテストが成功することを確認してから変異を実行します。元ファイルは変更せず、Viteのメモリ上で切り替えます。Vitestのsnapshot更新も無効です。対象はNode worker内でVite変換を経由するコードで、Browser Mode、native require、別の子プロセスは計測範囲に含みません。
+
+結果は`Killed`、`Survived`、`NoCoverage`、`Timeout`、`RuntimeError`、`Ignored`、`Pending`を区別します。JSONは独立した`errspec/mutation` schemaVersion 1です。既定では結果表示にとどめ、`--fail-on-undetected`を指定すると、生存か未到達があれば終了コード1になります。基準実行や実行器の異常、入力変更などで未完了なら終了コード2で、スコアはnullです。中断時は130または143です。[仕様と判定規則](docs/products/errspec/features/mutation-testing/requirements.md)も参照してください。
 
 ## 設定とテスト
 
@@ -309,6 +332,8 @@ import、再export、paths、具体化したgeneric、union/intersectionをtsrs�
 | コマンド／オプション | 用途 |
 |---|---|
 | `scan --project PATH` | 型候補・明示的な失敗箇所と保守的な伝播を調べる。テスト実行なし |
+| `mutate --root PATH` | Vitestで変異の生成・実行・判定。既定では結果表示 |
+| `mutate --fail-on-undetected` | 生存・未到達を終了コード1にする |
 | `init --source FILE --export NAME` | 選んだ型の設定と未完成のテストを生成 |
 | `check` | 型とケース登録の照合。テスト実行なし |
 | `verify --runner bun\|vitest` | テストと観測の照合。既定はVitest |
@@ -347,6 +372,8 @@ Bunは起動前に`--version`で版を確認し、1.2.19未満なら実行しま
 
 ## 開発と検証
 
+Rustの配置・共通化と期待値の確認は[Rustコードとsnaptestの基準](docs/engineering/guidelines/rust-code.md)に従います。
+
 仕様策定中は[sdev](https://github.com/azu/sdev)を使い、[Product・Requirements・Design](docs/README.md)をknjとAIで確認します。
 仕様案は日本語で整理しています。内容が固まった後にsdevを外し、英語のドキュメントを残します。
 sdevは開発中の作業用で、errspecの実行時依存やCIの必須条件には追加していません。
@@ -361,11 +388,16 @@ sdevは開発中の作業用で、errspecの実行時依存やCIの必須条件�
 ```sh
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
+INSTA_UPDATE=no cargo test --locked
 cargo build --locked
 node --test tests/testkit.test.mjs
 TESTKIT_ENTRY=../packages/testkit/index.ts node --test tests/testkit.test.mjs
 (cd examples/checkout && npm ci --ignore-scripts --no-audit --no-fund)
+(cd packages/mutation-driver && npm ci --ignore-scripts --no-audit --no-fund)
+node scripts/build-mutation-driver.mjs --check
+node --test tests/mutation-emitter.test.mjs
+node --test tests/mutation-process.test.mjs
+node scripts/demo-mutation.mjs
 node scripts/demo.mjs
 node scripts/demo-bun.mjs
 node scripts/demo-scenarios.mjs
@@ -375,6 +407,7 @@ node scripts/demo-failure-paths.mjs
 ```
 
 `demo-scenarios.mjs`は実際のBun/Vitestを起動し、一時コピーだけに変更を加えます。
+`mutate`の検証はNode 24以降で実行します。driver bundleの変更時はBun 1.4.4で`node scripts/build-mutation-driver.mjs`を実行し、生成物とライセンス通知を同じ変更に含めます。
 `demo-init.mjs`は初期生成したテストを両ランナーで実行し、未記入のTODOが通常実行でもverifyでも失敗することを確認します。
 `demo-failure-paths.mjs`は、実際のBunで経路の到達を記録し、未テストの経路（EC019）とエラー型の外へ出るthrow（EC018）を確認します。
 `demo-module-mock.mjs`は、依存を直接importするコードへモジュールのmockから障害を差し込めること、mockを外すと`EC009`になることを両ランナーで確認します。
@@ -387,4 +420,4 @@ node scripts/demo-failure-paths.mjs
 
 [mizchiさんのmutator紹介記事](https://zenn.dev/mizchi/articles/introduce-mutator)を読んだことが開発のきっかけです。
 errspecでは、エラー型から列挙したタグと、利用者が宣言した失敗シナリオ・必須の検証を対応付けます。
-mutation testingとの併用を想定していますが、mutatorとの自動連携は未実装です。
+mutation testingの提供目標と実装状況は[機能対応表](docs/products/errspec/mutator-coverage.md)を参照してください。

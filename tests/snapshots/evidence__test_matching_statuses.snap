@@ -1,0 +1,328 @@
+---
+source: tests/evidence.rs
+expression: reports
+---
+[
+  {
+    "schemaVersion": 2,
+    "engine": {
+      "name": "tsrs",
+      "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+    },
+    "mode": "verify",
+    "ok": true,
+    "analysisComplete": true,
+    "testsExecuted": true,
+    "testRunner": "vitest",
+    "contracts": [
+      {
+        "id": "x",
+        "source": {
+          "file": "e.ts",
+          "export": "E",
+          "discriminant": "tag"
+        },
+        "declaredBoundaries": [],
+        "tags": [
+          "A"
+        ],
+        "cases": [
+          {
+            "tag": "A",
+            "registration": "registered",
+            "testStatus": "passed",
+            "test": {
+              "file": "case.test.ts",
+              "name": "rejects A"
+            },
+            "expect": "rejects",
+            "observationStatus": "not_required"
+          }
+        ]
+      }
+    ],
+    "diagnostics": []
+  },
+  {
+    "schemaVersion": 2,
+    "engine": {
+      "name": "tsrs",
+      "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+    },
+    "mode": "verify",
+    "ok": false,
+    "analysisComplete": true,
+    "testsExecuted": true,
+    "testRunner": "vitest",
+    "contracts": [
+      {
+        "id": "x",
+        "source": {
+          "file": "e.ts",
+          "export": "E",
+          "discriminant": "tag"
+        },
+        "declaredBoundaries": [],
+        "tags": [
+          "A"
+        ],
+        "cases": [
+          {
+            "tag": "A",
+            "registration": "registered",
+            "testStatus": "pending",
+            "test": {
+              "file": "case.test.ts",
+              "name": "rejects A"
+            },
+            "expect": "rejects",
+            "observationStatus": "not_required"
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": "EC005",
+        "message": "Referenced test is pending: rejects A",
+        "contractId": "x",
+        "tag": "A"
+      }
+    ]
+  },
+  {
+    "schemaVersion": 2,
+    "engine": {
+      "name": "tsrs",
+      "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+    },
+    "mode": "verify",
+    "ok": false,
+    "analysisComplete": true,
+    "testsExecuted": true,
+    "testRunner": "vitest",
+    "contracts": [
+      {
+        "id": "x",
+        "source": {
+          "file": "e.ts",
+          "export": "E",
+          "discriminant": "tag"
+        },
+        "declaredBoundaries": [],
+        "tags": [
+          "A"
+        ],
+        "cases": [
+          {
+            "tag": "A",
+            "registration": "registered",
+            "testStatus": "failed",
+            "test": {
+              "file": "case.test.ts",
+              "name": "rejects A"
+            },
+            "expect": "rejects",
+            "observationStatus": "not_required"
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": "EC005",
+        "message": "Referenced test is failed: rejects A",
+        "contractId": "x",
+        "tag": "A"
+      }
+    ]
+  },
+  {
+    "schemaVersion": 2,
+    "engine": {
+      "name": "tsrs",
+      "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+    },
+    "mode": "verify",
+    "ok": false,
+    "analysisComplete": true,
+    "testsExecuted": true,
+    "testRunner": "vitest",
+    "contracts": [
+      {
+        "id": "x",
+        "source": {
+          "file": "e.ts",
+          "export": "E",
+          "discriminant": "tag"
+        },
+        "declaredBoundaries": [],
+        "tags": [
+          "A"
+        ],
+        "cases": [
+          {
+            "tag": "A",
+            "registration": "registered",
+            "testStatus": "future-status",
+            "test": {
+              "file": "case.test.ts",
+              "name": "rejects A"
+            },
+            "expect": "rejects",
+            "observationStatus": "not_required"
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": "EC005",
+        "message": "Referenced test is future-status: rejects A",
+        "contractId": "x",
+        "tag": "A"
+      }
+    ]
+  },
+  {
+    "schemaVersion": 2,
+    "engine": {
+      "name": "tsrs",
+      "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+    },
+    "mode": "verify",
+    "ok": false,
+    "analysisComplete": true,
+    "testsExecuted": true,
+    "testRunner": "vitest",
+    "contracts": [
+      {
+        "id": "x",
+        "source": {
+          "file": "e.ts",
+          "export": "E",
+          "discriminant": "tag"
+        },
+        "declaredBoundaries": [],
+        "tags": [
+          "A"
+        ],
+        "cases": [
+          {
+            "tag": "A",
+            "registration": "registered",
+            "testStatus": "Passed",
+            "test": {
+              "file": "case.test.ts",
+              "name": "rejects A"
+            },
+            "expect": "rejects",
+            "observationStatus": "not_required"
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": "EC005",
+        "message": "Referenced test is Passed: rejects A",
+        "contractId": "x",
+        "tag": "A"
+      }
+    ]
+  },
+  {
+    "schemaVersion": 2,
+    "engine": {
+      "name": "tsrs",
+      "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+    },
+    "mode": "verify",
+    "ok": false,
+    "analysisComplete": true,
+    "testsExecuted": true,
+    "testRunner": "vitest",
+    "contracts": [
+      {
+        "id": "x",
+        "source": {
+          "file": "e.ts",
+          "export": "E",
+          "discriminant": "tag"
+        },
+        "declaredBoundaries": [],
+        "tags": [
+          "A"
+        ],
+        "cases": [
+          {
+            "tag": "A",
+            "registration": "registered",
+            "testStatus": "not_found",
+            "test": {
+              "file": "case.test.ts",
+              "name": "rejects A"
+            },
+            "expect": "rejects",
+            "observationStatus": "not_required"
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": "EC005",
+        "message": "Referenced test is not_found: rejects A",
+        "contractId": "x",
+        "tag": "A"
+      }
+    ]
+  },
+  {
+    "schemaVersion": 2,
+    "engine": {
+      "name": "tsrs",
+      "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+    },
+    "mode": "verify",
+    "ok": false,
+    "analysisComplete": true,
+    "testsExecuted": true,
+    "testRunner": "vitest",
+    "contracts": [
+      {
+        "id": "x",
+        "source": {
+          "file": "e.ts",
+          "export": "E",
+          "discriminant": "tag"
+        },
+        "declaredBoundaries": [],
+        "tags": [
+          "A"
+        ],
+        "cases": [
+          {
+            "tag": "A",
+            "registration": "registered",
+            "testStatus": "ambiguous",
+            "test": {
+              "file": "case.test.ts",
+              "name": "rejects A"
+            },
+            "expect": "rejects",
+            "observationStatus": "not_required"
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": "EC005",
+        "message": "Referenced test is ambiguous: rejects A",
+        "contractId": "x",
+        "tag": "A"
+      }
+    ]
+  }
+]

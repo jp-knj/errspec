@@ -2,13 +2,7 @@
 use serde::Serialize;
 mod propagation;
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Location {
-    pub file: String,
-    pub byte_offset: u32,
-    pub line: usize,
-}
+pub use crate::model::Location;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Candidate {

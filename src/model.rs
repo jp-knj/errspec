@@ -3,6 +3,14 @@ use std::collections::BTreeMap;
 
 pub const TSRS_REVISION: &str = "1bfd1e65be95131f9242a03687d37006214a96f6";
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Location {
+    pub file: String,
+    pub byte_offset: u32,
+    pub line: usize,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {

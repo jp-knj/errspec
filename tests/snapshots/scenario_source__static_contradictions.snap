@@ -1,0 +1,159 @@
+---
+source: tests/scenario_source.rs
+expression: outcomes
+---
+[
+  {
+    "findings": [
+      {
+        "byteOffset": 420,
+        "code": "EC015",
+        "contractId": "checkout",
+        "file": "case.test.ts",
+        "line": 10,
+        "message": "Test registers a scenario that is not in the configuration: checkout / limit-later",
+        "scenarioId": "limit-later"
+      }
+    ],
+    "source": "{ id: 'limit-retries' }, { id: 'limit-later' }",
+    "status": 1
+  },
+  {
+    "findings": [
+      {
+        "byteOffset": 111,
+        "code": "EC015",
+        "contractId": "checkout",
+        "file": "case.test.ts",
+        "line": 5,
+        "message": "Test tag RateLimited differs from the registered tag Declined",
+        "scenarioId": "declined",
+        "tag": "Declined"
+      }
+    ],
+    "source": "id: 'declined', tag: 'RateLimited'",
+    "status": 1
+  },
+  {
+    "findings": [
+      {
+        "byteOffset": 580,
+        "code": "EC015",
+        "contractId": "checkout",
+        "file": "case.test.ts",
+        "line": 15,
+        "message": "Configuration declares \"faults\": [] but the test does not declare withoutFaults",
+        "scenarioId": "invalid",
+        "tag": "Invalid"
+      }
+    ],
+    "source": "tag: 'Invalid'",
+    "status": 1
+  },
+  {
+    "findings": [
+      {
+        "byteOffset": 580,
+        "code": "EC015",
+        "contractId": "checkout",
+        "file": "case.test.ts",
+        "line": 15,
+        "message": "Configuration declares \"faults\": [] but the test does not declare withoutFaults",
+        "scenarioId": "invalid",
+        "tag": "Invalid"
+      }
+    ],
+    "source": "tag: 'Invalid', withoutFaults: false",
+    "status": 1
+  },
+  {
+    "findings": [
+      {
+        "byteOffset": 111,
+        "code": "EC015",
+        "contractId": "checkout",
+        "file": "case.test.ts",
+        "line": 5,
+        "message": "Test declares withoutFaults but the configuration requires faults",
+        "scenarioId": "declined",
+        "tag": "Declined"
+      }
+    ],
+    "source": "tag: 'Declined', withoutFaults: true, description",
+    "status": 1
+  },
+  {
+    "findings": [
+      {
+        "byteOffset": 114,
+        "code": "EC015",
+        "contractId": "checkout-v2",
+        "file": "case.test.ts",
+        "line": 5,
+        "message": "Test registers a scenario that is not in the configuration: checkout-v2 / declined",
+        "scenarioId": "declined"
+      },
+      {
+        "byteOffset": 400,
+        "code": "EC015",
+        "contractId": "checkout-v2",
+        "file": "case.test.ts",
+        "line": 10,
+        "message": "Test registers a scenario that is not in the configuration: checkout-v2 / limit-first",
+        "scenarioId": "limit-first"
+      },
+      {
+        "byteOffset": 400,
+        "code": "EC015",
+        "contractId": "checkout-v2",
+        "file": "case.test.ts",
+        "line": 10,
+        "message": "Test registers a scenario that is not in the configuration: checkout-v2 / limit-retries",
+        "scenarioId": "limit-retries"
+      },
+      {
+        "byteOffset": 583,
+        "code": "EC015",
+        "contractId": "checkout-v2",
+        "file": "case.test.ts",
+        "line": 15,
+        "message": "Test registers a scenario that is not in the configuration: checkout-v2 / invalid",
+        "scenarioId": "invalid"
+      }
+    ],
+    "source": "const CONTRACT = 'checkout-v2';",
+    "status": 1
+  },
+  {
+    "findings": [
+      {
+        "byteOffset": 111,
+        "code": "EC016",
+        "contractId": "checkout",
+        "file": "case.test.ts",
+        "line": 5,
+        "message": "Scenario uses check id \"code\" that the configuration does not declare",
+        "scenarioId": "declined",
+        "tag": "Declined"
+      }
+    ],
+    "source": "s.check('code', 402, 402)",
+    "status": 1
+  },
+  {
+    "findings": [
+      {
+        "byteOffset": 111,
+        "code": "EC016",
+        "contractId": "checkout",
+        "file": "case.test.ts",
+        "line": 5,
+        "message": "Scenario uses fault id \"gate\" that the configuration does not declare",
+        "scenarioId": "declined",
+        "tag": "Declined"
+      }
+    ],
+    "source": "await s.fault('gate', async () => 1)();\n  s.check('status', 402",
+    "status": 1
+  }
+]

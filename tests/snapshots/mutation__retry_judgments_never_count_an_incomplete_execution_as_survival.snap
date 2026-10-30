@@ -1,0 +1,43 @@
+---
+source: tests/mutation.rs
+expression: "json!([pass, killed, timeout, runtime, limit])"
+---
+[
+  {
+    "failedModules": [],
+    "killedBy": [],
+    "number": 1,
+    "reason": "All selected tests passed",
+    "status": "Survived"
+  },
+  {
+    "failedModules": [],
+    "killedBy": [
+      "test"
+    ],
+    "number": 1,
+    "reason": "Selected test failed",
+    "status": "Killed"
+  },
+  {
+    "failedModules": [],
+    "killedBy": [],
+    "number": 1,
+    "reason": "Execution exceeded a timeout",
+    "status": "Timeout"
+  },
+  {
+    "failedModules": [],
+    "killedBy": [],
+    "number": 2,
+    "reason": "Selected tests did not all execute successfully",
+    "status": "RuntimeError"
+  },
+  {
+    "failedModules": [],
+    "killedBy": [],
+    "number": 1,
+    "reason": "Execution exceeded the hit limit",
+    "status": "Timeout"
+  }
+]

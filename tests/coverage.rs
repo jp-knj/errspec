@@ -75,10 +75,12 @@ fn tags_are_asserted_mentioned_or_missing() {
         ),
         (2, 4, 2, 1, 1)
     );
+    insta::assert_json_snapshot!("tag_coverage", json!({"types": types, "summary": summary}));
 }
 
 #[test]
 fn shared_tag_values_are_counted_per_discriminant_in_any_order() {
+    let mut results = Vec::new();
     let mut code = candidate("code.ts", "CodeFailure", &["Shared"]);
     code.source.discriminant = "code".into();
     let mut kind = candidate("kind.ts", "KindFailure", &["Shared"]);
@@ -103,7 +105,9 @@ fn shared_tag_values_are_counted_per_discriminant_in_any_order() {
             ),
             (2, 2, 1, 0, 1)
         );
+        results.push(json!({"types": types, "summary": summary}));
     }
+    insta::assert_json_snapshot!("shared_values_per_discriminant", results);
 }
 
 fn fixture() -> TempDir {

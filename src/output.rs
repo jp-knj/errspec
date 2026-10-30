@@ -84,6 +84,7 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
 
 pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
     match outcome {
+        Outcome::Mutation(report) => write_mutation(&report, format),
         Outcome::Contract(report) => write_contract(&report, format),
         Outcome::Scan {
             report,
@@ -95,6 +96,63 @@ pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
             fail_on_missing,
         } => write_coverage(&report, fail_on_missing, format),
     }
+}
+
+fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCode {
+    let output = match format {
+        Format::Json => serde_json::to_string_pretty(report).unwrap(),
+        Format::Text => {
+            let mut lines = vec![format!(
+                "mutate: {} (complete: {}, tests executed: {})",
+                if report.ok { "pass" } else { "fail" },
+                report.run_complete,
+                report.tests_executed
+            )];
+            let s = &report.summary;
+            lines.push(format!("{} mutants: {} killed, {} survived, {} uncovered, {} timeout, {} runtime errors, {} ignored, {} pending",
+                s.total,s.killed,s.survived,s.no_coverage,s.timeout,s.runtime_error,s.ignored,s.pending));
+            if let Some(score) = s.score {
+                lines.push(format!("score: {:.2}%", score * 100.0));
+            }
+            for m in &report.mutants {
+                lines.push(format!(
+                    "{}:{} {} {:?}: {} -> {}",
+                    m.candidate.location.file,
+                    m.candidate.location.line,
+                    m.candidate.mutator,
+                    m.status,
+                    m.candidate.original.replace('\n', " "),
+                    m.candidate.replacement.replace('\n', " ")
+                ));
+                if let Some(reason) = &m.candidate.ignored {
+                    lines.push(format!("  ignored: {reason}"));
+                }
+                if !m.covered_by.is_empty() {
+                    lines.push(format!("  covered by: {}", m.covered_by.join(", ")));
+                }
+                if !m.killed_by.is_empty() {
+                    lines.push(format!("  killed by: {}", m.killed_by.join(", ")));
+                }
+                if !m.failed_modules.is_empty() {
+                    lines.push(format!("  failed modules: {}", m.failed_modules.join(", ")));
+                }
+                for attempt in &m.attempts {
+                    lines.push(format!(
+                        "  attempt {} {:?}: {}",
+                        attempt.number, attempt.status, attempt.reason
+                    ));
+                }
+            }
+            for d in &report.diagnostics {
+                lines.push(format!("{}: {}", d.code, d.message));
+            }
+            lines.join("\n")
+        }
+    };
+    if writeln!(io::stdout().lock(), "{output}").is_err() {
+        return ExitCode::from(2);
+    }
+    ExitCode::from(report.exit_code())
 }
 
 fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {

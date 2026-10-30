@@ -258,6 +258,7 @@ fn findings_carry_the_contract_scenario_tag_and_source_location() {
                 ),
         "{finding}"
     );
+    insta::assert_json_snapshot!("located_static_diagnostic", outcome.findings);
 }
 
 #[test]
@@ -281,6 +282,7 @@ fn text_output_names_the_static_finding() {
 
 #[test]
 fn definite_contradictions_are_reported_before_tests_run() {
+    let mut outcomes = Vec::new();
     for (from, to, code, message) in [
         (
             "{ id: 'limit-retries' }",
@@ -331,8 +333,12 @@ fn definite_contradictions_are_reported_before_tests_run() {
             "fault id \"gate\"",
         ),
     ] {
-        assert_reports(&check_source(&replaced(from, to)), code, message, to);
+        let outcome = check_source(&replaced(from, to));
+        assert_reports(&outcome, code, message, to);
+        outcomes
+            .push(json!({"source": to, "status": outcome.status, "findings": outcome.findings}));
     }
+    insta::assert_json_snapshot!("static_contradictions", outcomes);
 }
 
 #[test]
@@ -400,24 +406,29 @@ fn nested(wrapper: &str, source: &str) -> String {
 
 #[test]
 fn scenarios_inside_describe_are_matched_like_top_level_ones() {
+    let mut outcomes = Vec::new();
     for wrapper in [
         "describe('group', ",
         "describe.only('group', ",
         "describe.each([1])('group', ",
     ] {
-        assert_clean(&check_source(&nested(wrapper, GOOD)), wrapper);
+        let valid = check_source(&nested(wrapper, GOOD));
+        assert_clean(&valid, wrapper);
         let broken = nested(wrapper, GOOD).replacen(
             "s.check('status', 400, 400)",
             "s.check('code', 400, 400)",
             1,
         );
+        let invalid = check_source(&broken);
         assert_reports(
-            &check_source(&broken),
+            &invalid,
             "EC016",
             "check id \"code\"",
             wrapper,
         );
+        outcomes.push(json!({"wrapper":wrapper,"valid":{"status":valid.status,"findings":valid.findings},"invalid":{"status":invalid.status,"findings":invalid.findings}}));
     }
+    insta::assert_json_snapshot!("nested_scenario_registrations", outcomes);
 }
 
 #[test]

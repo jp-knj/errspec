@@ -1,0 +1,121 @@
+---
+source: tests/cli.rs
+expression: reports
+---
+[
+  {
+    "report": {
+      "analysisComplete": false,
+      "contracts": [],
+      "diagnostics": [
+        {
+          "code": "EC002",
+          "contractId": "checkout",
+          "file": "errors.ts",
+          "message": "Cannot enumerate any"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "type": "any"
+  },
+  {
+    "report": {
+      "analysisComplete": false,
+      "contracts": [],
+      "diagnostics": [
+        {
+          "code": "EC002",
+          "contractId": "checkout",
+          "file": "errors.ts",
+          "message": "Cannot enumerate unknown"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "type": "unknown"
+  },
+  {
+    "report": {
+      "analysisComplete": false,
+      "contracts": [],
+      "diagnostics": [
+        {
+          "code": "EC002",
+          "contractId": "checkout",
+          "file": "errors.ts",
+          "message": "Discriminant must be a finite union of string literals; found string"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "type": "{_tag: string}"
+  },
+  {
+    "report": {
+      "analysisComplete": false,
+      "contracts": [],
+      "diagnostics": [
+        {
+          "code": "EC002",
+          "contractId": "checkout",
+          "file": "errors.ts",
+          "message": "Discriminant \"_tag\" is optional"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "type": "{_tag?: 'A'}"
+  },
+  {
+    "report": {
+      "analysisComplete": false,
+      "contracts": [],
+      "diagnostics": [
+        {
+          "code": "EC002",
+          "contractId": "checkout",
+          "file": "errors.ts",
+          "message": "Missing discriminant \"_tag\" in { code: 1; }"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "type": "{_tag:'A'} | {code:1}"
+  }
+]

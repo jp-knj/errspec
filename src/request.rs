@@ -6,6 +6,22 @@ pub(crate) enum Request {
     Scan(ScanRequest),
     Init(InitRequest),
     Coverage(CoverageRequest),
+    Mutation(MutationRequest),
+    MutationSource,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MutationRequest {
+    pub root: PathBuf,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+    pub exclude_mutator: Vec<String>,
+    pub vitest_config: Option<PathBuf>,
+    pub vitest_project: Option<String>,
+    pub vitest_package: Option<PathBuf>,
+    pub node: PathBuf,
+    pub fail_on_undetected: bool,
 }
 
 pub(crate) struct ContractRequest {

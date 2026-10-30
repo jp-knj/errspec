@@ -1,4 +1,4 @@
-use crate::tsrs_adapter::{TsrsAdapter, collect_tags};
+use crate::tsrs_adapter::{TsrsAdapter, collect_tags, location, text, walk};
 use errspec::{
     discovery::*,
     model::{Finding, Source},
@@ -14,27 +14,6 @@ use tsrs_ast::{
 use tsrs_checker::{Checker, Type, TypeFlags};
 use tsrs_core::P;
 
-pub(crate) fn location(root: &Path, node: P<Node>) -> Location {
-    let file = get_source_file_of_node(node).expect("source node");
-    let offset = tsrs_scanner::get_token_pos_of_node(node, file, false) as usize;
-    Location {
-        file: Path::new(file.file_name())
-            .strip_prefix(root)
-            .unwrap_or(Path::new(file.file_name()))
-            .to_string_lossy()
-            .replace('\\', "/"),
-        byte_offset: offset as u32,
-        line: line_at(file.text(), offset),
-    }
-}
-
-pub(crate) fn line_at(text: &str, offset: usize) -> usize {
-    text.as_bytes()[..offset.min(text.len())]
-        .iter()
-        .filter(|&&c| c == b'\n')
-        .count()
-        + 1
-}
 /// Whether every union member takes its discriminant property from a declaration outside `root`
 /// or in node_modules, such as `Omit<SdkIssue, 'at'>`. Unknown declarations count as local.
 fn declared_outside(checker: &mut Checker, ty: P<Type>, key: &str, root: &Path) -> bool {
@@ -66,22 +45,6 @@ pub(crate) fn key(root: &Path, node: P<Node>) -> String {
     let loc = location(root, node);
     format!("{}:{}:{:?}", loc.file, loc.byte_offset, node.kind())
 }
-pub(crate) fn text(node: P<Node>) -> String {
-    if matches!(
-        node.kind(),
-        Kind::Identifier | Kind::PrivateIdentifier | Kind::StringLiteral
-    ) {
-        return node.text().into();
-    }
-    get_source_file_of_node(node)
-        .and_then(|f| {
-            f.text()
-                .get(node.pos().source_offset()? as usize..node.end().source_offset()? as usize)
-        })
-        .unwrap_or("")
-        .trim()
-        .to_owned()
-}
 /// Unknown call expressions can span a whole callback body; keep enough to recognize the call.
 fn excerpt(text: &str) -> String {
     const LIMIT: usize = 120;
@@ -92,13 +55,6 @@ fn excerpt(text: &str) -> String {
     let mut short: String = line.chars().take(LIMIT).collect();
     short.push('…');
     short
-}
-pub(crate) fn walk(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
-    callback(node);
-    node.for_each_child(&mut |child| {
-        walk(child, callback);
-        false
-    });
 }
 pub(crate) fn walk_body(node: P<Node>, callback: &mut impl FnMut(P<Node>)) {
     if is_function_like_declaration(node) {

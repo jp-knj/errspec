@@ -42,6 +42,7 @@ const STRICT: &[&str] = &["check", "--baseline", "baseline.json", "--strict-base
 
 #[test]
 fn changed_scenarios_fail_only_when_strict_baseline_is_enabled() {
+    let mut reports = Vec::new();
     let (dir, original) = fixture();
     for (field, replacement) in [
         ("expect", json!("return success")),
@@ -76,7 +77,9 @@ fn changed_scenarios_fail_only_when_strict_baseline_is_enabled() {
         assert_eq!(strict["diagnostics"][0]["code"], "EC014");
         assert_eq!(strict["diagnostics"][0]["contractId"], "checkout");
         assert_eq!(strict["diagnostics"][0]["scenarioId"], "first");
+        reports.push(json!({"field": field, "normal": normal, "strict": strict}));
     }
+    insta::assert_json_snapshot!("strict_scenario_changes", reports);
     let original_baseline = fs::read(dir.path().join("baseline.json")).unwrap();
     assert_eq!(run(&dir, &["snapshot", "--out", "reviewed.json"]).0, 0);
     assert_eq!(
@@ -118,6 +121,7 @@ fn unchanged_and_added_scenarios_pass_but_removals_still_fail() {
     let (status, report) = run(&dir, STRICT);
     assert_eq!(status, 1);
     assert_eq!(report["diagnostics"][0]["code"], "EC013");
+    insta::assert_json_snapshot!("scenario_added_and_removed", report);
 }
 
 #[test]

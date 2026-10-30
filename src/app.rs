@@ -229,6 +229,7 @@ fn record_reach(
 
 /// Results crossing the execution/output boundary contain no compiler handles.
 pub(crate) enum Outcome {
+    Mutation(errspec::mutation::Report),
     Contract(Report),
     Scan {
         report: errspec::discovery::ScanReport,
@@ -243,6 +244,8 @@ pub(crate) enum Outcome {
 
 pub(crate) fn execute(request: Request) -> Outcome {
     match request {
+        Request::Mutation(request) => Outcome::Mutation(crate::mutate::run(request)),
+        Request::MutationSource => unreachable!("hidden source entry handled by main"),
         Request::Contract(request) => {
             let mode = request.command.mode();
             let report = worker(Some("errspec"), move || {

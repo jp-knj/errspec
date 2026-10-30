@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 use std::{fs, process::Command};
 use tempfile::TempDir;
+#[path = "support/snapshots.rs"]
+mod snapshots;
 
 #[test]
 fn sdk_types_preserve_fault_arguments_and_assertion_value_types() {
@@ -126,6 +128,7 @@ fn added_variant_requires_a_case_and_is_in_delta() {
     assert!(has(&report, "EC001"));
     assert_eq!(report["delta"]["added"]["checkout"], json!(["B"]));
     assert_eq!(report["analysisComplete"], true);
+    insta::assert_json_snapshot!("added_variant", report);
 }
 
 #[test]
@@ -142,10 +145,12 @@ fn resolves_reexports_generics_intersections_and_path_aliases() {
     assert_eq!(report["contracts"][0]["tags"], json!(["A", "B"]));
     assert_eq!(report["testsExecuted"], false);
     assert_eq!(report["contracts"][0]["cases"][0]["testStatus"], "not_run");
+    insta::assert_json_snapshot!("resolved_type_tags", report);
 }
 
 #[test]
 fn wide_unknown_any_and_optional_discriminants_are_incomplete() {
+    let mut reports = Vec::new();
     for ty in [
         "any",
         "unknown",
@@ -158,7 +163,9 @@ fn wide_unknown_any_and_optional_discriminants_are_incomplete() {
         assert_eq!(status, 2, "{ty}: {report}");
         assert!(has(&report, "EC002"));
         assert_eq!(report["analysisComplete"], false);
+        reports.push(json!({"type": ty, "report": snapshots::project(&report, dir.path())}));
     }
+    insta::assert_json_snapshot!("unresolved_discriminants", reports);
 }
 
 #[test]
@@ -181,6 +188,10 @@ fn compiler_error_is_not_a_clean_scan() {
     assert_eq!(status, 2, "{report}");
     assert!(has(&report, "TS2304"));
     assert_eq!(report["diagnostics"][0]["line"], 1);
+    insta::assert_json_snapshot!(
+        "compiler_diagnostics",
+        snapshots::project(&report, dir.path())
+    );
 }
 
 #[test]
@@ -285,6 +296,7 @@ fn missing_test_file_and_removed_case_fail() {
     assert_eq!(status, 1);
     assert!(has(&report, "EC003"));
     assert!(has(&report, "EC004"));
+    insta::assert_json_snapshot!("missing_file_and_removed_registration", report);
 }
 
 #[test]

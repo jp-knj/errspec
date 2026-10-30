@@ -1,0 +1,9 @@
+{
+  "name": "@errspec/mutation-driver",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "build": "node ../../scripts/build-mutation-driver.mjs" },
+  "dependencies": { "magic-string": "1.4.5" }
+}
