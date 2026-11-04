@@ -52,6 +52,10 @@ nodeは変異する式・文の範囲、scopeは最も近い名前付き関数�
 
 ### ランナーと実行計画
 
+`-j`／`--concurrency`と設定・APIの`concurrency`は1〜64の整数とし、既定1を維持します。2以上ではRustのqueueから各workerへ候補を割り当て、逐次実行と同じtrial・再確認・判定を使います。samplingとcache照合は配分前に行い、時間予算は要求全体の開始時刻で共有します。開始済みのtrialは完了させ、開始前の候補はPendingにします。完了順によらずinventory順へ結果を戻し、engine.parallelに要求数と起動したtrial worker数を示します。
+
+各workerは独立したdriver・run ID・一時領域・所有process groupを持ち、追加workerは全probeを取り直します。テスト登録・状態・到達・感染をprimary probeと照合し、task IDと実行記録をworker内へ結びます。timeout再起動でもprobeを照合し直します。1workerの失敗はpeerを中断し、SIGINT／SIGTERM／親のSIGKILLは全所有groupを終了します。cache保存前には全workerのruntime入力を結合し、設定の差は保存を停止、入力内容の競合や再利用済み証拠の不一致は未完了にします。外部サービスの状態は隔離しないため、利用先は同時実行に耐えるテストを用意します。
+
 `--shard INDEX/TOTAL`はGit・onlyの後の候補を、keyの先頭64-bit値modulo totalで分けます。設定・APIは`shard: {index,total}`とし、1始まりの範囲を検証します。選択と省略の件数・方式をreport.shardに示し、scoreとgateをその要求範囲に限定します。baseline／probeはproject全体、型検査とtrialはshard内です。共通cacheの指紋からshard指定を外し、全候補keyの記録を保持して逐次実行の結果を集めます。並行保存のatomicityは保ち、lost updateは再検査へ戻します。標本と予算は各shard呼出し内で適用します。
 
 Vitest、Jest、Playwrightは共通の実行要求と結果へ変換します。Jestはnative ESM、PlaywrightはViteとfixtureを使う方式に限定します。各実行器は独立した状態を持ち、並列枠数、分割、標本、時間予算を実行計画へ反映します。予算で開始しなかった候補はPendingとし、標本と予算の理由を区別します。Pendingが残る場合は全体スコアをnullにし、break閾値とfail-on-undetectedを合格にしません。実行済みの一部だけで100%の全体判定を作りません。

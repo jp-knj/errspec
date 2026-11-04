@@ -164,6 +164,12 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                     shard.index, shard.total, shard.selected, shard.eligible
                 ));
             }
+            if let Some(parallel) = &report.engine.parallel {
+                lines.push(format!(
+                    "parallel: {} trial workers (requested {})",
+                    parallel.workers, parallel.requested
+                ));
+            }
             if let Some(workers) = &report.workers {
                 lines.push(format!(
                     "workers: {} active, {} recovered, {} unverified",

@@ -44,6 +44,7 @@ jobs:
       - run: node --test tests/mutation-emitter.test.mjs
       - run: node --test tests/mutation-process.test.mjs
       - run: node --test tests/mutation-ownership.test.mjs
+      - run: node --test --test-concurrency=1 tests/mutation-parallel.test.mjs
       - run: node --test tests/mutation-process.test.mjs
         env:
           ERRSPEC_REUSE_SESSION: "1"

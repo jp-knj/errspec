@@ -173,11 +173,13 @@ import assert from 'node:assert/strict';
 import {defineConfig,runMutation} from '@errspec/core';
 const diff=process.argv.includes('--diff');
 const sharded=process.argv.includes('--shard');
+const parallel=process.argv.includes('--parallel');
 const cache=process.argv.includes('--cache'),warm=process.argv.includes('--cached');
-const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},reuseSession:true,cache,...(diff?{since:'HEAD',policy:{timeBudget:0}}:sharded?{shard:{index:1,total:2},policy:{timeBudget:0}}:{failOnUndetected:true})}));
+const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},reuseSession:true,cache,concurrency:parallel?2:1,...(diff?{since:'HEAD',policy:{timeBudget:0}}:sharded?{shard:{index:1,total:2},policy:{timeBudget:0}}:{failOnUndetected:true})}));
 assert.equal(result.exitCode,0);
 assert.equal(result.report.runComplete,true);
 assert.equal(result.report.engine.sessionReuse,'available');
+if(parallel)assert.deepEqual(result.report.engine.parallel,{requested:2,workers:warm?0:2});
 if(sharded){assert.equal(result.report.shard.index,1);assert.equal(result.report.shard.total,2);assert.equal(result.report.shard.selected,result.report.summary.total);assert.equal(result.report.shard.selected+result.report.shard.omitted,result.report.shard.eligible);assert.ok(result.report.mutants.every(m=>BigInt('0x'+m.key.slice(0,16))%2n===0n));}
 else if(diff){assert.equal(result.report.selection.selected,1);assert.ok(result.report.selection.omitted>0);assert.ok(result.report.mutants.every(m=>m.line===2));}
 else assert.equal(result.report.summary.killed,2);
@@ -187,7 +189,9 @@ if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equa
     run(process.execPath,["api.mjs","--cache"]);
     run(process.execPath,["api.mjs","--cache","--cached"]);
     run(process.execPath,["api.mjs","--shard"]);
-    extraChecks.push("embedded-mutation-driver","installed-core-mutation","installed-core-result-cache","installed-core-shard-selection");
+    run(process.execPath,["api.mjs","--parallel"]);
+    run(process.execPath,["api.mjs","--parallel","--cache","--cached"]);
+    extraChecks.push("embedded-mutation-driver","installed-core-mutation","installed-core-result-cache","installed-core-shard-selection","installed-core-parallel-execution");
     writeFileSync(join(dir,".gitignore"),"node_modules/\ncache/\n.errspec/mutation-cache/\n");
     run("git",["init","--quiet"]);
     run("git",["add","."]);

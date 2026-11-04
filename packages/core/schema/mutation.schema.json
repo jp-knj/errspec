@@ -190,6 +190,7 @@
     "fullDryRun": {
       "type": "boolean"
     },
+    "concurrency": { "type": "integer", "minimum": 1, "maximum": 64 },
     "shard": {
       "anyOf": [
         { "type": "null" },

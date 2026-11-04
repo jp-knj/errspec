@@ -5,6 +5,7 @@ pub mod cache;
 pub mod coverage_cache;
 pub mod options;
 pub mod ownership;
+pub mod parallel;
 pub mod policy;
 pub mod selection;
 pub mod sharding;
@@ -272,7 +273,7 @@ pub fn confirmed(attempts: &[Attempt]) -> Status {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mutant {
     #[serde(flatten)]
@@ -305,6 +306,8 @@ pub struct Engine {
     pub coverage_scope: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_reuse: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel: Option<parallel::Info>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -392,6 +395,7 @@ impl Report {
                 typecheck: "not_run",
                 coverage_scope: "vitest_vite_workers",
                 session_reuse: None,
+                parallel: None,
             },
             run_complete: false,
             ok: false,

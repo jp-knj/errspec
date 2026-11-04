@@ -19,7 +19,7 @@ pub(crate) struct Facts {
     runner_package: PathBuf,
     runtime: Runtime,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Runtime {
     node: String,
@@ -30,6 +30,47 @@ struct Runtime {
     exec_argv: Vec<String>,
     configuration_hash: Option<String>,
     env_hash: String,
+}
+impl Facts {
+    pub(crate) fn merge(&mut self, additional: Self) -> Result<(), Error> {
+        if self.version != additional.version
+            || self.runner_package != additional.runner_package
+            || self.runtime != additional.runtime
+        {
+            return Err(Error::Unavailable(
+                "Parallel workers resolved different runtime inputs".into(),
+            ));
+        }
+        if self
+            .inputs
+            .iter()
+            .map(|(path, _)| path)
+            .collect::<BTreeSet<_>>()
+            .len()
+            != self.inputs.len()
+            || additional
+                .inputs
+                .iter()
+                .map(|(path, _)| path)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != additional.inputs.len()
+        {
+            return Err(Error::Unavailable("Duplicate worker input facts".into()));
+        }
+        let mut inputs: BTreeMap<_, _> = self.inputs.iter().cloned().collect();
+        for (path, hash) in additional.inputs {
+            if inputs.get(&path).is_some_and(|old| old != &hash) {
+                return Err(Error::Changed(format!(
+                    "Workers observed different input contents: {}",
+                    path.display()
+                )));
+            }
+            inputs.insert(path, hash);
+        }
+        self.inputs = inputs.into_iter().collect();
+        Ok(())
+    }
 }
 pub(crate) struct Stamp {
     pub hash: String,
@@ -312,6 +353,7 @@ pub(crate) fn acquire(
         "failOnUndetected",
         "fullDryRun",
         "shard",
+        "concurrency",
     ] {
         settings.as_object_mut().unwrap().remove(field);
     }
@@ -567,6 +609,48 @@ pub(crate) fn check_directory(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn worker_facts_require_matching_runtime_and_cannot_hide_conflicting_contents() {
+        let facts = Facts {
+            version: 1,
+            inputs: vec![(PathBuf::from("/project/a.ts"), "a".repeat(64))],
+            runner_package: "/runner".into(),
+            runtime: Runtime {
+                node: "24".into(),
+                platform: "test".into(),
+                arch: "test".into(),
+                executable: "/node".into(),
+                cwd: "/project".into(),
+                exec_argv: vec![],
+                configuration_hash: Some("f".repeat(64)),
+                env_hash: "e".repeat(64),
+            },
+        };
+        let mut merged = facts.clone();
+        let mut additional = facts.clone();
+        additional
+            .inputs
+            .push(("/project/b.ts".into(), "b".repeat(64)));
+        merged.merge(additional).unwrap();
+        assert_eq!(merged.inputs.len(), 2);
+        let mut different = facts.clone();
+        different.runtime.env_hash = "d".repeat(64);
+        assert!(matches!(
+            merged.merge(different),
+            Err(Error::Unavailable(_))
+        ));
+        let before = merged.inputs.clone();
+        let mut conflict = facts.clone();
+        conflict.inputs[0].1 = "c".repeat(64);
+        assert!(matches!(merged.merge(conflict), Err(Error::Changed(_))));
+        assert_eq!(merged.inputs, before);
+        let mut duplicate = facts.clone();
+        duplicate.inputs.push(duplicate.inputs[0].clone());
+        assert!(matches!(
+            merged.merge(duplicate),
+            Err(Error::Unavailable(_))
+        ));
+    }
     use std::os::unix::fs::symlink;
     fn package(path: &Path, dependencies: serde_json::Value) {
         fs::create_dir_all(path).unwrap();

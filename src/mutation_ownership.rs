@@ -417,7 +417,20 @@ fn cleanup_temporary(configuration: &Configuration) {
     }
     // Leave unexpected project-created files alone, rather than recursively
     // deleting a directory after an unclean owner exit.
-    let _ = fs::remove_dir(directory);
+    if fs::remove_dir(directory).is_ok()
+        && let Some(parent) = directory.parent()
+        && parent
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("errspec-mutation-"))
+        && let Ok(metadata) = fs::symlink_metadata(parent)
+        && metadata.is_dir()
+        && !metadata.file_type().is_symlink()
+        && metadata.uid() == unsafe { libc::geteuid() }
+        && metadata.mode() & 0o077 == 0
+    {
+        let _ = fs::remove_dir(parent);
+    }
 }
 fn respond(mut stream: UnixStream, configuration: &Configuration) -> io::Result<bool> {
     stream.set_nonblocking(true)?;

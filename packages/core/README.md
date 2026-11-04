@@ -190,6 +190,32 @@ repeat. Concurrent writes remain atomic but may lose cache entries, requiring
 fresh verification. Sampling and time budgets apply separately within each shard
 invocation. Sharding does not start parallel workers by itself.
 
+## Parallel execution
+
+`errspec mutate -j 2` / `--concurrency 2` runs independent mutant trials in
+parallel. The API/configuration property is `concurrency`; it accepts integers
+from 1 to 64 and defaults to 1. Explicit CLI/API values override the file.
+`engine.parallel` reports the requested limit and number of trial workers started
+when concurrency exceeds one. Fully cached or already exhausted runs start zero
+trial workers. Baselines and typechecking still precede the trial pool.
+
+Each additional worker owns its runner context, probe identity and process group.
+It reruns the full instrumented probe and validates test registration, statuses,
+reachability and infection against the primary probe. Mismatches cancel the run
+with an unknown score. Opt-in session reuse stays within each worker; test modules
+remain isolated between attempts. Timeout confirmation restarts and revalidates
+only the affected worker. Any worker failure cancels active peers, while interrupts
+and unexpected owner exits terminate every owned group and ordinary descendants.
+
+Results retain inventory order regardless of completion order. Sampling applies
+before scheduling. The time budget is shared across this invocation: in-flight
+attempts finish, while candidates not started by the deadline remain Pending.
+Shards have separate budgets. Cached outcomes use the same evidence rules across
+serial and parallel runs. Every worker's runtime inputs are merged and validated
+before saving; inconsistent inputs disable cold persistence and invalidate reused
+evidence. Parallel tests must support simultaneous external side effects, such as
+separate database records or ports. This option does not isolate external services.
+
 ## Worker ownership and orphan recovery
 
 Mutation runners use a native supervisor as their process-group leader. The

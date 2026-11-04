@@ -15,7 +15,7 @@ process.stdout.write = (chunk, encoding, cb) => process.stderr.write(chunk, enco
 console.log = (...args) => process.stderr.write(format(...args)+"\n");
 console.info = console.log;
 const PROTOCOL = 1;
-let options, root, runId, api, packageDir, inventory = new Map(), fingerprints = new Map();
+let options, root, runId, api, packageDir, toolTemp, inventory = new Map(), fingerprints = new Map();
 let plain, baseline, testSpecs, projectName, configFiles = new Set();
 let current;
 let infrastructureFailure;
@@ -64,7 +64,7 @@ function candidateFiles(excluded) {
   const files=new Set();
   for(const pattern of patterns)for(const entry of globSync(pattern,{cwd:root,exclude:["**/node_modules/**",...options.exclude]})) {
     const absolute=realpathSync(resolve(root,entry)); const name=rel(absolute);
-    if(name.startsWith("../")||isAbsolute(name)||name.split("/").includes("node_modules")
+    if(absolute===toolTemp||absolute.startsWith(toolTemp+"/")||name.startsWith("../")||isAbsolute(name)||name.split("/").includes("node_modules")
       || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(name)||/\.d\.(?:[cm]?ts)$/.test(name)
       ||excluded.has(absolute)||!statSync(absolute).isFile())continue;
     files.add(absolute);
@@ -277,21 +277,27 @@ async function handle(request) {
   if(request.op==="open") {
     options=request.options;
     if(Number(process.versions.node.split(".")[0])<24)throw failure("EC_MUTATION_CONFIG","mutate requires Node 24 or newer");
-    root=realpathSync(options.root);packageDir=packagePath(options.vitestPackage);
+    root=realpathSync(options.root);toolTemp=realpathSync(options.toolTemp||options.temp);packageDir=packagePath(options.vitestPackage);
     const pkg=JSON.parse(readFileSync(join(packageDir,"package.json"),"utf8"));
     remember(join(packageDir,"package.json"));
     if(!/^5\./.test(pkg.version))throw failure("EC_MUTATION_CONFIG",`mutate requires Vitest 5.x; found ${pkg.version}`);
     api=await import(pathToFileURL(join(packageDir,"dist/node.js")).href);
     const setup=readFileSync(options.setup,"utf8").replace('"__VITEST_ENTRY__"',JSON.stringify(normalize(join(packageDir,"dist/index.js"))));
-    writeFileSync(options.setup,setup);
+    if(setup!==readFileSync(options.setup,"utf8"))writeFileSync(options.setup,setup);
     if(request.restore) {
       const saved=JSON.parse(readFileSync(options.state,"utf8"));
       baseline=saved.baseline;plain=saved.plain;testSpecs=saved.testSpecs;projectName=saved.projectName;
       inventory=new Map(saved.inventory);fingerprints=new Map(saved.fingerprints);verifyInputs();
+      for(const [file,entry] of inventory)entry.emitted=instrument(entry.source,entry.candidates,file,runId);
     }
     send(request,"done",{node:process.versions.node,vitest:pkg.version,count:0});return;
   }
   if(!options)throw failure("EC_MUTATION_PROTOCOL","Driver was not opened");
+  if(request.op==="prime"){
+    if(!baseline)throw failure("EC_MUTATION_PROTOCOL","Missing restored worker baseline");
+    const measured=await execute("probe",request);baseline=measured;
+    send(request,"primed",{execution:measured,...(options.cache?{cacheFacts:cacheFacts()}:{})});send(request,"done",{count:0});return;
+  }
   if(request.op==="cache-facts"){
     if(!options.cache)throw failure("EC_MUTATION_PROTOCOL","Result caching was not requested");
     verifyInputs();send(request,"done",{count:0,cacheFacts:cacheFacts()});return;
@@ -352,7 +358,7 @@ async function handle(request) {
     verifyInputs();
     // A fully reused result may run no trials. Refresh discovery anyway so a
     // newly added source or test cannot disappear behind cached coverage.
-    if(options.cache&&baseline)await execute("inspect",request);
+    if((options.cache||options.concurrency>1)&&baseline)await execute("inspect",request);
     if(warmContext){const saved=warmContext;warmContext=undefined;await closeContext(saved.ctx);if(saved.state.failure)throw saved.state.failure;}
     verifyInputs();send(request,"done",{count:0,...(options.cache?{cacheFacts:cacheFacts()}:{})});return;
   }
