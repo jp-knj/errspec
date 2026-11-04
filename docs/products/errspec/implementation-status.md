@@ -15,7 +15,7 @@ trial. No npm/crates publication or production deployment is included.
 
 | Requirement / accepted behavior | Implementation and executable evidence | Remaining work |
 | --- | --- | --- |
-| Existing mutation generation, baseline, reachability, retries and verdicts | `src/mutation.rs`, `src/mutation_source.rs`, `src/mutate.rs`; `scripts/demo-mutation.mjs`, `tests/mutation-emitter.test.mjs`, `tests/mutation-process.test.mjs` | Preserve these checks throughout |
+| Existing mutation generation, baseline, reachability, retries and verdicts | `src/mutation.rs`, `src/mutation_source.rs`, `src/mutate.rs`; `scripts/demo-mutation.mjs`, `tests/mutation-emitter.test.mjs`, `tests/mutation-process.test.mjs`; `tests/mutation-baseline.test.mjs` preserves module/assertion causes and tolerates equivalent file-enumeration orders | Preserve these checks throughout |
 | TS 6/7 compile errors and sound optional chaining exclusions | `src/mutate.rs`, embedded compiler adapter; `tests/mutation-typecheck.test.mjs` | Public typecheck package |
 | Weak mutation distinguishes reached but not infected | `src/mutate.rs`, driver instrumentation; `tests/mutation-weak.test.mjs` | Additional runner integration |
 | Stable mutant IDs, result/coverage reuse, conservative invalidation, removed killing tests | Stable IDs exist in native generation | Phase 2: opt-in independent caches; unchanged/position/function/test/dependency/config/plugin/corruption/checkout cases |
