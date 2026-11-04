@@ -8,6 +8,7 @@ pub mod options;
 pub mod ownership;
 pub mod parallel;
 pub mod policy;
+pub mod scope_cache;
 pub mod selection;
 pub mod sharding;
 pub mod syntax;
