@@ -69,6 +69,17 @@ test("a changed function reached through test code revalidates old detections an
   assert.equal(after.status,"Survived");assert.equal(after.reused,undefined);assert.equal(changed.cache.reused,0);
   assert.deepEqual(verdicts(changed),verdicts(run(root,["--no-cache"])));
 });
+test("anonymous default declarations retain their body in the module envelope when no function owner exists",{timeout:60000},t=>{
+  const root=fixture(t),text="export default function(){const value=1;return value-value;}\n";
+  writeFileSync(join(root,"src/value.ts"),text);rmSync(join(root,"b.test.ts"));
+  writeFileSync(join(root,"a.test.ts"),'import {test,expect} from "vitest";import cancel from "./src/value";test("cancels",()=>expect(cancel()).toBe(0));');
+  const cold=run(root),before=cold.mutants.find(m=>m.mutator==="ArithmeticOperator"&&m.original==="value-value");
+  assert.equal(before.status,"Killed");
+  writeFileSync(join(root,"src/value.ts"),text.replace("value=1","value=0"));
+  const changed=run(root),after=changed.mutants.find(m=>m.key===before.key);
+  assert.equal(after.status,"Survived");assert.equal(after.reused,undefined);assert.equal(changed.cache.reused,0);
+  assert.deepEqual(verdicts(changed),verdicts(run(root,["--no-cache"])));
+});
 test("different tests sharing a file and unavailable entry guards do not prove independence",{timeout:60000},t=>{
   for(const missingEntry of [false,true]){
     const root=fixture(t),args=missingEntry?["--exclude-mutator","BlockStatement"]:[];

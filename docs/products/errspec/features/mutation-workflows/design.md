@@ -54,6 +54,8 @@ nodeは変異する式・文の範囲、scopeは最も近い名前付き関数�
 
 再利用モデルは全probeから今回のtest IDとfileを取得し、entryに到達したtest fileの集合をstatic hitも含めて作ります。entryのない関数を未使用とは見なしません。前後の変更scopeの集合が不明、entryが欠落、opaqueな呼出しがある場合は再検査し、既知の場合も前後の到達fileの和集合と候補の到達fileが重なれば再検査します。同じfileの異なるtest ID間の状態共有もこの単位で扱います。入力envelope・候補所有者・関数hash・選択テストを一致させ、既存cacheと同じ初回比較結果だけを適用します。既定は完全一致方式を維持し、`--cache --cache-scope`／cacheScopeでこの判定を実行計画へ接続します。`--no-cache-scope`で設定を解除します。deterministicな隔離済みtest fileを対象とし、source本文・位置・stack traceへの依存は対象外です。compiler commentの付着を取得できるまで、commentを持つfileのmodule envelopeにはraw本文も含め、位置変更でも再検査します。
 
+独立したfunction ownerを持たない匿名default function宣言は、本文もmodule envelopeへ保持します。通常・async・generatorの匿名宣言を対象とし、名前付き関数のように本文を省略しません。
+
 scope指紋は完全一致のraw指紋と一回の入力取得で作ります。inventory内の本文だけを検証済みmodule effectへ置き換え、test/helper・依存・設定・環境・package間の辺と外部runtime入力は同じ値を要求します。raw指紋が変われば全probeを取り直し、entry cohortを今回の候補へ結びます。別kindのscope-results-v1.jsonへ保存し、cache.scopeとscopeReusedを省略可能な統計として示します。未選択の古い記録はcontext全体が一致する場合だけ保持します。終了時は同じprojectionを用いてraw指紋を再取得し、実行中の変更を未完了にしてから保存します。
 
 ### weak mutationと除外

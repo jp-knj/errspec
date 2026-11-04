@@ -200,7 +200,8 @@ Changed scopes with missing/excluded entry guards or opaque calls, changed scope
 inventories and overlapping file cohorts revalidate. Compiler comments currently require the raw
 identity of their entire file, so even moving a commented file's code revalidates;
 comment attachment semantics are not inferred. Module initialization/signatures,
-test/helper files, dependencies, resolved compilation/plugins, environment and
+anonymous default declarations without a function owner, test/helper files,
+dependencies, resolved compilation/plugins, environment and
 other execution inputs remain bound. Unknown compilation inputs disable both
 forms of cache reuse. New timeouts, retries and typechecks use the ordinary
 verification rules.
