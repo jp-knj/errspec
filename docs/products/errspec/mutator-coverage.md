@@ -29,7 +29,7 @@
 | 利用先のTypeScript 6以前／7以降でのmutantの型検査、`CompileError`、無効化 | `--typecheck` / `--no-typecheck`で提供。TS 5.9.3・6.0.3・7.0.2で検証 |
 | 型で同値と分かるoptional chaining mutantの除外と理由の提示 | 型検査で提供。strictNullChecksとnoUncheckedIndexedAccessを必要とする |
 | aridなログ専用コードの除外、calleeパターンの追加、無効化 | 未実装 |
-| disableコメントとStrykerコメントによる除外 | 未実装 |
+| disableコメントとStrykerコメントによる除外 | `errspec-`／`mutator-`のdisable-next-line・disable-line・disable/enable、Stryker disable/restoreを提供。family指定・region解除・理由の表示に対応。文字列・正規表現・template／JSX本文の偽指示は除外しない |
 | `accept`、理由付きの同値mutant承認、古くなった承認の案内 | `accept --reason`と`errspec.accepted.json`で提供 |
 | custom mutator／ignorer plugin、モジュール・パッケージからの読取、mutator単位の除外、plugin変更時のキャッシュ無効化 | `--exclude-mutator`を提供。custom pluginとキャッシュは未実装 |
 | `-j`による並列実行、長い実行の分割 | `-j`／`concurrency`で独立した所有workerを起動し、probeを照合して同じ判定処理で並列実行する。既定1、予算は呼出し内で共有。`--shard INDEX/TOTAL`と設定・APIでGit／only後の候補を決定的に分割し、score・gate・予算は各shardの範囲 |

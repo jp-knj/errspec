@@ -237,3 +237,29 @@ endpoint is unavailable in that mode. Normal interrupts and deadlines still end
 the currently owned group. Orphan cleanup removes only recognized temporary
 files and leaves unexpected files alone. Workers deliberately detached into a
 different group remain outside this ownership contract.
+
+## Explicit source exclusions
+
+Exclude an intentional case without changing tests:
+
+```ts
+// errspec-disable-next-line BooleanLiteral: specified by the external protocol
+export const enabled = true;
+```
+
+`errspec-disable-next-line`, `errspec-disable-line`, and region directives
+`errspec-disable` / `errspec-enable` accept comma- or space-separated mutator
+names. Omitting names, or specifying `all`, selects every family. A colon
+introduces an optional reason. The `mutator-` aliases and Stryker's
+`Stryker disable [next-line] <names>` / `Stryker restore <names>` are supported.
+Region directives apply after the comment, until a matching enable/restore.
+Line directives take precedence; next-line means the physical line after the
+comment ends, including for block comments. Restore only the named families
+to keep other region exclusions active.
+
+Only lexical comments count. Directive text inside strings, regular expressions,
+template text or JSX text cannot suppress candidates. Malformed directives are
+ignored. Suppressed candidates retain their IDs, appear as `Ignored` with
+`ignored: "disabled[: reason]"`, run no trials and stay outside the score and
+gates. Removing a directive restores verification and invalidates exact-input
+cached evidence. Existing built-in safety exclusions keep their own reason.

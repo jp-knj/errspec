@@ -61,7 +61,7 @@ function start(root,args=[]){
  const done=new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',(code,signal)=>resolve({code,signal,stdout,stderr}));});return {child,done};
 }
 async function until(predicate,message){const end=Date.now()+12000;while(!predicate()&&Date.now()<end)await delay(10);assert.ok(predicate(),message);}
-function running(pid){try{process.kill(pid,0);return !(process.platform==='linux'&&existsSync(`/proc/${pid}/stat`)&&/\) Z /.test(readFileSync(`/proc/${pid}/stat`,'utf8')));}catch(error){if(error.code==='ESRCH')return false;throw error;}}
+function running(pid){try{process.kill(pid,0);return !(process.platform==='linux'&&/\) Z /.test(readFileSync(`/proc/${pid}/stat`,'utf8')));}catch(error){if(error.code==='ESRCH'||error.code==='ENOENT')return false;throw error;}}
 for(const signal of ['SIGINT','SIGTERM','SIGKILL'])test(`${signal} terminates every active parallel group and its ordinary descendants`,{timeout:30000},async t=>{
  const {root,control}=fixture(t,'export const alpha=true;export const beta=true;',`if(!alpha||!beta){const {spawn}=await import('node:child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});writeFileSync(control+'/'+process.pid+'.json',JSON.stringify({worker:process.pid,descendant:child.pid}));await new Promise(resolve=>setTimeout(resolve,20000));}expect(alpha).toBe(true);expect(beta).toBe(true);`);
  const unrelated=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}),execution=start(root);
