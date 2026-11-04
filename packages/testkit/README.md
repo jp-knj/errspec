@@ -73,7 +73,25 @@ vi.mock("../src/mailer", () => ({ deliver: (to: string) => mailer.deliver(to) })
 
 ## API
 
-- `scenarioTest(test, fileURL, { contract, id, tag, withoutFaults? }, body)` — トップレベルのテストを登録。bodyは必ず必要な非同期処理をawaitする。
+### 単一障害で状態の原子性を検査する
+
+`checkFailureAtomicity({ setup, faults, isFailure, only? })`は、正常系の依存呼び出しを観測し、各呼び出しへ障害を一回ずつ差し込みます。`setup`は実行ごとに独立したfixtureを返し、fixtureは`run(scope)`と`snapshot()`、任意の`dispose()`を持ちます。`scope.wrap(dependency, implementation)`で検査対象の非同期依存を包みます。ラッパーは引数とthisを保ち、選んだ呼び出しでは実装の代わりに障害関数を実行します。
+
+`faults`は一意の`id`、`dependency`、有効な失敗値を返すか例外を投げる`inject`関数の配列です。`isFailure(result)`は操作の戻り値が失敗かをbooleanで返します。注入した例外はアプリケーションで処理して戻り値へ変換します。操作自身が例外を投げた場合は検査を失敗させます。
+
+失敗値を返したら、複製した前後のスナップショットを比較します。参照が同じでも変更を検出し、ロールバック後の状態が同じなら成功します。保護対象の業務状態を返し、ログや時刻、秘密情報は含めないでください。
+
+結果の`baseline.calls`は正常系の依存別呼び出し回数、`cases`は障害ごとの`fault`、`status`、`before`、`after`、`result`を持ちます。`preserved`は失敗時の状態維持、`recovered`は障害後の成功、`violated`は状態変更や未注入・例外・後処理の失敗です。違反があれば全ケースの実行後に`FailureAtomicityError`を投げ、その`report`から根拠を読めます。`only: { fault, call }`にケースの値を渡すと単一ケースを再実行します。
+
+`recovered`は成功値を返したという観測で、正しく回復したという証明ではありません。エラーを握り潰して成功値を返すバグを見つけるには、成功時の出力・状態も既存テストで確認してください。
+
+正常系の失敗、登録した依存を通らないケース、空・重複の障害、未完了の依存呼び出しは成功にしません。fixtureの`dispose()`は失敗時も呼びます。テスト対象のバックグラウンド処理を停止する機能はないため、操作は依存をawaitし、fixtureが外部状態を隔離してください。
+
+型から任意の障害値や業務仕様を推測するAPIではありません。正常系の呼び出し回数に対する単一障害だけを探索します。回復成功の出力や、守る状態の選び方は既存テストで確認します。レポートはJavaScript値を含むため、JSONに変換できるとは限りません。
+
+### シナリオの実行記録
+
+- `scenarioTest(test, fileURL, { contract, id, tag, withoutFaults? }, body)` — テストを登録する。トップレベルでも`describe`の中でもよい。bodyは必ず必要な非同期処理をawaitする。
   `withoutFaults: true`は入力だけで結果が決まるシナリオの宣言です。設定の`observe.faults: []`と組み合わせます。指定すると`fault`の呼出が失敗になり、指定しないとfaultが0件のシナリオは失敗します。
 - `scenarioTestName(contract, id)` — 設定照合に使うテスト名を生成する。
 - 定義の`description`は、テスト名の後ろに空白1つを挟んで付く表示用の説明です。1行の空でない文字列に限ります。CLIは説明を除いた固定部分で照合し、観測にはランナーと同じ完全な名前を記録します。

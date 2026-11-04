@@ -50,20 +50,6 @@ export function scenarios(context, syn, files) {
         : "absent",
     };
   };
-  const nested = (call) => {
-    for (let parent = call.parent; parent; parent = parent.parent) {
-      if (parent.kind !== K.CallExpression) continue;
-      let root = parent.expression;
-      while ([K.PropertyAccessExpression, K.CallExpression].includes(root.kind))
-        root = root.expression;
-      if (
-        root.kind === K.Identifier &&
-        context.symbol(root)?.name === "describe"
-      )
-        return true;
-    }
-    return false;
-  };
   const result = [];
   for (const name of files) {
     const file = context.program.getSourceFile(name);
@@ -85,7 +71,6 @@ export function scenarios(context, syn, files) {
       const definitionObject = definition?.kind === K.ObjectLiteralExpression;
       result.push({
         location: location(call),
-        insideDescribe: nested(call),
         contract: definitionObject
           ? value(definition, "contract")
           : { kind: "unknown" },

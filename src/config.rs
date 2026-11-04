@@ -1,5 +1,7 @@
 //! Configuration accepted at the input boundary. Wire types remain in `model`.
-use crate::model::{Config, Finding, ObservationRequirements, Source, TestRef, scenario_test_name};
+use crate::model::{
+    Config, EntryRef, Finding, ObservationRequirements, Source, TestRef, scenario_test_name,
+};
 use std::collections::BTreeSet;
 
 /// Created only by validating a complete configuration. Access is read-only.
@@ -15,6 +17,7 @@ pub struct ValidatedContract {
     id: String,
     source: Source,
     boundaries: Vec<String>,
+    entry: Option<EntryRef>,
     cases: Vec<ValidatedCase>,
 }
 
@@ -57,6 +60,9 @@ impl ValidatedContract {
     }
     pub fn boundaries(&self) -> &[String] {
         &self.boundaries
+    }
+    pub fn entry(&self) -> Option<&EntryRef> {
+        self.entry.as_ref()
     }
     pub fn cases(&self) -> &[ValidatedCase] {
         &self.cases
@@ -107,6 +113,20 @@ impl TryFrom<Config> for ValidatedConfig {
                 return Err(Finding::new(
                     "EC_CONFIG",
                     format!("Incomplete source in {}", c.id),
+                ));
+            }
+            if let Some(entry) = &c.entry
+                && (config.schema_version != 2
+                    || [&entry.file, &entry.export]
+                        .iter()
+                        .any(|s| s.trim().is_empty()))
+            {
+                return Err(Finding::new(
+                    "EC_CONFIG",
+                    format!(
+                        "entry requires schemaVersion: 2 and a nonempty file and export in {}",
+                        c.id
+                    ),
                 ));
             }
             let mut identities = BTreeSet::new();
@@ -187,6 +207,7 @@ impl TryFrom<Config> for ValidatedConfig {
                 id: c.id,
                 source: c.source,
                 boundaries: c.boundaries,
+                entry: c.entry,
                 cases,
             });
         }

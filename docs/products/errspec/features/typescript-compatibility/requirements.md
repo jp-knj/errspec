@@ -60,7 +60,13 @@ Scenario: 登録テストが契約と食い違う場合、静的照合で診断�
 
 - Given: 対象テストがプロジェクトに含まれ、登録内容や必須IDが契約と異なる。
 - When: 公式APIのbackendで`check`を実行する。
-- Then: tsrsの場合と同じ条件でEC015・EC016・EC017を判定する。
+- Then: tsrsの場合と同じ条件でEC015・EC016を判定する。
+
+Scenario: entryを指定した場合、同じ失敗経路と逸脱を判定する
+
+- Given: 宣言関数、const関数、再export、非同期return、throwやrejectionを含むentryがある。
+- When: 各backendでcheckまたはBunのverifyを実行する。
+- Then: 同じreturn位置とタグを取得し、共通のEC018・EC019を判定する。入れ子の関数のreturnはentryへ数えない。
 
 Scenario: 選択したAPIが利用できない場合、未完了を返す
 

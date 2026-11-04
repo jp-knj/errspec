@@ -64,25 +64,34 @@ impl TestStatus {
 pub struct TestRun {
     pub runner: &'static str,
     statuses: BTreeMap<TestRef, TestStatus>,
-    full_names: BTreeMap<TestRef, String>,
+    sdk_names: BTreeMap<TestRef, String>,
 }
 
 impl TestRun {
     pub fn status(&self, test: &TestRef) -> &TestStatus {
         self.statuses.get(test).unwrap_or(&TestStatus::NotFound)
     }
-    /// The runner's name for the single matching test, including any SDK description.
-    pub fn full_name<'a>(&'a self, test: &'a TestRef) -> &'a str {
-        self.full_names.get(test).unwrap_or(&test.name)
+    /// The name the SDK registered for the single matching test: the runner's full name
+    /// without describe prefixes, including any description.
+    pub fn sdk_name<'a>(&'a self, test: &'a TestRef) -> &'a str {
+        self.sdk_names.get(test).unwrap_or(&test.name)
     }
 }
 
-/// A scenario name may carry a human description after one space. The JSON tuple
-/// ends with `]`, so a description cannot make one scenario's name match another.
-fn names_scenario(runner_name: &str, scenario_name: &str) -> bool {
+/// Runners prefix describe titles with spaces, and the SDK may append a description after
+/// one space. The stable name must therefore appear as a whole space-delimited part.
+/// The JSON tuple ends with `]`, so one scenario's name cannot extend into another's.
+fn scenario_part<'a>(runner_name: &'a str, scenario_name: &str) -> Option<&'a str> {
     runner_name
-        .strip_prefix(scenario_name)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+        .match_indices(scenario_name)
+        .map(|(start, _)| start)
+        .find(|&start| {
+            let before = &runner_name[..start];
+            let after = &runner_name[start + scenario_name.len()..];
+            (before.is_empty() || before.ends_with(' '))
+                && (after.is_empty() || after.starts_with(' '))
+        })
+        .map(|start| &runner_name[start..])
 }
 
 pub fn judge(
@@ -101,7 +110,7 @@ pub fn judge(
         }
     }
     let mut statuses = BTreeMap::new();
-    let mut full_names = BTreeMap::new();
+    let mut sdk_names = BTreeMap::new();
     let mut findings = Vec::new();
     for registration in registrations {
         for case in &registration.cases {
@@ -111,19 +120,22 @@ pub fn judge(
                 Some(path) if case.scenario().is_none() => results
                     .get(&(path, test.name.clone()))
                     .into_iter()
-                    .flat_map(|values| values.iter().map(|status| (&test.name, status)))
+                    .flat_map(|values| values.iter().map(|status| (test.name.as_str(), status)))
                     .collect(),
                 Some(path) => results
                     .iter()
-                    .filter(|((file, name), _)| *file == path && names_scenario(name, &test.name))
-                    .flat_map(|((_, name), values)| values.iter().map(move |status| (name, status)))
+                    .filter(|((file, _), _)| *file == path)
+                    .filter_map(|((_, name), values)| {
+                        scenario_part(name, &test.name).map(|part| (part, values))
+                    })
+                    .flat_map(|(part, values)| values.iter().map(move |status| (part, status)))
                     .collect(),
                 None => Vec::new(),
             };
             let status = match matches.as_slice() {
                 [] => TestStatus::NotFound,
                 [(name, status)] => {
-                    full_names.insert(test.clone(), (*name).clone());
+                    sdk_names.insert(test.clone(), (*name).to_owned());
                     (*status).clone()
                 }
                 _ => TestStatus::Ambiguous,
@@ -151,7 +163,7 @@ pub fn judge(
         TestRun {
             runner: evidence.runner,
             statuses,
-            full_names,
+            sdk_names,
         },
         findings,
     )

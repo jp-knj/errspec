@@ -33,7 +33,6 @@ pub(crate) enum Value {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ScenarioCall {
     pub location: Location,
-    pub inside_describe: bool,
     pub contract: Value,
     pub id: Value,
     pub tags: Value,
@@ -88,7 +87,6 @@ pub(crate) fn inspect(
             let without_faults = value("withoutFaults");
             calls.push(ScenarioCall {
                 location: location(root, call),
-                inside_describe: inside_describe(&mut checker, call),
                 contract,
                 id,
                 tags,
@@ -154,12 +152,6 @@ fn inspect_call(
         finding.line = Some(location.line as u32);
         finding
     };
-    if call.inside_describe {
-        findings.push(at(
-            "EC017",
-            "scenarioTest is registered inside describe; its full test name cannot match".into(),
-        ));
-    }
     let (Value::Known(contracts), Value::Known(ids)) = (&call.contract, &call.id) else {
         return;
     };
@@ -251,35 +243,6 @@ fn is_sdk(checker: &mut Checker, call: P<Node>, name: &str, owner: Option<&str>)
             })
         }),
     }
-}
-
-fn inside_describe(checker: &mut Checker, call: P<Node>) -> bool {
-    let mut node = call.parent();
-    while let Some(current) = node {
-        if current.kind() == Kind::CallExpression
-            && let Some(callee) = current.expression()
-        {
-            let mut root = callee;
-            while matches!(
-                root.kind(),
-                Kind::PropertyAccessExpression | Kind::CallExpression
-            ) {
-                let Some(inner) = root.expression() else {
-                    break;
-                };
-                root = inner;
-            }
-            if root.kind() == Kind::Identifier
-                && checker
-                    .get_symbol_at_location_exported(root)
-                    .is_some_and(|s| s.name() == "describe")
-            {
-                return true;
-            }
-        }
-        node = current.parent();
-    }
-    false
 }
 
 fn property(checker: &mut Checker, object: P<Node>, key: &str) -> Value {

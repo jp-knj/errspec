@@ -1,5 +1,8 @@
 use errspec::{
-    coverage::{AssertionRecord, ErrorType, TagStatus, judge},
+    coverage::{
+        AssertionRecord, CoverageDelta, ErrorType, TagChange, TagCoverage, TagRef, TagStatus,
+        TypeCoverage, capture, compare, judge,
+    },
     model::Source,
 };
 use serde_json::{Value, json};
@@ -14,6 +17,7 @@ fn candidate(file: &str, export: &str, tags: &[&str]) -> ErrorType {
             discriminant: "_tag".into(),
         },
         tags: tags.iter().map(|t| (*t).into()).collect(),
+        flows: vec![],
     }
 }
 
@@ -184,6 +188,179 @@ fn coverage_without_vitest_reports_where_it_looked() {
     assert!(message.contains("pass --vitest PATH"), "{message}");
 }
 
+#[test]
+fn assertions_in_failed_skipped_or_ambiguous_tests_are_not_evidence() {
+    for status in ["failed", "skipped"] {
+        let dir = fixture();
+        let path = dir.path().join("runner.sh");
+        let runner = fs::read_to_string(&path)
+            .unwrap()
+            .replace("\"status\":\"passed\"", &format!("\"status\":\"{status}\""));
+        fs::write(path, runner).unwrap();
+        let (_, report) = coverage(&dir, &[]);
+        assert_eq!(report["summary"]["asserted"], 0, "{report}");
+    }
+    let dir = fixture();
+    let path = dir.path().join("runner.sh");
+    let runner = fs::read_to_string(&path).unwrap().replace(
+        "[{\"fullName\":\"t\",\"status\":\"passed\"}]",
+        "[{\"fullName\":\"t\",\"status\":\"passed\"},{\"fullName\":\"t\",\"status\":\"passed\"}]",
+    );
+    fs::write(path, runner).unwrap();
+    let (_, report) = coverage(&dir, &[]);
+    assert_eq!(report["summary"]["asserted"], 0, "{report}");
+}
+
+#[test]
+fn markdown_lists_unasserted_tags_per_type() {
+    let dir = fixture();
+    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+        .current_dir(dir.path())
+        .args([
+            "coverage",
+            "--vitest",
+            "./runner.sh",
+            "--format",
+            "markdown",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        concat!(
+            "**errspec coverage**: 1 error types, 3 tags: 1 asserted, 1 mentioned only, 1 missing\n",
+            "\n",
+            "### `errors.ts` Failure (`_tag`): 1/3 asserted\n",
+            "\n",
+            "| Tag | Status | Note |\n",
+            "|---|---|---|\n",
+            "| `B` | mentioned | Written in a test, but no passing assertion required it |\n",
+            "| `C` | missing | No test refers to it |\n",
+        )
+    );
+}
+
+#[test]
+fn markdown_is_rejected_outside_coverage() {
+    let dir = fixture();
+    for command in ["scan", "mutate"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+            .current_dir(dir.path())
+            .args([command, "--format", "markdown"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            diagnostic.contains("supported only by coverage"),
+            "{command}: {diagnostic}"
+        );
+    }
+}
+
+fn types(tags: &[(&str, TagStatus)]) -> Vec<TypeCoverage> {
+    vec![TypeCoverage {
+        source: candidate("errors.ts", "Failure", &[]).source,
+        flows: vec![],
+        tags: tags
+            .iter()
+            .map(|(tag, status)| TagCoverage {
+                tag: (*tag).into(),
+                status: *status,
+                tests: vec![],
+            })
+            .collect(),
+    }]
+}
+
+#[test]
+fn baseline_fails_only_on_regressions_and_new_missing_tags() {
+    use TagStatus::*;
+    let before = capture(&types(&[
+        ("Kept", Missing),
+        ("Weaker", Asserted),
+        ("Dropped", Mentioned),
+        ("Better", Missing),
+    ]));
+    let after = types(&[
+        ("Kept", Missing),
+        ("Weaker", Mentioned),
+        ("Dropped", Missing),
+        ("Better", Asserted),
+        ("NewGap", Missing),
+        ("NewMention", Mentioned),
+    ]);
+    let key = "errors.ts#Failure#_tag".to_owned();
+    let change = |tag: &str, from, to| TagChange {
+        type_key: key.clone(),
+        tag: tag.into(),
+        from,
+        to,
+    };
+    assert_eq!(
+        compare(&before, &after).unwrap(),
+        CoverageDelta {
+            regressed: vec![
+                change("Weaker", Asserted, Mentioned),
+                change("Dropped", Mentioned, Missing)
+            ],
+            new_missing: vec![TagRef {
+                type_key: key.clone(),
+                tag: "NewGap".into(),
+            }],
+            improved: vec![change("Better", Missing, Asserted)],
+        }
+    );
+    // An unchanged gap passes: adoption can start from today's state.
+    assert_eq!(
+        compare(&before, &types(&[("Kept", Missing)])).unwrap(),
+        CoverageDelta::default()
+    );
+}
+
+#[test]
+fn baseline_of_another_kind_is_rejected() {
+    let mut other = capture(&types(&[]));
+    other.kind = "errspec/snapshot".into();
+    assert_eq!(
+        compare(&other, &types(&[])).unwrap_err().code,
+        "EC_BASELINE"
+    );
+}
+
+#[test]
+fn saved_baseline_ratchets_later_runs() {
+    let dir = fixture();
+    let (status, _) = coverage(&dir, &["--save-baseline", "coverage-baseline.json"]);
+    assert_eq!(status, 0);
+    let saved: Value =
+        serde_json::from_slice(&fs::read(dir.path().join("coverage-baseline.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        saved["types"]["errors.ts#Failure#_tag"],
+        json!({"A": "asserted", "B": "mentioned", "C": "missing"})
+    );
+    // Existing files are never overwritten.
+    let (status, report) = coverage(&dir, &["--save-baseline", "coverage-baseline.json"]);
+    assert_eq!(status, 2, "{report}");
+    let (status, report) = coverage(&dir, &["--baseline", "coverage-baseline.json"]);
+    assert_eq!(status, 0, "{report}");
+    assert_eq!(report["delta"]["regressed"], json!([]));
+    // The test no longer mentions B: mentioned -> missing is a regression.
+    fs::write(dir.path().join("case.test.ts"), "export {};").unwrap();
+    let (status, report) = coverage(&dir, &["--baseline", "coverage-baseline.json"]);
+    assert_eq!(status, 1, "{report}");
+    assert_eq!(
+        report["delta"]["regressed"],
+        json!([{"type": "errors.ts#Failure#_tag", "tag": "B", "from": "mentioned", "to": "missing"}])
+    );
+}
+
 fn append_runner(dir: &TempDir, script: &str) {
     let path = dir.path().join("runner.sh");
     let original = fs::read_to_string(&path).unwrap();
@@ -240,4 +417,29 @@ fn fail_on_missing_checks_each_discriminant_even_when_a_value_is_shared() {
         report["summary"],
         json!({"types": 2, "tags": 2, "asserted": 1, "mentioned": 0, "missing": 1})
     );
+}
+
+#[test]
+fn invalid_records_fail_baseline_comparison_and_prevent_saving_partial_results() {
+    let dir = fixture();
+    let (status, _) = coverage(&dir, &["--save-baseline", "baseline.json"]);
+    assert_eq!(status, 0);
+    let original = fs::read(dir.path().join("baseline.json")).unwrap();
+    append_runner(&dir, "printf '%s' '{' >> \"$ERRSPEC_COVERAGE/one.jsonl\"");
+    for extra in [
+        ["--baseline", "baseline.json"],
+        ["--save-baseline", "partial.json"],
+    ] {
+        let (status, report) = coverage(&dir, &extra);
+        assert_eq!(status, 2, "{extra:?}: {report}");
+        assert_eq!(report["testsExecuted"], true);
+        assert_eq!(report["runnerOk"], true);
+        assert_eq!(report["diagnostics"][0]["code"], "EC_RUNNER");
+        assert!(report.get("delta").is_none(), "{report}");
+    }
+    assert_eq!(
+        fs::read(dir.path().join("baseline.json")).unwrap(),
+        original
+    );
+    assert!(!dir.path().join("partial.json").exists());
 }

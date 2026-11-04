@@ -2,6 +2,7 @@ mod analysis_backend;
 mod app;
 mod cli;
 mod coverage_runner;
+mod failure_paths;
 mod input;
 mod mutate;
 mod mutation_source;

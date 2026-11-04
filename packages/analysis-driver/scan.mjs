@@ -28,7 +28,30 @@ export function scan(context, syn, root, discriminants, extractTags) {
     unknowns: [],
   };
   const files = context.files.filter(local),
-    bodies = new Map();
+    bodies = new Map(), declared = new Map(), errorDeclarations = [];
+  const declarationKey = node => {
+    const loc = location(node);
+    return `${loc.file}:${loc.byteOffset}`;
+  };
+  const declarationsOf = type => {
+    const result = new Set();
+    const visit = type => {
+      const symbols = context.major === 6 ? [type.aliasSymbol, type.symbol]
+        : [type.getAliasSymbol(), type.getSymbol()];
+      for (const symbol of symbols) {
+        const declaration = context.declarations(symbol)[0];
+        if (declaration) result.add(declarationKey(declaration));
+      }
+      if (type.flags & T.Union) for (const member of context.members(type)) visit(member);
+    };
+    visit(type);
+    return result;
+  };
+  const external = (type, discriminant) => context.members(type).every(member => {
+    const property = checker.getPropertyOfType(member, discriminant);
+    const declaration = context.declarations(property)[0];
+    return !!declaration && !local(declaration.getSourceFile());
+  });
   const isConst = (decl) =>
     decl.parent?.kind === K.VariableDeclarationList &&
     !!(decl.parent.flags & NodeFlags.Const);
@@ -140,7 +163,11 @@ export function scan(context, syn, root, discriminants, extractTags) {
     facts.unknowns.push({
       function: owner,
       location: location(node),
-      expression: text(node),
+      expression: (() => {
+        const original = text(node), line = original.split(/\r?\n/, 1)[0].trimEnd();
+        const chars = [...line];
+        return original === line && chars.length <= 120 ? original : chars.slice(0, 120).join("") + "…";
+      })(),
       reason,
     });
   const origin = (owner, node, channel, errorType, caught, escapes) =>
@@ -159,11 +186,11 @@ export function scan(context, syn, root, discriminants, extractTags) {
       for (const member of context.members(t)) {
         if (member.flags & (T.Any | T.Unknown | T.Never)) continue;
         const error = context.propertyType(member, "error");
-        if (error) errors.push(context.typeString(error));
+        if (error) errors.push(error);
       }
     }
     collect(type);
-    return sorted(errors);
+    return errors;
   };
   for (const file of files) {
     facts.files.push(location(file).file);
@@ -179,15 +206,22 @@ export function scan(context, syn, root, discriminants, extractTags) {
               export: exported.name,
               discriminant,
             });
-            if (values.length)
-              facts.candidates.push({
+            if (values.length) {
+              const declaration = context.declarations(symbol)[0];
+              const identity = declaration ? declarationKey(declaration) : `${location(file).file}:0`;
+              const candidateKey = `${identity}:${discriminant}`;
+              const candidate = {
                 source: {
                   file: location(file).file,
                   export: exported.name,
                   discriminant,
                 },
                 tags: values,
-              });
+                reexports: [], external: external(checker.getDeclaredTypeOfSymbol(symbol), discriminant), flows: [],
+              };
+              if (!declared.has(candidateKey)) declared.set(candidateKey, { identity, file: declaration ? location(declaration).file : location(file).file, exports: [] });
+              declared.get(candidateKey).exports.push(candidate);
+            }
           } catch (error) {
             if (!(error instanceof TagError)) throw error;
           }
@@ -212,6 +246,16 @@ export function scan(context, syn, root, discriminants, extractTags) {
       }
     });
   }
+  const candidateDeclarations = new Map();
+  for (const [candidateKey, group] of [...declared].sort(([a],[b]) => order(a,b))) {
+    group.exports.sort((a,b) => order(a.source.file,b.source.file) || order(a.source.export,b.source.export));
+    let primary = group.exports.findIndex(c => c.source.file === group.file);
+    if (primary < 0) primary = 0;
+    const [candidate] = group.exports.splice(primary,1);
+    candidate.reexports = group.exports.map(c => ({ file: c.source.file, export: c.source.export }));
+    candidateDeclarations.set(candidate, group.identity);
+    facts.candidates.push(candidate);
+  }
   for (const [owner, node] of [...bodies].sort(([a], [b]) => order(a, b))) {
     const isAsync = modifier(node, ModifierFlags.Async),
       body = node.body || node;
@@ -222,15 +266,16 @@ export function scan(context, syn, root, discriminants, extractTags) {
       if (!signature)
         throw new Error("Compiler could not resolve a function signature");
       const returned = checker.getReturnTypeOfSignature(signature);
-      const errors = sorted(
-        context.awaitedMembers(returned).flatMap(resultErrors),
-      );
-      if (errors.length)
-        origin(owner, node, "result", errors.join(" | "), false, true);
+      const errors = context.awaitedMembers(returned).flatMap(resultErrors);
+      if (errors.length) {
+        errorDeclarations.push([new Set(errors.flatMap(t => [...declarationsOf(t)])), "result"]);
+        origin(owner, node, "result", sorted(errors.map(context.typeString)).join(" | "), false, true);
+      }
     }
     walkBody(body, (n) => {
       if (n.kind === K.ThrowStatement) {
         const [isCaught, rethrows] = caught(n);
+        errorDeclarations.push([declarationsOf(context.type(n.expression)), isAsync ? "rejection" : "throw"]);
         origin(
           owner,
           n,
@@ -260,6 +305,7 @@ export function scan(context, syn, root, discriminants, extractTags) {
       ) {
         const receiver = binding(callee.expression);
         if (receiver?.name && text(receiver.name) === "Promise") {
+          if (n.arguments?.[0]) errorDeclarations.push([declarationsOf(context.type(n.arguments[0])), "rejection"]);
           const error = n.arguments?.[0]
             ? context.typeString(context.type(n.arguments[0]))
             : "undefined";
@@ -340,6 +386,11 @@ export function scan(context, syn, root, discriminants, extractTags) {
             : "unresolved_call",
         );
     });
+  }
+  const channels = ["throw", "rejection", "result"];
+  for (const candidate of facts.candidates) {
+    const declaration = candidateDeclarations.get(candidate);
+    candidate.flows = channels.filter(channel => errorDeclarations.some(([declarations, found]) => found === channel && declarations.has(declaration)));
   }
   return facts;
 }
