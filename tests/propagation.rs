@@ -173,6 +173,7 @@ fn recursive_channel_changes_have_finite_witnesses_and_keep_unknowns() {
             .collect::<Vec<_>>(),
         [true, true, false]
     );
+    insta::assert_json_snapshot!("recursive_channel_witnesses", report);
 }
 
 #[test]
@@ -217,6 +218,9 @@ fn first_witness_is_stable_and_recomputing_replaces_stale_summaries_only() {
             discriminant: "_tag".into(),
         },
         tags: vec!["Offline".into()],
+        reexports: vec![],
+        external: false,
+        flows: vec![],
     };
     let mut report = ScanFacts {
         files: vec!["z.ts".into(), "a.ts".into(), "z.ts".into()],
@@ -246,6 +250,7 @@ fn first_witness_is_stable_and_recomputing_replaces_stale_summaries_only() {
         ])
     );
     let expected = serde_json::to_value(&report).unwrap();
+    insta::assert_json_snapshot!("first_witness_order", report);
     for f in &mut report.functions {
         f.effects.clear();
         f.has_unknown = true;

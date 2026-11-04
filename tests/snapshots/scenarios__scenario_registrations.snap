@@ -1,0 +1,111 @@
+---
+source: tests/scenarios.rs
+expression: data.registrations
+---
+[
+    Registration {
+        contract: ValidatedContract {
+            id: "checkout",
+            source: Source {
+                file: "e.ts",
+                export: "E",
+                discriminant: "tag",
+            },
+            boundaries: [],
+            entry: None,
+            cases: [
+                ValidatedCase {
+                    tag: "A",
+                    expect: "reject without writing",
+                    test: TestRef {
+                        file: "case.test.ts",
+                        name: "errspec [\"checkout\",\"first\"]",
+                    },
+                    kind: Scenario {
+                        id: "first",
+                        observe: ObservationRequirements {
+                            faults: [
+                                "gateway",
+                            ],
+                            assertions: [
+                                "status",
+                                "writes",
+                            ],
+                        },
+                    },
+                },
+                ValidatedCase {
+                    tag: "A",
+                    expect: "stop after retry",
+                    test: TestRef {
+                        file: "case.test.ts",
+                        name: "errspec [\"checkout\",\"retry\"]",
+                    },
+                    kind: Scenario {
+                        id: "retry",
+                        observe: ObservationRequirements {
+                            faults: [
+                                "gateway",
+                            ],
+                            assertions: [
+                                "attempts",
+                            ],
+                        },
+                    },
+                },
+            ],
+        },
+        tags: [
+            "A",
+            "B",
+        ],
+        cases: [
+            Registered(
+                ValidatedCase {
+                    tag: "A",
+                    expect: "reject without writing",
+                    test: TestRef {
+                        file: "case.test.ts",
+                        name: "errspec [\"checkout\",\"first\"]",
+                    },
+                    kind: Scenario {
+                        id: "first",
+                        observe: ObservationRequirements {
+                            faults: [
+                                "gateway",
+                            ],
+                            assertions: [
+                                "status",
+                                "writes",
+                            ],
+                        },
+                    },
+                },
+            ),
+            Registered(
+                ValidatedCase {
+                    tag: "A",
+                    expect: "stop after retry",
+                    test: TestRef {
+                        file: "case.test.ts",
+                        name: "errspec [\"checkout\",\"retry\"]",
+                    },
+                    kind: Scenario {
+                        id: "retry",
+                        observe: ObservationRequirements {
+                            faults: [
+                                "gateway",
+                            ],
+                            assertions: [
+                                "attempts",
+                            ],
+                        },
+                    },
+                },
+            ),
+            Missing(
+                "B",
+            ),
+        ],
+    },
+]

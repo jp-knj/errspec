@@ -1,0 +1,62 @@
+---
+source: tests/scenarios.rs
+expression: report
+---
+{
+  "schemaVersion": 2,
+  "engine": {
+    "name": "tsrs",
+    "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+  },
+  "mode": "verify",
+  "ok": false,
+  "analysisComplete": true,
+  "testsExecuted": true,
+  "testRunner": "vitest",
+  "contracts": [
+    {
+      "id": "checkout",
+      "source": {
+        "file": "e.ts",
+        "export": "E",
+        "discriminant": "tag"
+      },
+      "declaredBoundaries": [],
+      "tags": [
+        "A"
+      ],
+      "cases": [
+        {
+          "id": "first",
+          "tag": "A",
+          "registration": "registered",
+          "testStatus": "passed",
+          "test": {
+            "file": "case.test.ts",
+            "name": "errspec [\"checkout\",\"first\"]"
+          },
+          "expect": "reject without writing",
+          "observe": {
+            "faults": [
+              "gateway"
+            ],
+            "assertions": [
+              "status",
+              "writes"
+            ]
+          },
+          "observationStatus": "invalid"
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "EC011",
+      "message": "Scenario executed more than once; retries/repeats are ambiguous",
+      "contractId": "checkout",
+      "tag": "A",
+      "scenarioId": "first"
+    }
+  ]
+}

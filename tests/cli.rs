@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 use std::{fs, process::Command};
 use tempfile::TempDir;
+#[path = "support/snapshots.rs"]
+mod snapshots;
 
 #[test]
 fn sdk_types_preserve_fault_arguments_and_assertion_value_types() {
@@ -31,7 +33,7 @@ export type ErrorType = {_tag:'A'};
 
 /// Minimal declarations for the Node APIs the TypeScript testkit imports; the repository has no @types/node.
 const NODE_STUB: &str = r#"
-declare module "node:assert/strict" { export function deepStrictEqual(actual: unknown, expected: unknown): void; }
+declare module "node:assert/strict" { export function deepStrictEqual(actual: unknown, expected: unknown, message?: string): void; }
 declare module "node:crypto" { export function randomUUID(): string; }
 declare module "node:fs" {
   export function writeFileSync(path: string, data: string, options: { flag: string }): void;
@@ -61,6 +63,12 @@ export type ErrorType = {_tag:'A'};
 "#,
             &["A"],
         );
+        // The flags of @tsconfig/strictest that apply to vendored code, without the unused-name checks for this fixture.
+        fs::write(
+            dir.path().join("tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"skipLibCheck":true,"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","exactOptionalPropertyTypes":true,"noFallthroughCasesInSwitch":true,"noImplicitOverride":true,"noImplicitReturns":true,"noPropertyAccessFromIndexSignature":true,"noUncheckedIndexedAccess":true,"isolatedModules":true,"checkJs":true},"files":["errors.ts"]}"#,
+        )
+        .unwrap();
         fs::create_dir(dir.path().join("sdk")).unwrap();
         fs::write(dir.path().join("sdk/node.d.ts"), NODE_STUB).unwrap();
         fs::write(
@@ -70,6 +78,61 @@ export type ErrorType = {_tag:'A'};
         .unwrap();
         let (status, report) = run(&dir, &["check"]);
         assert_eq!(status, expected, "{report}");
+    }
+}
+
+#[test]
+fn atomicity_api_infers_fixture_results_state_and_dependency_arguments() {
+    for extension in ["ts", "d.mts"] {
+        let dir = fixture(
+            r#"
+/// <reference path="./sdk/node.d.ts" />
+import { checkFailureAtomicity, type FailureAtomicityReport } from './sdk/index.mjs';
+const report = checkFailureAtomicity({
+  faults: [{ id: 'down', dependency: 'save', inject: () => ({ ok: false, value: 0 }) }],
+  setup: () => ({
+    snapshot: () => ({ balance: 1 }),
+    run(scope) {
+      const save = scope.wrap('save', async (value: number) => ({ ok: true, value }));
+      // @ts-expect-error preserve dependency argument types
+      save('wrong');
+      return save(1);
+    }
+  }),
+  isFailure: result => !result.ok,
+});
+const typed: Promise<FailureAtomicityReport<{ok: boolean; value: number}, {balance: number}>> = report;
+report.then(result => {
+  const balance: number | undefined = result.cases[0]?.before?.balance;
+  // @ts-expect-error preserve snapshot value types
+  const wrong: string = result.cases[0]!.before!.balance;
+});
+export type ErrorType = {_tag:'A'};
+"#,
+            &["A"],
+        );
+        fs::create_dir(dir.path().join("sdk")).unwrap();
+        fs::write(dir.path().join("sdk/node.d.ts"), NODE_STUB).unwrap();
+        fs::write(
+            dir.path().join(format!("sdk/index.{extension}")),
+            if extension == "ts" {
+                include_str!("../packages/testkit/index.ts")
+            } else {
+                include_str!("../packages/testkit/index.d.mts")
+            },
+        )
+        .unwrap();
+        // TypeScript resolves .mjs to .mts/.d.mts; use .ts explicitly for the vendored copy.
+        if extension == "ts" {
+            let source = fs::read_to_string(dir.path().join("errors.ts")).unwrap();
+            fs::write(
+                dir.path().join("errors.ts"),
+                source.replace("./sdk/index.mjs", "./sdk/index"),
+            )
+            .unwrap();
+        }
+        let (status, report) = run(&dir, &["check"]);
+        assert_eq!(status, 0, "{extension}: {report}");
     }
 }
 
@@ -120,6 +183,7 @@ fn added_variant_requires_a_case_and_is_in_delta() {
     assert!(has(&report, "EC001"));
     assert_eq!(report["delta"]["added"]["checkout"], json!(["B"]));
     assert_eq!(report["analysisComplete"], true);
+    insta::assert_json_snapshot!("added_variant", report);
 }
 
 #[test]
@@ -136,10 +200,12 @@ fn resolves_reexports_generics_intersections_and_path_aliases() {
     assert_eq!(report["contracts"][0]["tags"], json!(["A", "B"]));
     assert_eq!(report["testsExecuted"], false);
     assert_eq!(report["contracts"][0]["cases"][0]["testStatus"], "not_run");
+    insta::assert_json_snapshot!("resolved_type_tags", report);
 }
 
 #[test]
 fn wide_unknown_any_and_optional_discriminants_are_incomplete() {
+    let mut reports = Vec::new();
     for ty in [
         "any",
         "unknown",
@@ -152,7 +218,9 @@ fn wide_unknown_any_and_optional_discriminants_are_incomplete() {
         assert_eq!(status, 2, "{ty}: {report}");
         assert!(has(&report, "EC002"));
         assert_eq!(report["analysisComplete"], false);
+        reports.push(json!({"type": ty, "report": snapshots::project(&report, dir.path())}));
     }
+    insta::assert_json_snapshot!("unresolved_discriminants", reports);
 }
 
 #[test]
@@ -175,6 +243,10 @@ fn compiler_error_is_not_a_clean_scan() {
     assert_eq!(status, 2, "{report}");
     assert!(has(&report, "TS2304"));
     assert_eq!(report["diagnostics"][0]["line"], 1);
+    insta::assert_json_snapshot!(
+        "compiler_diagnostics",
+        snapshots::project(&report, dir.path())
+    );
 }
 
 #[test]
@@ -192,6 +264,86 @@ fn text_output_locates_diagnostics_without_a_case() {
 }
 
 #[test]
+fn files_outside_root_dir_do_not_block_analysis() {
+    let dir = fixture(
+        "import type { Shared } from './shared/types';\nexport type ErrorType = Shared;",
+        &["A"],
+    );
+    fs::create_dir(dir.path().join("shared")).unwrap();
+    fs::write(
+        dir.path().join("shared/types.ts"),
+        "export type Shared = {_tag:'A'};",
+    )
+    .unwrap();
+    fs::create_dir(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("tsconfig.json"), r#"{"compilerOptions":{"strict":true,"skipLibCheck":true,"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","rootDir":"./src","outDir":"./dist"},"files":["errors.ts"]}"#).unwrap();
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 0, "{report}");
+    let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
+        .current_dir(dir.path())
+        .args(["scan", "--format", "json"])
+        .output()
+        .unwrap();
+    let scan: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(scan["scanComplete"], true, "{scan}");
+}
+
+#[test]
+fn node10_resolution_is_analysed_as_bundler_with_a_visible_assumption() {
+    let dir = fixture(
+        "import type { Base } from './kinds';\nimport type { Nested } from './nested';\nimport type { Legacy } from 'legacy';\nexport type ErrorType = Base | Nested | Legacy;",
+        &["A", "B", "C"],
+    );
+    fs::write(
+        dir.path().join("kinds.ts"),
+        "export type Base = {_tag:'A'};",
+    )
+    .unwrap();
+    fs::create_dir(dir.path().join("nested")).unwrap();
+    fs::write(
+        dir.path().join("nested/index.ts"),
+        "export type Nested = {_tag:'B'};",
+    )
+    .unwrap();
+    // A CommonJS-era package: main/types only, no exports map.
+    fs::create_dir_all(dir.path().join("node_modules/legacy")).unwrap();
+    fs::write(
+        dir.path().join("node_modules/legacy/package.json"),
+        r#"{"name":"legacy","main":"index.js","types":"index.d.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("node_modules/legacy/index.d.ts"),
+        "export type Legacy = {_tag:'C'};",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("tsconfig.json"),
+        r#"{"compilerOptions":{"strict":true,"skipLibCheck":true,"module":"commonjs","moduleResolution":"node"},"files":["errors.ts"]}"#,
+    )
+    .unwrap();
+    let (status, report) = run(&dir, &["check"]);
+    assert_eq!(status, 0, "{report}");
+    assert_eq!(report["contracts"][0]["tags"], json!(["A", "B", "C"]));
+    assert!(
+        report["assumptions"][0]
+            .as_str()
+            .unwrap()
+            .contains("node10"),
+        "{report}"
+    );
+    let (status, scan) = run(&dir, &["scan"]);
+    assert_eq!(status, 0, "{scan}");
+    assert!(
+        scan["assumptions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a.as_str().unwrap().contains("node10"))
+    );
+}
+
+#[test]
 fn missing_test_file_and_removed_case_fail() {
     let dir = fixture("export type ErrorType = {_tag:'A'};", &["A", "B"]);
     fs::remove_file(dir.path().join("test.ts")).unwrap();
@@ -199,6 +351,7 @@ fn missing_test_file_and_removed_case_fail() {
     assert_eq!(status, 1);
     assert!(has(&report, "EC003"));
     assert!(has(&report, "EC004"));
+    insta::assert_json_snapshot!("missing_file_and_removed_registration", report);
 }
 
 #[test]

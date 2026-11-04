@@ -1,7 +1,7 @@
 //! Static matching of registered test files against the configuration, before any test runs.
 //! Only definite contradictions are reported: a value whose type is not a finite set of string
 //! literals, or SDK use routed through helpers, is left to the runtime observation checks.
-use crate::{scan, tsrs_adapter::TsrsAdapter};
+use crate::tsrs_adapter::{TsrsAdapter, location, text, walk};
 use errspec::{
     config::{CaseKind, ValidatedConfig},
     model::{Finding, ObservationRequirements},
@@ -63,7 +63,7 @@ pub(crate) fn inspect(
             .program
             .get_type_checker_for_file(&adapter.context, file);
         let mut calls = Vec::new();
-        scan::walk(file.as_node(), &mut |node| {
+        walk(file.as_node(), &mut |node| {
             if node.kind() == Kind::CallExpression
                 && is_sdk(&mut checker, node, "scenarioTest", None)
             {
@@ -86,19 +86,13 @@ fn inspect_call(
     findings: &mut Vec<Finding>,
 ) {
     let at = |code: &str, message: String| {
-        let location = scan::location(root, call);
+        let location = location(root, call);
         let mut finding = Finding::new(code, message);
         finding.file = Some(location.file.into());
         finding.byte_offset = Some(location.byte_offset);
         finding.line = Some(location.line as u32);
         finding
     };
-    if inside_describe(checker, call) {
-        findings.push(at(
-            "EC017",
-            "scenarioTest is registered inside describe; its full test name cannot match".into(),
-        ));
-    }
     let arguments = call.arguments();
     let Some(definition) = arguments
         .get(2)
@@ -187,13 +181,12 @@ fn is_sdk(checker: &mut Checker, call: P<Node>, name: &str, owner: Option<&str>)
     let Some(declaration) = checker.get_resolved_signature_exported(call).declaration() else {
         return false;
     };
-    if declaration.name().is_none_or(|n| scan::text(n) != name) {
+    if declaration.name().is_none_or(|n| text(n) != name) {
         return false;
     }
     match owner {
         Some(owner) => declaration.parent().is_some_and(|p| {
-            p.kind() == Kind::InterfaceDeclaration
-                && p.name().is_some_and(|n| scan::text(n) == owner)
+            p.kind() == Kind::InterfaceDeclaration && p.name().is_some_and(|n| text(n) == owner)
         }),
         None => get_source_file_of_node(declaration).is_some_and(|file| {
             file.symbol().is_some_and(|module| {
@@ -206,38 +199,9 @@ fn is_sdk(checker: &mut Checker, call: P<Node>, name: &str, owner: Option<&str>)
     }
 }
 
-fn inside_describe(checker: &mut Checker, call: P<Node>) -> bool {
-    let mut node = call.parent();
-    while let Some(current) = node {
-        if current.kind() == Kind::CallExpression
-            && let Some(callee) = current.expression()
-        {
-            let mut root = callee;
-            while matches!(
-                root.kind(),
-                Kind::PropertyAccessExpression | Kind::CallExpression
-            ) {
-                let Some(inner) = root.expression() else {
-                    break;
-                };
-                root = inner;
-            }
-            if root.kind() == Kind::Identifier
-                && checker
-                    .get_symbol_at_location_exported(root)
-                    .is_some_and(|s| s.name() == "describe")
-            {
-                return true;
-            }
-        }
-        node = current.parent();
-    }
-    false
-}
-
 fn property(checker: &mut Checker, object: P<Node>, key: &str) -> Value {
     for property in object.properties() {
-        let name = property.name().map(scan::text);
+        let name = property.name().map(text);
         if name.as_deref() != Some(key) {
             continue;
         }
@@ -288,7 +252,7 @@ fn literals(checker: &mut Checker, ty: P<Type>) -> Option<BTreeSet<String>> {
 /// Literal ids passed directly to `ScenarioScope.fault` / `check` within the scenario body.
 fn observation_ids(checker: &mut Checker, body: P<Node>) -> Vec<(&'static str, String)> {
     let mut calls = Vec::new();
-    scan::walk(body, &mut |node| {
+    walk(body, &mut |node| {
         if node.kind() == Kind::CallExpression {
             calls.push(node);
         }

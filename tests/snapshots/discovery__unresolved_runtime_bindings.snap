@@ -1,0 +1,358 @@
+---
+source: tests/discovery.rs
+expression: r
+---
+{
+  "allRuntimeErrorsKnown": false,
+  "assumptions": [
+    "May-propagate analysis, not a proof of runtime reachability or exhaustiveness.",
+    "Dependencies in node_modules and declaration-only implementations are not traversed.",
+    "Implicit exceptions, getters/proxies, eval and arbitrary callback execution are not modeled.",
+    "Return error properties and finite discriminants are candidates; their domain meaning requires review.",
+    "Conditional catches/rethrows and finally overrides are conservatively approximated.",
+    "Static calls assume function declarations and built-in globals are not reassigned or monkey-patched; mutable aliases and callbacks are unresolved."
+  ],
+  "candidates": [],
+  "diagnostics": [],
+  "edges": [
+    {
+      "awaited": false,
+      "callee": "bindings.ts:52:FunctionDeclaration",
+      "caller": "bindings.ts:135:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 161,
+        "file": "bindings.ts",
+        "line": 6
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "bindings.ts:1:FunctionDeclaration",
+      "caller": "bindings.ts:271:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 321,
+        "file": "bindings.ts",
+        "line": 9
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "bindings.ts:524:ArrowFunction",
+      "caller": "bindings.ts:561:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 593,
+        "file": "bindings.ts",
+        "line": 14
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "bindings.ts:442:FunctionDeclaration",
+      "caller": "bindings.ts:604:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 653,
+        "file": "bindings.ts",
+        "line": 15
+      },
+      "mayRethrow": false,
+      "returned": false
+    }
+  ],
+  "files": [
+    "bindings.ts"
+  ],
+  "functions": [
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "bindings.ts:1:SourceFile",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 1,
+        "file": "bindings.ts",
+        "line": 2
+      },
+      "name": "<module>"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "bindings.ts:25:ThrowStatement:Throw",
+          "via": [
+            "bindings.ts:1:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "bindings.ts:1:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 1,
+        "file": "bindings.ts",
+        "line": 2
+      },
+      "name": "leaf"
+    },
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "bindings.ts:52:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 52,
+        "file": "bindings.ts",
+        "line": 3
+      },
+      "name": "safe"
+    },
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "bindings.ts:135:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 135,
+        "file": "bindings.ts",
+        "line": 6
+      },
+      "name": "typed"
+    },
+    {
+      "effects": [],
+      "hasUnknown": true,
+      "id": "bindings.ts:177:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 177,
+        "file": "bindings.ts",
+        "line": 7
+      },
+      "name": "callback"
+    },
+    {
+      "effects": [],
+      "hasUnknown": true,
+      "id": "bindings.ts:227:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 227,
+        "file": "bindings.ts",
+        "line": 8
+      },
+      "name": "reassigned"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "bindings.ts:25:ThrowStatement:Throw",
+          "via": [
+            "bindings.ts:271:FunctionDeclaration",
+            "bindings.ts:1:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": true,
+      "id": "bindings.ts:271:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 271,
+        "file": "bindings.ts",
+        "line": 9
+      },
+      "name": "member"
+    },
+    {
+      "effects": [],
+      "hasUnknown": true,
+      "id": "bindings.ts:332:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 332,
+        "file": "bindings.ts",
+        "line": 10
+      },
+      "name": "customPromise"
+    },
+    {
+      "effects": [
+        {
+          "channel": "rejection",
+          "origin": "bindings.ts:481:CallExpression:Rejection",
+          "via": [
+            "bindings.ts:442:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "bindings.ts:442:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 442,
+        "file": "bindings.ts",
+        "line": 12
+      },
+      "name": "nativeAlias"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "bindings.ts:532:ThrowStatement:Throw",
+          "via": [
+            "bindings.ts:524:ArrowFunction"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "bindings.ts:524:ArrowFunction",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 524,
+        "file": "bindings.ts",
+        "line": 13
+      },
+      "name": "arrow"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "bindings.ts:532:ThrowStatement:Throw",
+          "via": [
+            "bindings.ts:561:FunctionDeclaration",
+            "bindings.ts:524:ArrowFunction"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "bindings.ts:561:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 561,
+        "file": "bindings.ts",
+        "line": 14
+      },
+      "name": "directArrow"
+    },
+    {
+      "effects": [],
+      "hasUnknown": true,
+      "id": "bindings.ts:604:FunctionDeclaration",
+      "isAsync": true,
+      "location": {
+        "byteOffset": 604,
+        "file": "bindings.ts",
+        "line": 15
+      },
+      "name": "mutablePromise"
+    }
+  ],
+  "kind": "errspec/scan",
+  "origins": [
+    {
+      "caught": false,
+      "channel": "throw",
+      "errorType": "Error",
+      "escapes": true,
+      "function": "bindings.ts:1:FunctionDeclaration",
+      "id": "bindings.ts:25:ThrowStatement:Throw",
+      "location": {
+        "byteOffset": 25,
+        "file": "bindings.ts",
+        "line": 2
+      }
+    },
+    {
+      "caught": false,
+      "channel": "rejection",
+      "errorType": "\"x\"",
+      "escapes": true,
+      "function": "bindings.ts:442:FunctionDeclaration",
+      "id": "bindings.ts:481:CallExpression:Rejection",
+      "location": {
+        "byteOffset": 481,
+        "file": "bindings.ts",
+        "line": 12
+      }
+    },
+    {
+      "caught": false,
+      "channel": "throw",
+      "errorType": "Error",
+      "escapes": true,
+      "function": "bindings.ts:524:ArrowFunction",
+      "id": "bindings.ts:532:ThrowStatement:Throw",
+      "location": {
+        "byteOffset": 532,
+        "file": "bindings.ts",
+        "line": 13
+      }
+    }
+  ],
+  "scanComplete": true,
+  "schemaVersion": 1,
+  "unknowns": [
+    {
+      "expression": "f()",
+      "function": "bindings.ts:177:FunctionDeclaration",
+      "location": {
+        "byteOffset": 220,
+        "file": "bindings.ts",
+        "line": 7
+      },
+      "reason": "implementation_outside_scan_or_dynamic_signature"
+    },
+    {
+      "expression": "mutable()",
+      "function": "bindings.ts:227:FunctionDeclaration",
+      "location": {
+        "byteOffset": 258,
+        "file": "bindings.ts",
+        "line": 8
+      },
+      "reason": "implementation_outside_scan_or_dynamic_signature"
+    },
+    {
+      "expression": "obj.f()",
+      "function": "bindings.ts:271:FunctionDeclaration",
+      "location": {
+        "byteOffset": 321,
+        "file": "bindings.ts",
+        "line": 9
+      },
+      "reason": "member_dispatch_may_be_overridden"
+    },
+    {
+      "expression": "P.reject('x')",
+      "function": "bindings.ts:332:FunctionDeclaration",
+      "location": {
+        "byteOffset": 394,
+        "file": "bindings.ts",
+        "line": 10
+      },
+      "reason": "implementation_outside_scan_or_dynamic_signature"
+    },
+    {
+      "expression": "nativeAlias()",
+      "function": "bindings.ts:604:FunctionDeclaration",
+      "location": {
+        "byteOffset": 653,
+        "file": "bindings.ts",
+        "line": 15
+      },
+      "reason": "promise_use_not_resolved_to_await_or_return"
+    }
+  ]
+}

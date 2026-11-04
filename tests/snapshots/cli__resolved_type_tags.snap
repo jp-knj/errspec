@@ -1,0 +1,55 @@
+---
+source: tests/cli.rs
+expression: report
+---
+{
+  "analysisComplete": true,
+  "contracts": [
+    {
+      "cases": [
+        {
+          "expect": "must reject",
+          "observationStatus": "not_required",
+          "registration": "registered",
+          "tag": "A",
+          "test": {
+            "file": "test.ts",
+            "name": "A"
+          },
+          "testStatus": "not_run"
+        },
+        {
+          "expect": "must reject",
+          "observationStatus": "not_required",
+          "registration": "registered",
+          "tag": "B",
+          "test": {
+            "file": "test.ts",
+            "name": "B"
+          },
+          "testStatus": "not_run"
+        }
+      ],
+      "declaredBoundaries": [],
+      "id": "checkout",
+      "source": {
+        "discriminant": "_tag",
+        "export": "ErrorType",
+        "file": "errors.ts"
+      },
+      "tags": [
+        "A",
+        "B"
+      ]
+    }
+  ],
+  "diagnostics": [],
+  "engine": {
+    "name": "tsrs",
+    "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+  },
+  "mode": "check",
+  "ok": true,
+  "schemaVersion": 2,
+  "testsExecuted": false
+}

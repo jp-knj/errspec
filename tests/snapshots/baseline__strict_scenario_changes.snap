@@ -1,0 +1,664 @@
+---
+source: tests/baseline.rs
+expression: reports
+---
+[
+  {
+    "field": "expect",
+    "normal": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "return success",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "orders"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": true,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "strict": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "return success",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "orders"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [
+        {
+          "code": "EC014",
+          "contractId": "checkout",
+          "message": "Scenario changed from baseline; review before creating a new baseline",
+          "scenarioId": "first"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    }
+  },
+  {
+    "field": "observe",
+    "normal": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "status"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": true,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "strict": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "status"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [
+        {
+          "code": "EC014",
+          "contractId": "checkout",
+          "message": "Scenario changed from baseline; review before creating a new baseline",
+          "scenarioId": "first"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    }
+  },
+  {
+    "field": "observe",
+    "normal": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "orders"
+                ],
+                "faults": [
+                  "different"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": true,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "strict": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "orders"
+                ],
+                "faults": [
+                  "different"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [
+        {
+          "code": "EC014",
+          "contractId": "checkout",
+          "message": "Scenario changed from baseline; review before creating a new baseline",
+          "scenarioId": "first"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    }
+  },
+  {
+    "field": "observe",
+    "normal": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "orders",
+                  "status"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": true,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "strict": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "orders",
+                  "status"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "case.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [
+        {
+          "code": "EC014",
+          "contractId": "checkout",
+          "message": "Scenario changed from baseline; review before creating a new baseline",
+          "scenarioId": "first"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    }
+  },
+  {
+    "field": "test",
+    "normal": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "orders"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "other.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": true,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    },
+    "strict": {
+      "analysisComplete": true,
+      "contracts": [
+        {
+          "cases": [
+            {
+              "expect": "reject without writing",
+              "id": "first",
+              "observationStatus": "not_run",
+              "observe": {
+                "assertions": [
+                  "status",
+                  "orders"
+                ],
+                "faults": [
+                  "gateway"
+                ]
+              },
+              "registration": "registered",
+              "tag": "A",
+              "test": {
+                "file": "other.test.ts",
+                "name": "errspec [\"checkout\",\"first\"]"
+              },
+              "testStatus": "not_run"
+            }
+          ],
+          "declaredBoundaries": [],
+          "id": "checkout",
+          "source": {
+            "discriminant": "tag",
+            "export": "E",
+            "file": "errors.ts"
+          },
+          "tags": [
+            "A"
+          ]
+        }
+      ],
+      "delta": {
+        "added": {},
+        "addedScenarios": {},
+        "changedScenarios": {
+          "checkout": [
+            "first"
+          ]
+        },
+        "removed": {},
+        "removedContracts": [],
+        "removedScenarios": {}
+      },
+      "diagnostics": [
+        {
+          "code": "EC014",
+          "contractId": "checkout",
+          "message": "Scenario changed from baseline; review before creating a new baseline",
+          "scenarioId": "first"
+        }
+      ],
+      "engine": {
+        "name": "tsrs",
+        "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+      },
+      "mode": "check",
+      "ok": false,
+      "schemaVersion": 2,
+      "testsExecuted": false
+    }
+  }
+]

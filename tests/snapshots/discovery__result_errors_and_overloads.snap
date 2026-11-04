@@ -1,0 +1,211 @@
+---
+source: tests/discovery.rs
+expression: r
+---
+{
+  "allRuntimeErrorsKnown": false,
+  "assumptions": [
+    "May-propagate analysis, not a proof of runtime reachability or exhaustiveness.",
+    "Dependencies in node_modules and declaration-only implementations are not traversed.",
+    "Implicit exceptions, getters/proxies, eval and arbitrary callback execution are not modeled.",
+    "Return error properties and finite discriminants are candidates; their domain meaning requires review.",
+    "Conditional catches/rethrows and finally overrides are conservatively approximated.",
+    "Static calls assume function declarations and built-in globals are not reassigned or monkey-patched; mutable aliases and callbacks are unresolved."
+  ],
+  "candidates": [
+    {
+      "flows": [
+        "result"
+      ],
+      "source": {
+        "discriminant": "kind",
+        "export": "Failure",
+        "file": "result.ts"
+      },
+      "tags": [
+        "Invalid",
+        "Missing"
+      ]
+    }
+  ],
+  "diagnostics": [],
+  "edges": [
+    {
+      "awaited": false,
+      "callee": "result.ts:111:FunctionDeclaration",
+      "caller": "result.ts:213:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 254,
+        "file": "result.ts",
+        "line": 5
+      },
+      "mayRethrow": false,
+      "returned": true
+    },
+    {
+      "awaited": false,
+      "callee": "result.ts:351:FunctionDeclaration",
+      "caller": "result.ts:431:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 458,
+        "file": "result.ts",
+        "line": 9
+      },
+      "mayRethrow": false,
+      "returned": false
+    }
+  ],
+  "files": [
+    "result.ts"
+  ],
+  "functions": [
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "result.ts:1:SourceFile",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 1,
+        "file": "result.ts",
+        "line": 2
+      },
+      "name": "<module>"
+    },
+    {
+      "effects": [
+        {
+          "channel": "result",
+          "origin": "result.ts:111:FunctionDeclaration:Result",
+          "via": [
+            "result.ts:111:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "result.ts:111:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 111,
+        "file": "result.ts",
+        "line": 4
+      },
+      "name": "parse"
+    },
+    {
+      "effects": [
+        {
+          "channel": "result",
+          "origin": "result.ts:111:FunctionDeclaration:Result",
+          "via": [
+            "result.ts:213:FunctionDeclaration",
+            "result.ts:111:FunctionDeclaration"
+          ]
+        },
+        {
+          "channel": "result",
+          "origin": "result.ts:213:FunctionDeclaration:Result",
+          "via": [
+            "result.ts:213:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "result.ts:213:FunctionDeclaration",
+      "isAsync": true,
+      "location": {
+        "byteOffset": 213,
+        "file": "result.ts",
+        "line": 5
+      },
+      "name": "wrapper"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "result.ts:401:ThrowStatement:Throw",
+          "via": [
+            "result.ts:351:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "result.ts:351:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 351,
+        "file": "result.ts",
+        "line": 8
+      },
+      "name": "overload"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "result.ts:401:ThrowStatement:Throw",
+          "via": [
+            "result.ts:431:FunctionDeclaration",
+            "result.ts:351:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "result.ts:431:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 431,
+        "file": "result.ts",
+        "line": 9
+      },
+      "name": "caller"
+    }
+  ],
+  "kind": "errspec/scan",
+  "origins": [
+    {
+      "caught": false,
+      "channel": "result",
+      "errorType": "Failure",
+      "escapes": true,
+      "function": "result.ts:111:FunctionDeclaration",
+      "id": "result.ts:111:FunctionDeclaration:Result",
+      "location": {
+        "byteOffset": 111,
+        "file": "result.ts",
+        "line": 4
+      }
+    },
+    {
+      "caught": false,
+      "channel": "result",
+      "errorType": "Failure",
+      "escapes": true,
+      "function": "result.ts:213:FunctionDeclaration",
+      "id": "result.ts:213:FunctionDeclaration:Result",
+      "location": {
+        "byteOffset": 213,
+        "file": "result.ts",
+        "line": 5
+      }
+    },
+    {
+      "caught": false,
+      "channel": "throw",
+      "errorType": "TypeError",
+      "escapes": true,
+      "function": "result.ts:351:FunctionDeclaration",
+      "id": "result.ts:401:ThrowStatement:Throw",
+      "location": {
+        "byteOffset": 401,
+        "file": "result.ts",
+        "line": 8
+      }
+    }
+  ],
+  "scanComplete": true,
+  "schemaVersion": 1,
+  "unknowns": []
+}

@@ -1,0 +1,69 @@
+---
+source: tests/cli.rs
+expression: report
+---
+{
+  "analysisComplete": true,
+  "contracts": [
+    {
+      "cases": [
+        {
+          "expect": "must reject",
+          "observationStatus": "not_required",
+          "registration": "registered",
+          "tag": "A",
+          "test": {
+            "file": "test.ts",
+            "name": "A"
+          },
+          "testStatus": "not_run"
+        },
+        {
+          "observationStatus": "not_required",
+          "registration": "missing",
+          "tag": "B",
+          "testStatus": "not_run"
+        }
+      ],
+      "declaredBoundaries": [],
+      "id": "checkout",
+      "source": {
+        "discriminant": "_tag",
+        "export": "ErrorType",
+        "file": "errors.ts"
+      },
+      "tags": [
+        "A",
+        "B"
+      ]
+    }
+  ],
+  "delta": {
+    "added": {
+      "checkout": [
+        "B"
+      ]
+    },
+    "addedScenarios": {},
+    "changedScenarios": {},
+    "removed": {},
+    "removedContracts": [],
+    "removedScenarios": {}
+  },
+  "diagnostics": [
+    {
+      "code": "EC001",
+      "contractId": "checkout",
+      "message": "Error variant has no registered failure contract and test",
+      "tag": "B"
+    }
+  ],
+  "engine": {
+    "name": "tsrs",
+    "revision": "1bfd1e65be95131f9242a03687d37006214a96f6"
+  },
+  "mode": "check",
+  "ok": false,
+  "schemaVersion": 2,
+  "testsExecuted": false
+}

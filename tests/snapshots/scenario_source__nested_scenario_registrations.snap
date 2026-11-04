@@ -1,0 +1,72 @@
+---
+source: tests/scenario_source.rs
+expression: outcomes
+---
+[
+  {
+    "invalid": {
+      "findings": [
+        {
+          "byteOffset": 614,
+          "code": "EC016",
+          "contractId": "checkout",
+          "file": "case.test.ts",
+          "line": 15,
+          "message": "Scenario uses check id \"code\" that the configuration does not declare",
+          "scenarioId": "invalid",
+          "tag": "Invalid"
+        }
+      ],
+      "status": 1
+    },
+    "valid": {
+      "findings": [],
+      "status": 0
+    },
+    "wrapper": "describe('group', "
+  },
+  {
+    "invalid": {
+      "findings": [
+        {
+          "byteOffset": 619,
+          "code": "EC016",
+          "contractId": "checkout",
+          "file": "case.test.ts",
+          "line": 15,
+          "message": "Scenario uses check id \"code\" that the configuration does not declare",
+          "scenarioId": "invalid",
+          "tag": "Invalid"
+        }
+      ],
+      "status": 1
+    },
+    "valid": {
+      "findings": [],
+      "status": 0
+    },
+    "wrapper": "describe.only('group', "
+  },
+  {
+    "invalid": {
+      "findings": [
+        {
+          "byteOffset": 624,
+          "code": "EC016",
+          "contractId": "checkout",
+          "file": "case.test.ts",
+          "line": 15,
+          "message": "Scenario uses check id \"code\" that the configuration does not declare",
+          "scenarioId": "invalid",
+          "tag": "Invalid"
+        }
+      ],
+      "status": 1
+    },
+    "valid": {
+      "findings": [],
+      "status": 0
+    },
+    "wrapper": "describe.each([1])('group', "
+  }
+]

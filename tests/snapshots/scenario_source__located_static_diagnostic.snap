@@ -1,0 +1,16 @@
+---
+source: tests/scenario_source.rs
+expression: outcome.findings
+---
+[
+  {
+    "byteOffset": 111,
+    "code": "EC016",
+    "contractId": "checkout",
+    "file": "case.test.ts",
+    "line": 5,
+    "message": "Scenario uses check id \"code\" that the configuration does not declare",
+    "scenarioId": "declined",
+    "tag": "Declined"
+  }
+]

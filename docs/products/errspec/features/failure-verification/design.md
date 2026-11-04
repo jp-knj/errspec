@@ -13,7 +13,7 @@ Agent JSONは診断の受渡し手段であり、型・仕様・実行の対応�
 
 | モジュール | 責任 |
 |---|---|
-| tsrs_adapter | tsconfig、診断、exportのsymbol解決、有限タグ集合の取得 |
+| tsrs_adapter | tsconfig、診断、exportのsymbol解決、有限タグ集合の取得、ASTの位置・本文・走査 |
 | model / config | 外部形式のデータとenum、読取専用の検証済み設定 |
 | contract | 型タグとケース登録の比較。ファイル存在の確認結果を受け取る |
 | snapshot | 登録結果からの一覧生成、シナリオの追加・削除・変更差分 |
@@ -35,6 +35,9 @@ Agent JSONは診断の受渡し手段であり、型・仕様・実行の対応�
 型解析はRust＋tsrs、対象コードとテストの実行はBun/Vitestが担当する。
 Oxcエコシステムのtsrsを使用しているが、追加のoxc_parserは入れていない。
 同じ型システムを再実装せず、tsrs内部APIへの依存はadapterに閉じ込める。
+TypeScript 7で廃止された`moduleResolution: node10`は、adapterがtsconfigの解析後に未指定へ戻してからProgramを作る。tsrsは未指定のCommonJSを`bundler`で解決するため、TS5108だけで解析を止めずに済む。置き換えはレポートの`assumptions`に記録し、`ok`には影響させない。ほかの廃止オプションは解決結果が変わるため置き換えない。
+
+共通関数と型の配置は[Rustコードの基準](../../../../engineering/guidelines/rust-code.md)に従います。ASTの位置・本文・走査はadapterが提供し、走査と実行前の静的照合が同じ規則を利用します。ソース位置の`Location`は共通モデルに定義し、`discovery::Location`も再公開で維持します。
 Git revisionとCargo.lockを固定する。arenaは単発CLIのプロセス寿命で管理し、常駐APIはまだ提供しない。
 
 今回、並列化や高速キャッシュは追加していない。将来は所有可能なIRへ変換した後の処理や独立したプロジェクトの解析を候補にする。
@@ -57,16 +60,16 @@ assertionは1件以上を必要とする。faultは空の配列を明示した�
 
 ## 識別子とテストの結び付け
 
-補助APIがトップレベルに登録する名前は`errspec `とJSON配列[contract id, scenario id]の連結。
+補助APIが登録する名前は`errspec `とJSON配列[contract id, scenario id]の連結。
 区切り文字を含むIDでも衝突しない。ファイルはimport.meta.urlから取得してRust側でcanonicalizeする。
 定義に`description`があれば、固定名の後ろに空白1つと説明を連結した名前で登録する。説明は空でない1行に限る。
-v2のシナリオは、ランナーのテスト名が固定名と一致するか、固定名＋空白で始まるものを候補にする。JSON配列は`]`で閉じるため、別のシナリオの固定名とは前方一致しない。
-候補が1件のときだけ成功とし、観測のテスト名はその候補の完全名との一致を要求する。v1の登録名は従来どおり完全一致とする。
+v2のシナリオは、ランナーの完全名の中で固定名が空白区切りの一部として現れるものを候補にする。固定名の前は名前の先頭か空白（`describe`の題名）、後ろは名前の末尾か空白（説明）であることを条件にする。Bun（JUnitの入れ子のsuite）とVitest（`fullName`）は、どちらも`describe`の題名を空白でつないで前に付ける。JSON配列は`]`で閉じるため、別のシナリオの固定名とは一致しない。
+候補が1件のときだけ成功とし、同じシナリオが2つの`describe`にあれば曖昧とする。補助APIは`describe`の題名を知らないため、観測のテスト名は候補の完全名のうち固定名から後ろの部分との一致を要求する。v1の登録名は従来どおり完全一致とする。
 説明は設定にもsnapshotにも保存しない。説明の変更はchangedScenariosやEC014の対象外。
 テストの成功はランナーレポートで確認し、補助APIの自己申告だけを成功にしない。
 ファイル・名前が重複したテスト、同じシナリオの複数実行は曖昧として拒否する。
 
-describeによる名前の接頭辞、retry/repeat、ブラウザ内実行は現時点の対応範囲外。
+retry/repeat、ブラウザ内実行は現時点の対応範囲外。
 distinct IDのconcurrent実行は各callbackに独立したscopeと観測ファイルを与える。
 
 ## 観測のライフサイクル
@@ -242,7 +245,7 @@ testkitは現在の小さなAPIを保ち、この段階では比較式DSL、Resu
 `scenarioTest`は解決した呼出シグネチャの宣言で特定する。宣言が`scenarioTest`という名前で、同じモジュールが`ScenarioScope`をexportしていることを条件にする。`s.fault`／`s.check`は、宣言が`ScenarioScope`インターフェースのメソッドであることで特定する。名前の一致だけの関数は対象にしない。
 定義はオブジェクトリテラルの場合だけ読む。各プロパティの初期化式の型から文字列リテラル型の集合を取り出す。オブジェクト全体の型は`ScenarioDefinition`の文脈で`string`へ広がるため使わない。集合を作れない値（`string`、spreadの可能性）は照合しない。
 本体（第4引数）の中で直接呼ばれた`fault`／`check`の第1引数を同じ方法で読み、設定の必須IDにないものをEC016とする。必須IDの欠落はヘルパー経由の呼出と区別できないため、静的には報告しない。
-contractとidの組合せごとに、未登録・テストファイルの不一致・タグの不一致・`withoutFaults`と空の`faults`の不一致をEC015とする。`describe`の呼出の内側にある`scenarioTest`はEC017とする。
+contractとidの組合せごとに、未登録・テストファイルの不一致・タグの不一致・`withoutFaults`と空の`faults`の不一致をEC015とする。
 いずれも実行時の照合で必ず失敗する条件であり、合格の条件を新たに追加するものではない。verifyでも同じ診断を出し、テストの実行と観測の照合はそのまま続ける。
 
 ## 登録済みファイルの選択実行

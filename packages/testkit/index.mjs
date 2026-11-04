@@ -11,7 +11,7 @@ export function scenarioTestName(contract, id) {
   return `errspec ${JSON.stringify([contract, id])}`;
 }
 
-/** Register at the top level. Each invocation owns its observations, including in concurrent tests. */
+/** Register at the top level or inside describe. Each invocation owns its observations, including in concurrent tests. */
 export function scenarioTest(test, file, definition, body) {
   const { contract, id, tag, withoutFaults = false, description } = definition;
   if (description !== undefined && (!nonempty(description) || /[\r\n]/.test(description))) {
@@ -104,4 +104,146 @@ export function scenarioTest(test, file, definition, body) {
       throw error;
     } finally { closed = true; save(); }
   });
+}
+
+export class FailureAtomicityError extends Error {
+    report;
+    constructor(message, report) {
+        super(message);
+        this.name = "FailureAtomicityError";
+        this.report = report;
+    }
+}
+/** Explore single dependency failures with fresh fixtures and an explicit state oracle. */
+export async function checkFailureAtomicity(options) {
+    if (typeof options?.setup !== "function" || typeof options.isFailure !== "function"
+        || !Array.isArray(options.faults) || options.faults.length === 0) {
+        throw new TypeError("Provide setup, isFailure and at least one fault");
+    }
+    const ids = new Set();
+    for (const fault of options.faults) {
+        if (!fault || !nonempty(fault.id) || ids.has(fault.id) || !nonempty(fault.dependency)
+            || typeof fault.inject !== "function") {
+            throw new TypeError("Faults require unique nonempty ids, a dependency and an inject function");
+        }
+        ids.add(fault.id);
+    }
+    const only = options.only;
+    if (only && (!ids.has(only.fault) || !Number.isSafeInteger(only.call) || only.call < 1)) {
+        throw new TypeError("only must name a registered fault and a positive call number");
+    }
+    const report = { baseline: { calls: {} }, cases: [] };
+    const message = (error) => error instanceof Error ? error.message : String(error);
+    async function execute(selected, injection) {
+        const calls = Object.create(null);
+        let fixture;
+        let pending = 0;
+        let active = true;
+        let injected = false;
+        // The baseline is kept separately from fault cases in the public report.
+        const trial = {
+            fault: selected ?? { fault: "baseline", dependency: "", call: 0 }, status: "violated",
+        };
+        const scope = {
+            wrap(dependency, implementation) {
+                if (!nonempty(dependency) || typeof implementation !== "function") {
+                    throw new TypeError("wrap requires a dependency name and an implementation");
+                }
+                return async function (...args) {
+                    if (!active)
+                        throw new Error("Dependency called after the operation finished");
+                    calls[dependency] = (calls[dependency] ?? 0) + 1;
+                    const inject = selected?.dependency === dependency && selected.call === calls[dependency];
+                    pending++;
+                    try {
+                        if (inject) {
+                            injected = true;
+                            return await injection.inject.apply(this, args);
+                        }
+                        return await implementation.apply(this, args);
+                    }
+                    finally {
+                        pending--;
+                    }
+                };
+            },
+        };
+        try {
+            fixture = await options.setup();
+            trial.before = structuredClone(await fixture.snapshot());
+            trial.result = await fixture.run(scope);
+            active = false;
+            if (pending !== 0)
+                throw new Error("Operation finished with dependency calls still pending; await them");
+            trial.after = structuredClone(await fixture.snapshot());
+            if (selected && !injected)
+                throw new Error("Selected fault was not injected");
+            const failed = options.isFailure(trial.result);
+            if (typeof failed !== "boolean")
+                throw new TypeError("isFailure must return a boolean");
+            if (!selected && failed)
+                throw new Error("Baseline operation must succeed without an injected fault");
+            if (selected && failed) {
+                deepStrictEqual(trial.after, trial.before, "Failed operation changed the protected state");
+                trial.status = "preserved";
+            }
+            else {
+                trial.status = "recovered";
+            }
+        }
+        catch (error) {
+            trial.status = "violated";
+            trial.error = error;
+            trial.message = message(error);
+            // Preserve the state left by unexpected throws as well, when possible.
+            if (fixture && !Object.hasOwn(trial, "after") && pending === 0) {
+                try {
+                    trial.after = structuredClone(await fixture.snapshot());
+                }
+                catch { /* original diagnostic wins */ }
+            }
+        }
+        finally {
+            active = false;
+            try {
+                await fixture?.dispose?.();
+            }
+            catch (error) {
+                trial.status = "violated";
+                trial.error = error;
+                trial.message = `${trial.message ? `${trial.message}; ` : ""}Fixture cleanup failed: ${message(error)}`;
+            }
+        }
+        return { calls, trial };
+    }
+    const baseline = await execute();
+    report.baseline.calls = baseline.calls;
+    if (baseline.trial.status === "violated") {
+        report.baseline.message = baseline.trial.message ?? "Baseline failed";
+        report.baseline.error = baseline.trial.error;
+        throw new FailureAtomicityError(`Baseline failed: ${report.baseline.message}`, report);
+    }
+    for (const fault of options.faults) {
+        if (only && only.fault !== fault.id)
+            continue;
+        const count = baseline.calls[fault.dependency] ?? 0;
+        if (count === 0 || (only && only.call > count)) {
+            report.cases.push({
+                fault: { fault: fault.id, dependency: fault.dependency, call: only?.call ?? 1 },
+                status: "violated", message: "Selected dependency call was not observed in the baseline",
+            });
+            continue;
+        }
+        for (let call = 1; call <= count; call++) {
+            if (only && only.call !== call)
+                continue;
+            const selected = { fault: fault.id, dependency: fault.dependency, call };
+            report.cases.push((await execute(selected, fault)).trial);
+        }
+    }
+    const violations = report.cases.filter(trial => trial.status === "violated");
+    if (violations.length) {
+        throw new FailureAtomicityError(violations.map(trial => `${trial.fault.fault} at ${trial.fault.dependency} call ${trial.fault.call}: ${trial.message}`).join("\n"), report);
+    }
+    return report;
 }

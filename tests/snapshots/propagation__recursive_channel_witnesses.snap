@@ -1,0 +1,153 @@
+---
+source: tests/propagation.rs
+expression: report
+---
+{
+  "kind": "errspec/scan",
+  "schemaVersion": 1,
+  "scanComplete": true,
+  "allRuntimeErrorsKnown": false,
+  "files": [],
+  "candidates": [],
+  "origins": [
+    {
+      "id": "failure",
+      "function": "a",
+      "location": {
+        "file": "graph.ts",
+        "byteOffset": 0,
+        "line": 1
+      },
+      "channel": "throw",
+      "errorType": "Failure",
+      "caught": false,
+      "escapes": true
+    }
+  ],
+  "functions": [
+    {
+      "id": "a",
+      "name": "a",
+      "location": {
+        "file": "graph.ts",
+        "byteOffset": 0,
+        "line": 1
+      },
+      "isAsync": false,
+      "effects": [
+        {
+          "origin": "failure",
+          "channel": "throw",
+          "via": [
+            "a"
+          ]
+        },
+        {
+          "origin": "failure",
+          "channel": "rejection",
+          "via": [
+            "a",
+            "b",
+            "a"
+          ]
+        }
+      ],
+      "hasUnknown": true
+    },
+    {
+      "id": "b",
+      "name": "b",
+      "location": {
+        "file": "graph.ts",
+        "byteOffset": 0,
+        "line": 1
+      },
+      "isAsync": true,
+      "effects": [
+        {
+          "origin": "failure",
+          "channel": "rejection",
+          "via": [
+            "b",
+            "a"
+          ]
+        }
+      ],
+      "hasUnknown": true
+    },
+    {
+      "id": "isolated",
+      "name": "isolated",
+      "location": {
+        "file": "graph.ts",
+        "byteOffset": 0,
+        "line": 1
+      },
+      "isAsync": false,
+      "effects": [],
+      "hasUnknown": false
+    }
+  ],
+  "edges": [
+    {
+      "caller": "a",
+      "callee": "b",
+      "location": {
+        "file": "graph.ts",
+        "byteOffset": 0,
+        "line": 1
+      },
+      "awaited": false,
+      "returned": true,
+      "catches": false,
+      "mayRethrow": false
+    },
+    {
+      "caller": "b",
+      "callee": "a",
+      "location": {
+        "file": "graph.ts",
+        "byteOffset": 0,
+        "line": 1
+      },
+      "awaited": true,
+      "returned": false,
+      "catches": false,
+      "mayRethrow": false
+    },
+    {
+      "caller": "a",
+      "callee": "a",
+      "location": {
+        "file": "graph.ts",
+        "byteOffset": 0,
+        "line": 1
+      },
+      "awaited": false,
+      "returned": false,
+      "catches": false,
+      "mayRethrow": false
+    }
+  ],
+  "unknowns": [
+    {
+      "function": "b",
+      "location": {
+        "file": "graph.ts",
+        "byteOffset": 0,
+        "line": 1
+      },
+      "expression": "callback()",
+      "reason": "unresolved_call"
+    }
+  ],
+  "assumptions": [
+    "May-propagate analysis, not a proof of runtime reachability or exhaustiveness.",
+    "Dependencies in node_modules and declaration-only implementations are not traversed.",
+    "Implicit exceptions, getters/proxies, eval and arbitrary callback execution are not modeled.",
+    "Return error properties and finite discriminants are candidates; their domain meaning requires review.",
+    "Conditional catches/rethrows and finally overrides are conservatively approximated.",
+    "Static calls assume function declarations and built-in globals are not reassigned or monkey-patched; mutable aliases and callbacks are unresolved."
+  ],
+  "diagnostics": []
+}

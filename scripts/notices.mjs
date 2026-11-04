@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 const rustc = spawnSync("rustc", ["-vV"], { encoding: "utf8" });
 const target = rustc.stdout?.match(/^host: (.+)$/m)?.[1];
 if (!target) throw new Error("Cannot determine Rust build target");
@@ -55,3 +56,4 @@ for (const pkg of metadata.packages
     process.stdout.write(readFileSync(file, "utf8") + "\n");
   }
 }
+process.stdout.write("\n"+readFileSync(fileURLToPath(new URL("../packages/mutation-driver/THIRD_PARTY_NOTICES.txt",import.meta.url)),"utf8"));

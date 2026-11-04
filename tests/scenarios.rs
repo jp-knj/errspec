@@ -79,7 +79,10 @@ fn check_runner(config: Value, runner_names: &[&str], values: Vec<Value>) -> Rep
 fn multiple_scenarios_share_a_tag_but_ids_are_unique() {
     let cfg: Config = serde_json::from_value(config()).unwrap();
     let cfg = ValidatedConfig::try_from(cfg).unwrap();
-    let report = support::register(&cfg, &["A", "B"]).finish("check");
+    let data = support::register(&cfg, &["A", "B"]);
+    insta::assert_debug_snapshot!("scenario_registrations", data.registrations);
+    let report = data.finish("check");
+    insta::assert_json_snapshot!("registered_and_missing_scenarios", report);
     let result = &report.contracts[0];
     let gaps = &report.diagnostics;
     assert_eq!(result.cases.len(), 3);
@@ -122,14 +125,17 @@ fn version_two_cannot_omit_observation_requirements_or_use_old_names() {
 
 #[test]
 fn passing_test_requires_actual_complete_observations() {
+    let mut reports = Vec::new();
     let report = check(vec![record()]);
     assert!(report.diagnostics.is_empty());
     assert_eq!(
         report.contracts[0].cases[0].observation_status,
         ObservationStatus::Passed
     );
+    reports.push(json!({"case": "complete", "report": report}));
     let report = check(vec![]);
     assert_eq!(report.diagnostics[0].code, "EC008");
+    reports.push(json!({"case": "missing", "report": report}));
     for (field, value, code) in [
         ("faults", json!([]), "EC009"),
         (
@@ -175,7 +181,9 @@ fn passing_test_requires_actual_complete_observations() {
             report.contracts[0].cases[0].observation_status,
             ObservationStatus::Passed
         );
+        reports.push(json!({"field": field, "value": value, "report": report}));
     }
+    insta::assert_json_snapshot!("scenario_observation_judgments", reports);
 }
 
 #[test]
@@ -233,6 +241,81 @@ fn a_description_after_the_stable_name_matches_only_its_own_scenario() {
     }
 }
 
+fn passes(report: &Report) -> bool {
+    report.diagnostics.is_empty()
+        && report.contracts[0].cases[0].observation_status == ObservationStatus::Passed
+}
+
+fn has(report: &Report, code: &str, message: &str) -> bool {
+    report
+        .diagnostics
+        .iter()
+        .any(|f| f.code == code && f.message.contains(message))
+}
+
+#[test]
+fn describe_titles_before_the_stable_name_match_the_scenario() {
+    let base = scenario_test_name("checkout", "first");
+    let described = format!("{base} [異常系] 書き込まない");
+    let mut plain = record();
+    plain["testName"] = json!(base);
+    let mut with_description = record();
+    with_description["testName"] = json!(described);
+    for (runner_name, observed) in [
+        (format!("submit {base}"), &plain),
+        (format!("outer inner group {base}"), &plain),
+        (format!("submitFormEbook {described}"), &with_description),
+        (format!("日本語 の グループ {described}"), &with_description),
+        // A describe title may itself contain brackets and quotes.
+        (format!("[\"x\"] {base}"), &plain),
+    ] {
+        let report = check_names(&[&runner_name], vec![observed.clone()]);
+        assert!(passes(&report), "{runner_name}: {report:?}");
+    }
+}
+
+#[test]
+fn the_observation_names_the_sdk_part_without_describe_titles() {
+    let base = scenario_test_name("checkout", "first");
+    let runner_name = format!("group {base}");
+    // The SDK cannot know describe titles, so recording them would be a mismatch.
+    let mut prefixed = record();
+    prefixed["testName"] = json!(runner_name);
+    let report = check_names(&[&runner_name], vec![prefixed]);
+    assert!(has(&report, "EC011", "test name"), "{report:?}");
+    // A description in the runner name must also appear in the observation.
+    let report = check_names(&[&format!("group {base} 説明")], vec![record()]);
+    assert!(has(&report, "EC011", "test name"), "{report:?}");
+}
+
+#[test]
+fn the_stable_name_must_be_a_whole_space_delimited_part() {
+    let base = scenario_test_name("checkout", "first");
+    for runner_name in [
+        format!("group{base}"),
+        format!("group {base}x"),
+        format!("group\u{3000}{base}"),
+        format!("group {}", scenario_test_name("checkout", "first-retry")),
+        format!("group {}", scenario_test_name("checkout-v2", "first")),
+    ] {
+        let report = check_names(&[&runner_name], vec![record()]);
+        assert!(
+            has(&report, "EC005", "not_found"),
+            "{runner_name}: {report:?}"
+        );
+    }
+}
+
+#[test]
+fn the_same_scenario_in_two_describes_is_ambiguous() {
+    let base = scenario_test_name("checkout", "first");
+    let (a, b) = (format!("a {base}"), format!("b {base}"));
+    let report = check_names(&[&a, &b], vec![record()]);
+    assert!(has(&report, "EC005", "ambiguous"), "{report:?}");
+    let report = check_names(&[&base, &a], vec![record()]);
+    assert!(has(&report, "EC005", "ambiguous"), "{report:?}");
+}
+
 #[test]
 fn wrong_identity_extra_ids_and_repeated_execution_are_rejected() {
     for (field, value) in [
@@ -259,6 +342,7 @@ fn wrong_identity_extra_ids_and_repeated_execution_are_rejected() {
         report.contracts[0].cases[0].observation_status,
         ObservationStatus::Invalid
     );
+    insta::assert_json_snapshot!("duplicate_scenario_execution", report);
 }
 
 #[test]
@@ -316,4 +400,8 @@ fn baseline_tracks_scenario_removal_and_requirement_changes_with_unchanged_tags(
     assert!(delta.added.is_empty() && delta.removed.is_empty());
     assert_eq!(delta.removed_scenarios["checkout"], ["retry"]);
     assert_eq!(delta.changed_scenarios["checkout"], ["first"]);
+    insta::assert_json_snapshot!(
+        "scenario_history_delta",
+        json!({"before": before, "after": after, "delta": delta})
+    );
 }

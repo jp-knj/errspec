@@ -1,0 +1,341 @@
+---
+source: tests/discovery.rs
+expression: r
+---
+{
+  "allRuntimeErrorsKnown": false,
+  "assumptions": [
+    "May-propagate analysis, not a proof of runtime reachability or exhaustiveness.",
+    "Dependencies in node_modules and declaration-only implementations are not traversed.",
+    "Implicit exceptions, getters/proxies, eval and arbitrary callback execution are not modeled.",
+    "Return error properties and finite discriminants are candidates; their domain meaning requires review.",
+    "Conditional catches/rethrows and finally overrides are conservatively approximated.",
+    "Static calls assume function declarations and built-in globals are not reassigned or monkey-patched; mutable aliases and callbacks are unresolved."
+  ],
+  "candidates": [
+    {
+      "flows": [],
+      "reexports": [
+        {
+          "export": "PublicFailure",
+          "file": "barrel.ts"
+        }
+      ],
+      "source": {
+        "discriminant": "_tag",
+        "export": "Failure",
+        "file": "leaf.ts"
+      },
+      "tags": [
+        "Denied",
+        "Offline"
+      ]
+    }
+  ],
+  "diagnostics": [],
+  "edges": [
+    {
+      "awaited": false,
+      "callee": "api.ts:166:FunctionDeclaration",
+      "caller": "api.ts:100:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 144,
+        "file": "api.ts",
+        "line": 3
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "api.ts:59:FunctionDeclaration",
+      "caller": "api.ts:100:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 157,
+        "file": "api.ts",
+        "line": 3
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "api.ts:100:FunctionDeclaration",
+      "caller": "api.ts:166:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 202,
+        "file": "api.ts",
+        "line": 4
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "api.ts:59:FunctionDeclaration",
+      "caller": "api.ts:210:FunctionDeclaration",
+      "catches": true,
+      "location": {
+        "byteOffset": 249,
+        "file": "api.ts",
+        "line": 5
+      },
+      "mayRethrow": false,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "api.ts:59:FunctionDeclaration",
+      "caller": "api.ts:269:FunctionDeclaration",
+      "catches": true,
+      "location": {
+        "byteOffset": 309,
+        "file": "api.ts",
+        "line": 6
+      },
+      "mayRethrow": true,
+      "returned": false
+    },
+    {
+      "awaited": false,
+      "callee": "leaf.ts:64:FunctionDeclaration",
+      "caller": "api.ts:59:FunctionDeclaration",
+      "catches": false,
+      "location": {
+        "byteOffset": 89,
+        "file": "api.ts",
+        "line": 2
+      },
+      "mayRethrow": false,
+      "returned": false
+    }
+  ],
+  "files": [
+    "api.ts",
+    "barrel.ts",
+    "leaf.ts"
+  ],
+  "functions": [
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "leaf.ts:0:SourceFile",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 0,
+        "file": "leaf.ts",
+        "line": 1
+      },
+      "name": "<module>"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "leaf.ts:96:ThrowStatement:Throw",
+          "via": [
+            "leaf.ts:64:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "leaf.ts:64:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 64,
+        "file": "leaf.ts",
+        "line": 1
+      },
+      "name": "leaf"
+    },
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "barrel.ts:0:SourceFile",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 0,
+        "file": "barrel.ts",
+        "line": 1
+      },
+      "name": "<module>"
+    },
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "api.ts:0:SourceFile",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 0,
+        "file": "api.ts",
+        "line": 1
+      },
+      "name": "<module>"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "leaf.ts:96:ThrowStatement:Throw",
+          "via": [
+            "api.ts:59:FunctionDeclaration",
+            "leaf.ts:64:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "api.ts:59:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 59,
+        "file": "api.ts",
+        "line": 2
+      },
+      "name": "api"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "leaf.ts:96:ThrowStatement:Throw",
+          "via": [
+            "api.ts:100:FunctionDeclaration",
+            "api.ts:59:FunctionDeclaration",
+            "leaf.ts:64:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "api.ts:100:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 100,
+        "file": "api.ts",
+        "line": 3
+      },
+      "name": "a"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "leaf.ts:96:ThrowStatement:Throw",
+          "via": [
+            "api.ts:166:FunctionDeclaration",
+            "api.ts:100:FunctionDeclaration",
+            "api.ts:59:FunctionDeclaration",
+            "leaf.ts:64:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "api.ts:166:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 166,
+        "file": "api.ts",
+        "line": 4
+      },
+      "name": "b"
+    },
+    {
+      "effects": [],
+      "hasUnknown": false,
+      "id": "api.ts:210:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 210,
+        "file": "api.ts",
+        "line": 5
+      },
+      "name": "caught"
+    },
+    {
+      "effects": [
+        {
+          "channel": "throw",
+          "origin": "api.ts:329:ThrowStatement:Throw",
+          "via": [
+            "api.ts:269:FunctionDeclaration"
+          ]
+        },
+        {
+          "channel": "throw",
+          "origin": "leaf.ts:96:ThrowStatement:Throw",
+          "via": [
+            "api.ts:269:FunctionDeclaration",
+            "api.ts:59:FunctionDeclaration",
+            "leaf.ts:64:FunctionDeclaration"
+          ]
+        }
+      ],
+      "hasUnknown": false,
+      "id": "api.ts:269:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 269,
+        "file": "api.ts",
+        "line": 6
+      },
+      "name": "rethrow"
+    },
+    {
+      "effects": [],
+      "hasUnknown": true,
+      "id": "api.ts:342:FunctionDeclaration",
+      "isAsync": false,
+      "location": {
+        "byteOffset": 342,
+        "file": "api.ts",
+        "line": 7
+      },
+      "name": "shadow"
+    }
+  ],
+  "kind": "errspec/scan",
+  "origins": [
+    {
+      "caught": false,
+      "channel": "throw",
+      "errorType": "unknown",
+      "escapes": true,
+      "function": "api.ts:269:FunctionDeclaration",
+      "id": "api.ts:329:ThrowStatement:Throw",
+      "location": {
+        "byteOffset": 329,
+        "file": "api.ts",
+        "line": 6
+      }
+    },
+    {
+      "caught": false,
+      "channel": "throw",
+      "errorType": "Error",
+      "escapes": true,
+      "function": "leaf.ts:64:FunctionDeclaration",
+      "id": "leaf.ts:96:ThrowStatement:Throw",
+      "location": {
+        "byteOffset": 96,
+        "file": "leaf.ts",
+        "line": 1
+      }
+    }
+  ],
+  "scanComplete": true,
+  "schemaVersion": 1,
+  "unknowns": [
+    {
+      "expression": "renamed()",
+      "function": "api.ts:342:FunctionDeclaration",
+      "location": {
+        "byteOffset": 394,
+        "file": "api.ts",
+        "line": 7
+      },
+      "reason": "implementation_outside_scan_or_dynamic_signature"
+    }
+  ]
+}

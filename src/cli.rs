@@ -1,5 +1,8 @@
 //! Command-line syntax and its conversion to internal requests.
-use crate::request::{ContractAction, ContractRequest, InitRequest, Request, Runner, ScanRequest};
+use crate::request::{
+    ContractAction, ContractRequest, CoverageRequest, InitRequest, MutationRequest, Request,
+    Runner, ScanRequest,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
@@ -26,6 +29,8 @@ pub(crate) struct Cli {
 pub(crate) enum Format {
     Json,
     Text,
+    /// GitHub-flavored Markdown; coverage only.
+    Markdown,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -36,6 +41,29 @@ enum CliRunner {
 
 #[derive(Subcommand)]
 enum Action {
+    /// Generate mutations, run Vitest, and report detected and undetected changes.
+    Mutate {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        include: Vec<String>,
+        #[arg(long)]
+        exclude: Vec<String>,
+        #[arg(long)]
+        exclude_mutator: Vec<String>,
+        #[arg(long)]
+        vitest_config: Option<PathBuf>,
+        #[arg(long)]
+        vitest_project: Option<String>,
+        #[arg(long)]
+        vitest_package: Option<PathBuf>,
+        #[arg(long, default_value = "node")]
+        node: PathBuf,
+        #[arg(long)]
+        fail_on_undetected: bool,
+    },
+    #[command(name = "__mutation-source", hide = true)]
+    MutationSource,
     /// Generate configuration and intentionally failing tests for one exported type.
     Init {
         #[arg(long, default_value = "tsconfig.json")]
@@ -61,6 +89,28 @@ enum Action {
         discriminant: Vec<String>,
         #[arg(long)]
         fail_on_unknown: bool,
+    },
+    /// Run existing Vitest tests and report which scanned error tags they assert.
+    Coverage {
+        #[arg(long, default_value = "tsconfig.json")]
+        project: PathBuf,
+        #[arg(long, value_delimiter = ',', default_value = "_tag,kind,type,code")]
+        discriminant: Vec<String>,
+        /// Vitest executable; defaults to the nearest node_modules/.bin/vitest.
+        #[arg(long)]
+        vitest: Option<PathBuf>,
+        /// Vitest config; defaults to the nearest vitest.config.* or vite.config.*.
+        #[arg(long)]
+        vitest_config: Option<PathBuf>,
+        /// Exit 1 when a tag is neither asserted nor mentioned by any test.
+        #[arg(long)]
+        fail_on_missing: bool,
+        /// Write the current per-tag statuses for --baseline. Refuses to overwrite.
+        #[arg(long, conflicts_with = "baseline")]
+        save_baseline: Option<PathBuf>,
+        /// Extra arguments for `vitest run`, after `--` (e.g. `-- --project backend`).
+        #[arg(last = true)]
+        runner_args: Vec<String>,
     },
     /// Resolve error tags and check registrations. Does not execute tests.
     Check,
@@ -96,8 +146,43 @@ impl From<CliRunner> for Runner {
 
 impl Cli {
     /// Translate CLI syntax once. Execution code never receives clap argument types.
-    pub(crate) fn into_request(self) -> Result<(Request, Format), String> {
+    pub(crate) fn into_request(self, explicit_config: bool) -> Result<(Request, Format), String> {
+        if matches!(self.format, Format::Markdown)
+            && !matches!(self.command, Action::Coverage { .. })
+        {
+            return Err("--format markdown is supported only by coverage".into());
+        }
         let command = match self.command {
+            Action::MutationSource => return Ok((Request::MutationSource, self.format)),
+            Action::Mutate {
+                root,
+                include,
+                exclude,
+                exclude_mutator,
+                vitest_config,
+                vitest_project,
+                vitest_package,
+                node,
+                fail_on_undetected,
+            } => {
+                if explicit_config || self.baseline.is_some() || self.strict_baseline {
+                    return Err("mutate does not accept --config or baseline options".into());
+                }
+                return Ok((
+                    Request::Mutation(MutationRequest {
+                        root,
+                        include,
+                        exclude,
+                        exclude_mutator,
+                        vitest_config,
+                        vitest_project,
+                        vitest_package,
+                        node,
+                        fail_on_undetected,
+                    }),
+                    self.format,
+                ));
+            }
             Action::Init {
                 project,
                 source,
@@ -137,6 +222,32 @@ impl Cli {
                         project,
                         discriminants: discriminant,
                         fail_on_unknown,
+                    }),
+                    self.format,
+                ));
+            }
+            Action::Coverage {
+                project,
+                discriminant,
+                vitest,
+                vitest_config,
+                fail_on_missing,
+                save_baseline,
+                runner_args,
+            } => {
+                if self.strict_baseline {
+                    return Err("coverage does not accept --strict-baseline".into());
+                }
+                return Ok((
+                    Request::Coverage(CoverageRequest {
+                        project,
+                        discriminants: discriminant,
+                        vitest,
+                        vitest_config,
+                        fail_on_missing,
+                        runner_args,
+                        baseline: self.baseline,
+                        save_baseline,
                     }),
                     self.format,
                 ));

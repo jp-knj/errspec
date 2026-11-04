@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "project": "tsconfig.json",
+  "contracts": [
+    {
+      "id": "signup",
+      "source": { "file": "src/submit.ts", "export": "SubmitResult", "discriminant": "status" },
+      "entry": { "file": "src/submit.ts", "export": "submit" },
+      "cases": [
+        { "id": "invalid-email", "tag": "invalid", "expect": "Reject an address without @ before verification", "test": { "file": "tests/submit.test.ts" }, "observe": { "faults": [], "assertions": ["result"] } },
+        { "id": "verification-down", "tag": "blocked", "expect": "Block when human verification fails", "test": { "file": "tests/submit.test.ts" }, "observe": { "faults": ["verification"], "assertions": ["result"] } },
+        { "id": "bot", "tag": "blocked", "expect": "Block a visitor judged to be a bot", "test": { "file": "tests/submit.test.ts" }, "observe": { "faults": ["verification"], "assertions": ["result"] } },
+        { "id": "sent", "tag": "sent", "expect": "Send for a verified human", "test": { "file": "tests/submit.test.ts" }, "observe": { "faults": ["verification"], "assertions": ["result"] } }
+      ]
+    }
+  ]
+}

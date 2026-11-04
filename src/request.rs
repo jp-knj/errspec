@@ -5,6 +5,23 @@ pub(crate) enum Request {
     Contract(ContractRequest),
     Scan(ScanRequest),
     Init(InitRequest),
+    Coverage(CoverageRequest),
+    Mutation(MutationRequest),
+    MutationSource,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MutationRequest {
+    pub root: PathBuf,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+    pub exclude_mutator: Vec<String>,
+    pub vitest_config: Option<PathBuf>,
+    pub vitest_project: Option<String>,
+    pub vitest_package: Option<PathBuf>,
+    pub node: PathBuf,
+    pub fail_on_undetected: bool,
 }
 
 pub(crate) struct ContractRequest {
@@ -49,6 +66,17 @@ pub(crate) struct ScanRequest {
     pub project: PathBuf,
     pub discriminants: Vec<String>,
     pub fail_on_unknown: bool,
+}
+
+pub(crate) struct CoverageRequest {
+    pub project: PathBuf,
+    pub discriminants: Vec<String>,
+    pub vitest: Option<PathBuf>,
+    pub vitest_config: Option<PathBuf>,
+    pub fail_on_missing: bool,
+    pub runner_args: Vec<String>,
+    pub baseline: Option<PathBuf>,
+    pub save_baseline: Option<PathBuf>,
 }
 
 pub(crate) struct InitRequest {

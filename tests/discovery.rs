@@ -1,6 +1,8 @@
 use serde_json::Value;
 use std::{fs, process::Command};
 use tempfile::TempDir;
+#[path = "support/snapshots.rs"]
+mod snapshots;
 
 fn project(files: &[(&str, &str)]) -> TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -60,13 +62,15 @@ export function shadow(renamed: () => void): void { renamed(); }
     ]);
     let (status, r) = scan(&dir, &[]);
     assert_eq!(status, 0, "{r}");
-    assert!(
-        r["candidates"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| c["source"]["export"] == "PublicFailure"
-                && c["tags"] == serde_json::json!(["Denied", "Offline"]))
+    assert_eq!(
+        r["candidates"],
+        serde_json::json!([{
+            "source": {"file": "leaf.ts", "export": "Failure", "discriminant": "_tag"},
+            "tags": ["Denied", "Offline"],
+            "reexports": [{"file": "barrel.ts", "export": "PublicFailure"}],
+            "flows": []
+        }]),
+        "{r}"
     );
     for name in ["api", "a", "b", "rethrow"] {
         assert!(
@@ -89,6 +93,7 @@ export function shadow(renamed: () => void): void { renamed(); }
     assert_eq!(function(&r, "shadow")["hasUnknown"], true);
     assert_eq!(r["allRuntimeErrorsKnown"], false);
     assert_eq!(scan(&dir, &["--fail-on-unknown"]).0, 1);
+    insta::assert_json_snapshot!("imported_aliases_recursion_and_catches", r);
 }
 
 #[test]
@@ -141,6 +146,7 @@ export async function bounce(): Promise<void> { await recursive(); }
             );
         }
     }
+    insta::assert_json_snapshot!("rejection_boundaries", r);
 }
 
 #[test]
@@ -181,6 +187,28 @@ export function caller() { overload(''); }
             .len(),
         1
     );
+    insta::assert_json_snapshot!("result_errors_and_overloads", r);
+}
+
+#[test]
+fn unknown_expressions_keep_only_the_start_of_long_calls() {
+    let body: String = (0..50).map(|i| format!("  const v{i} = {i};\n")).collect();
+    let dir = project(&[(
+        "callbacks.ts",
+        &format!(
+            "export function run(f: (g: () => void) => void) {{\n  f(() => {{\n{body}  }});\n  f(() => {{}});\n}}\n"
+        ),
+    )]);
+    let (status, r) = scan(&dir, &[]);
+    assert_eq!(status, 0, "{r}");
+    let expressions: Vec<&str> = r["unknowns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|u| u["expression"].as_str().unwrap())
+        .collect();
+    assert!(expressions.contains(&"f(() => {…"), "{expressions:?}");
+    assert!(expressions.contains(&"f(() => {})"), "{expressions:?}");
 }
 
 #[test]
@@ -228,6 +256,7 @@ export async function mutablePromise() { let p = nativeAlias(); try { await p; }
             "{name}: {r}"
         );
     }
+    insta::assert_json_snapshot!("unresolved_runtime_bindings", r);
 }
 
 #[test]
@@ -237,4 +266,132 @@ fn invalid_types_fail_without_claiming_a_complete_scan() {
     assert_eq!(status, 2);
     assert_eq!(r["scanComplete"], false);
     assert!(!r["diagnostics"].as_array().unwrap().is_empty());
+    insta::assert_json_snapshot!("compiler_diagnostics", snapshots::project(&r, dir.path()));
+}
+
+#[test]
+fn reexported_declarations_are_one_candidate_and_distinct_declarations_stay_apart() {
+    let dir = project(&[
+        (
+            "errors.ts",
+            "type Hidden = { kind: 'Lost' }; export { Hidden as Renamed }; export type Failure = { kind: 'Offline' } | { kind: 'Denied' };",
+        ),
+        (
+            "index.ts",
+            "export type { Failure, Renamed } from './errors'; export type { Failure as Alias } from './errors';",
+        ),
+        (
+            "other.ts",
+            "export type Failure = { kind: 'Offline' } | { kind: 'Denied' };",
+        ),
+    ]);
+    let (status, r) = scan(&dir, &["--discriminant", "kind"]);
+    assert_eq!(status, 0, "{r}");
+    let summary: Vec<_> = r["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                format!(
+                    "{}#{}",
+                    c["source"]["file"].as_str().unwrap(),
+                    c["source"]["export"].as_str().unwrap()
+                ),
+                c["reexports"].as_array().map(|a| a.len()).unwrap_or(0),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("errors.ts#Failure".to_owned(), 2),
+            ("errors.ts#Renamed".to_owned(), 1),
+            ("other.ts#Failure".to_owned(), 0),
+        ],
+        "{r}"
+    );
+}
+
+#[test]
+fn candidates_built_only_from_dependency_declarations_are_external() {
+    let dir = project(&[(
+        "errors.ts",
+        "import type { SdkIssue } from 'sdk';
+export type Issue = Omit<SdkIssue, 'at'>;
+export type Passed = SdkIssue;
+export type Mixed = SdkIssue | { code: 'local' };
+export type Local = { code: 'local' } | { code: 'other' };",
+    )]);
+    let sdk = dir.path().join("node_modules/sdk");
+    fs::create_dir_all(&sdk).unwrap();
+    fs::write(
+        sdk.join("package.json"),
+        r#"{"name":"sdk","types":"index.d.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        sdk.join("index.d.ts"),
+        "export type SdkIssue = { code: 'unknown_page'; at: number } | { code: 'invalid_url'; at: number };",
+    )
+    .unwrap();
+    let (status, r) = scan(&dir, &["--discriminant", "code"]);
+    assert_eq!(status, 0, "{r}");
+    let external: Vec<_> = r["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["source"]["file"] == "errors.ts")
+        .map(|c| {
+            (
+                c["source"]["export"].as_str().unwrap(),
+                c.get("external").is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        external,
+        [
+            ("Issue", true),
+            ("Local", false),
+            ("Mixed", false),
+            ("Passed", true)
+        ],
+        "{r}"
+    );
+}
+
+#[test]
+fn candidates_record_the_channels_through_which_they_flow_as_errors() {
+    let dir = project(&[(
+        "errors.ts",
+        "export interface Offline { kind: 'offline' }
+export type Failure = Offline | { kind: 'denied' };
+export type Thrown = { kind: 'boom' };
+export type Rejected = { kind: 'late' };
+export type Shape = { kind: 'circle' } | { kind: 'square' };
+export function load(): { ok: true; value: number } | { ok: false; error: Failure } { return { ok: true, value: 1 }; }
+export function fail(e: Thrown): never { throw e; }
+export function later(e: Rejected): Promise<void> { return Promise.reject(e); }
+export function area(s: Shape): number { return s.kind === 'circle' ? 1 : 2; }",
+    )]);
+    let (status, r) = scan(&dir, &["--discriminant", "kind"]);
+    assert_eq!(status, 0, "{r}");
+    let flows: Vec<_> = r["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["source"]["export"].as_str().unwrap(), c["flows"].clone()))
+        .collect();
+    assert_eq!(
+        flows,
+        [
+            ("Failure", serde_json::json!(["result"])),
+            ("Offline", serde_json::json!(["result"])),
+            ("Rejected", serde_json::json!(["rejection"])),
+            ("Shape", serde_json::json!([])),
+            ("Thrown", serde_json::json!(["throw"])),
+        ],
+        "{r}"
+    );
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -139,6 +139,16 @@ scenarioTest(test, import.meta.url, {contract:'Failure',id:'case-1',tag:'Offline
     ),
   );
   assert.equal(all.ok, false);
+  const extraChecks=[];
+  if(process.env.ERRSPEC_VITEST_PACKAGE) {
+    mkdirSync(join(dir,"src"));
+    writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}");
+    writeFileSync(join(dir,"mutation.test.ts"),'import {test,expect} from "vitest";import {add} from "./src/mutation";test("adds",()=>expect(add(2,3)).toBe(5));');
+    writeFileSync(join(dir,"vitest.config.mjs"),'export default {test:{include:["mutation.test.ts"]}};');
+    const mutation=JSON.parse(run(process.execPath,[launcher,"mutate","--node",process.execPath,"--vitest-package",resolve(process.env.ERRSPEC_VITEST_PACKAGE),"--fail-on-undetected","--format","json"]));
+    assert.equal(mutation.runComplete,true);assert.equal(mutation.summary.killed,2);
+    extraChecks.push("embedded-mutation-driver");
+  }
   console.log(
     JSON.stringify({
       target: manifest.target,
@@ -152,6 +162,7 @@ scenarioTest(test, import.meta.url, {contract:'Failure',id:'case-1',tag:'Offline
         "completed-passes",
         "selected-files",
         "full-suite-fails",
+        ...extraChecks,
       ],
     }),
   );

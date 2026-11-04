@@ -1,0 +1,90 @@
+---
+source: tests/coverage.rs
+expression: results
+---
+[
+  {
+    "summary": {
+      "asserted": 1,
+      "mentioned": 0,
+      "missing": 1,
+      "tags": 2,
+      "types": 2
+    },
+    "types": [
+      {
+        "flows": [],
+        "source": {
+          "discriminant": "code",
+          "export": "CodeFailure",
+          "file": "code.ts"
+        },
+        "tags": [
+          {
+            "status": "asserted",
+            "tag": "Shared",
+            "tests": [
+              "a.test.ts > t"
+            ]
+          }
+        ]
+      },
+      {
+        "flows": [],
+        "source": {
+          "discriminant": "kind",
+          "export": "KindFailure",
+          "file": "kind.ts"
+        },
+        "tags": [
+          {
+            "status": "missing",
+            "tag": "Shared"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "summary": {
+      "asserted": 1,
+      "mentioned": 0,
+      "missing": 1,
+      "tags": 2,
+      "types": 2
+    },
+    "types": [
+      {
+        "flows": [],
+        "source": {
+          "discriminant": "kind",
+          "export": "KindFailure",
+          "file": "kind.ts"
+        },
+        "tags": [
+          {
+            "status": "missing",
+            "tag": "Shared"
+          }
+        ]
+      },
+      {
+        "flows": [],
+        "source": {
+          "discriminant": "code",
+          "export": "CodeFailure",
+          "file": "code.ts"
+        },
+        "tags": [
+          {
+            "status": "asserted",
+            "tag": "Shared",
+            "tests": [
+              "a.test.ts > t"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
