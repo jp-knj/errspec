@@ -148,6 +148,27 @@ pub fn validate(metadata: &Metadata, source: &str, candidates: &[Candidate]) -> 
     if linked.len() != metadata.nodes.len().saturating_sub(1) {
         return Err("Incomplete syntax node graph".into());
     }
+    let call_ranges = metadata
+        .nodes
+        .iter()
+        .filter(|node| matches!(node.kind.as_str(), "CallExpression" | "NewExpression"))
+        .map(|node| (node.start, node.end))
+        .collect::<BTreeSet<_>>();
+    let mut seen_calls = BTreeSet::new();
+    for call in &metadata.calls {
+        let scope = metadata
+            .scopes
+            .get(&call.scope)
+            .ok_or("Unknown call owner")?;
+        if !seen_calls.insert((call.start, call.end))
+            || !call_ranges.contains(&(call.start, call.end))
+            || call.start < scope.start
+            || call.end > scope.end
+            || call.callee.as_ref().is_some_and(|callee| callee.is_empty())
+        {
+            return Err("Invalid acquired call site".into());
+        }
+    }
     for (owner, scope) in &metadata.scopes {
         if let Some(key) = &scope.entry_key {
             let candidate = candidates

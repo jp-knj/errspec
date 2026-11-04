@@ -241,6 +241,27 @@ deleted killing checks trigger fresh verification, including after relocation.
 Inputs such as a different CI run ID remain bound and may prevent reuse; storing
 the cache alone does not establish that two environments are interchangeable.
 
+## Experimental static-call reuse
+
+`--cache --cache-scope --experimental-callgraph` / `experimentalCallgraph: true`
+can additionally reuse old survivors when neither the old nor current source-call
+graph connects their function to a changed function in either direction. The
+setting requires both cache modes, defaults off, and has an explicit
+`--no-experimental-callgraph` override. Switching it off invalidates its evidence.
+
+This is an approximation: values can flow between otherwise disconnected calls
+through callers, tests or shared state. An old survivor can therefore remain a
+survivor even when a fresh run would kill it. Old detections are always
+revalidated when ordinary scope evidence requires it. A warning,
+`cache.experimentalCallgraph` and `cache.callgraphReused` expose the mode and its
+extra reused outcomes.
+
+Calls use acquired lexical owners, named/namespace/default import bindings,
+actual Vite import resolution and method receivers. Unknown or ambiguous calls,
+parameter shadowing, missing entry evidence and incompatible graphs keep fresh
+verification. Callers sharing a callee alone are not connected by a directed path.
+Coverage still refreshes fully after edits; this option only prunes result trials.
+
 ## Sharded execution
 
 `--shard 1/4` selects one deterministic partition of the requested candidates.

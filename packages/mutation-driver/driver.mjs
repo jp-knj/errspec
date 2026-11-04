@@ -22,6 +22,7 @@ let current;
 let infrastructureFailure;
 let warmContext, reuseMode="fresh_lifecycle_unknown";
 let configurationHash=null;
+const pendingGenerated = new Map();
 const normalize = s => s.replaceAll("\\", "/");
 const rel = file => normalize(relative(root,file));
 const hash = data => createHash("sha256").update(data).digest("hex");
@@ -249,6 +250,9 @@ async function execute(phase,request) {
     if(phase!=="inspect")await ctx.runTestSpecifications(planned,true);
     if(state.failure)throw state.failure;
     if(infrastructureFailure)throw infrastructureFailure;
+    if(phase==="plain"&&options.experimentalCallgraph&&!execution.failedModules.length&&!execution.errors.length
+       &&execution.tests.some(test=>test.started&&test.status==="passed")&&!execution.tests.some(test=>test.status==="failed"))
+      await acquireStaticImports(project);
     // Include local Vite dependencies, not just mutation targets.
     for(const project of ctx.projects)for(const environment of Object.values(project.vite.environments))
       for(const module of environment.moduleGraph?.idToModuleMap?.values()||[]) {
@@ -275,6 +279,28 @@ function send(request,type,payload={}) {
 function cacheFacts(){
   return {version:1,inputs:[...fingerprints],runnerPackage:packageDir,runtime:{node:process.versions.node,platform:process.platform,arch:process.arch,executable:process.execPath,cwd:process.cwd(),execArgv:process.execArgv,configurationHash,envHash:hash(JSON.stringify(Object.entries(process.env).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([name,value])=>[name,options.cacheRelocation&&['PWD','INIT_CWD'].includes(name)?relocatedPath(value):value])))}};
 }
+// Plugin acquisition extends this helper; callers share the same final facts.
+async function generateSource(source,file,base) {
+  return base ?? native(source,file);
+}
+async function acquireStaticImports(project) {
+  const container=project.vite.environments?.__vitest__?.pluginContainer ?? project.vite.environments?.ssr?.pluginContainer;
+  for(const [file,entry] of inventory) {
+    const generated=await generateSource(entry.source,rel(file),native(entry.source,rel(file)));
+    pendingGenerated.set(file,generated);
+    for(const binding of generated.metadata?.imports||[]) {
+      binding.resolved=null;
+      try {
+        const resolved=await container?.resolveId(binding.source,file);
+        let target=resolved?.id?.split('?')[0];
+        if(target?.startsWith('/@fs/'))target=target.slice(4);
+        if(!target||!isAbsolute(target)||!existsSync(target))continue;
+        target=normalize(realpathSync(target));remember(target);
+        if(inventory.has(target))binding.resolved=rel(target);
+      } catch { /* Unknown resolution keeps callers opaque in the native graph. */ }
+    }
+  }
+}
 async function handle(request) {
   if(request.version!==PROTOCOL||typeof request.runId!=="string"||!Number.isSafeInteger(request.requestId))
     throw failure("EC_MUTATION_PROTOCOL","Invalid request envelope");
@@ -282,6 +308,7 @@ async function handle(request) {
   runId=request.runId;
   if(request.op==="open") {
     options=request.options;
+    pendingGenerated.clear();
     if(Number(process.versions.node.split(".")[0])<24)throw failure("EC_MUTATION_CONFIG","mutate requires Node 24 or newer");
     root=realpathSync(options.root);toolTemp=realpathSync(options.toolTemp||options.temp);packageDir=packagePath(options.vitestPackage);
     const pkg=JSON.parse(readFileSync(join(packageDir,"package.json"),"utf8"));
@@ -315,7 +342,8 @@ async function handle(request) {
       throw failure("EC_MUTATION_BASELINE","Unmodified baseline failed or executed no tests");
     let count=0;
     for(const [file,entry] of inventory) {
-      const generated=native(entry.source,rel(file));
+      const generated=pendingGenerated.get(file) ?? await generateSource(entry.source,rel(file));
+      pendingGenerated.delete(file);
       entry.candidates=generated.candidates;
       entry.critical=generated.critical||[];
       for(const c of entry.candidates)if(c.regex) {try{new RegExp(...c.regex);}catch{c.ignored="Regex replacement is invalid for the original flags";}}
