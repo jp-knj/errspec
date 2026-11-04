@@ -8,6 +8,7 @@ import { format } from "node:util";
 import { serialize } from "node:v8";
 import { instrument } from "./emitter.mjs";
 import { typecheckMutants } from "./typecheck.mjs";
+import { compilerInputs } from "./cache-inputs.mjs";
 
 const protocolWrite = process.stdout.write.bind(process.stdout);
 // Config evaluation happens in this process, before Vitest redirects test logs.
@@ -188,7 +189,7 @@ async function execute(phase,request) {
         if([...ctx.projects,...(rootProject?[rootProject]:[])].some(p=>p.config.globalSetup?.length))throw new Error("globalSetup may provide external inputs");
         const provided={...project.getProvidedContext()};delete provided.__errspecMutation;
         const sequence={...config.sequence};delete sequence.sequencer;if(!sequence.shuffle)delete sequence.seed;
-        configurationHash=hash(serialize({provided,env:config.env,include:config.include,exclude:config.exclude,
+        configurationHash=hash(serialize({compiler:compilerInputs(project.vite,config,relocatedPath),provided,env:config.env,include:config.include,exclude:config.exclude,
           testNamePattern:config.testNamePattern,testTimeout:timeouts.test,hookTimeout:timeouts.hook,
           retry:config.retry,bail:config.bail,sequence,setupFiles:config.setupFiles.filter(f=>f!==options.setup).map(relocatedPath),
           globalSetup:config.globalSetup,environment:config.environment,environmentOptions:config.environmentOptions,

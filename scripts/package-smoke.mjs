@@ -21,6 +21,7 @@ const files = manifest.packages.map((pkg) => {
 });
 const dir = mkdtempSync(join(tmpdir(), "errspec-consumer-"));
 let relocatedConsumer;
+let compilationControl;
 function run(command, args, expected = 0, environment={}, cwd=dir) {
   const result = spawnSync(command, args, {
     cwd,
@@ -214,6 +215,16 @@ if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equa
     assert.equal(arid.runComplete,true);assert.equal(arid.summary.ignored,2);assert.equal(arid.summary.killed,4);
     assert.ok(arid.mutants.filter(m=>m.status==='Ignored').every(m=>m.ignored==='arid: logging-only code'&&m.attempts.length===0));
     extraChecks.push("installed-arid-exclusions");
+    compilationControl=mkdtempSync(join(tmpdir(),"errspec-compile-control-"));
+    const defineValue=join(compilationControl,"value");writeFileSync(defineValue,"1");
+    writeFileSync(join(dir,"src/mutation.ts"),"export const cancel=(value:number)=>value-value;\n");
+    writeFileSync(join(dir,"mutation.test.ts"),'import {test,expect} from "vitest";import {cancel} from "./src/mutation";test("cancellation",()=>expect(cancel(__ERRSPEC_INPUT__)).toBe(0));');
+    writeFileSync(join(dir,"vitest.config.mjs"),`import {readFileSync} from 'node:fs';export default {define:{__ERRSPEC_INPUT__:readFileSync(${JSON.stringify(defineValue)},'utf8')},test:{include:['mutation.test.ts']}};`);
+    const compiledArgs=[launcher,"mutate","--cache","--node",process.execPath,"--vitest-package",resolve(process.env.ERRSPEC_VITEST_PACKAGE),"--format","json"];
+    const compiled=JSON.parse(run(process.execPath,compiledArgs));assert.equal(compiled.summary.killed,2);assert.equal(compiled.cache.saved,2);
+    writeFileSync(defineValue,"0");
+    const recompiled=JSON.parse(run(process.execPath,compiledArgs));assert.equal(recompiled.cache.reused,0);assert.equal(recompiled.cache.invalidated,true);assert.equal(recompiled.summary.survived,1);
+    extraChecks.push("installed-compilation-cache-invalidation");
     const installed=JSON.parse(run(process.execPath,["--input-type=module","-e","import {nativeBinary} from '@errspec/cli/native';console.log(JSON.stringify(nativeBinary()));"]));
     run(process.execPath,["--test",fileURLToPath(new URL("../tests/mutation-ownership.test.mjs",import.meta.url))],0,{ERRSPEC_BIN:installed});
     extraChecks.push("installed-native-ownership-and-orphan-recovery");
@@ -236,6 +247,7 @@ if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equa
     }),
   );
 } finally {
+  if(compilationControl)rmSync(compilationControl,{recursive:true,force:true});
   if(relocatedConsumer)rmSync(relocatedConsumer,{recursive:true,force:true});
   rmSync(dir, { recursive: true, force: true });
 }

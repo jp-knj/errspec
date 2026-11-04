@@ -140,6 +140,18 @@ selected test IDs. Dependency edges are bound even when packages are shared.
 Gates are recomputed from the current request. `mutant.reused` and `report.cache`
 distinguish cached outcomes from current trials.
 
+Compilation values are acquired from the resolved Vite root and execution
+environments as well as Vitest's runtime-injected defines. Dynamic `define`,
+resolution, compiler, environment and optimizer settings must still match when
+the configuration file itself is unchanged. Known filesystem locations use the
+optional relocation identity; define expressions and runtime values stay raw.
+
+Unknown or duplicate compilation plugins, opaque asset matchers, runtime define
+scripts and unserializable compiler options keep verification fresh. CSS disabled
+by Vitest uses its serialized test policy; CSS processing with callbacks also
+keeps fresh verification. The disabled-cache reason remains visible. Custom Vite
+transform/resolve/load closures need acquired inputs before they can reuse results.
+
 Probe observations use a separate `coverage-v1.json` document. Only after the
 current ordinary baseline passes, matching input fingerprints, candidate references
 and complete test registration/statuses allow reuse. `cache.coverageReused` marks
