@@ -33,14 +33,29 @@ export function instrument(source, candidates, file, runId) {
     parent.children.push(group); stack.push(group);
   }
   const runtime = `globalThis[Symbol.for(${JSON.stringify(`errspec.mutation.${runId}`)})]`;
+  function slice(group,start,end) {
+    let original = source.slice(start,end);
+    for(const child of [...group.children].reverse()) {
+      if(child.end<=start||child.start>=end)continue;
+      if(child.start<start||child.end>end)throw new Error(`Weak operands cross a mutation placement in ${file}`);
+      original=original.slice(0,child.start-start)+render(child)+original.slice(child.end-start);
+    }
+    return original;
+  }
   function render(group) {
-    let original = source.slice(group.start,group.end);
-    // Build inactive children first. Selecting the parent never evaluates them.
-    for (const child of [...group.children].reverse()) {
-      original = original.slice(0,child.start-group.start) + render(child)
-        + original.slice(child.end-group.start);
+    let original = slice(group,group.start,group.end);
+    const weak = group.candidates.filter(c=>c.weak);
+    if(weak.length) {
+      const layout=weak[0].weak;
+      const leftEnd=indices.get(layout.leftEnd),rightStart=indices.get(layout.rightStart);
+      if(leftEnd===undefined||rightStart===undefined||leftEnd<group.start||rightStart>group.end||leftEnd>rightStart
+        ||weak.some(c=>c.weak.leftEnd!==layout.leftEnd||c.weak.rightStart!==layout.rightStart||c.weak.operator!==layout.operator))throw new Error(`Invalid weak mutation range in ${file}`);
+      const changes=JSON.stringify(weak.map(c=>[c.key,c.weak.replacementOperator]));
+      const left=slice(group,group.start,leftEnd),right=slice(group,rightStart,group.end);
+      original=`(${runtime}?.binary?${runtime}.binary(${JSON.stringify(layout.operator)},${changes},(${left}),(${right})):(${original}))`;
     }
     for (const c of [...group.candidates].reverse()) {
+      if(c.weak)continue;
       const check = `${runtime}?.(${JSON.stringify(c.key)})`;
       if (c.placement === "emptyCondition") original = `(${check}?false:true)`;
       else if (c.placement === "expression") original = `(${check}?(${c.replacement}):(${original}))`;

@@ -1,6 +1,7 @@
 //! Mutation results and judgments. No compiler handles, processes, or file I/O.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub mod policy;
 
 pub const RULES_VERSION: &str = "1";
 pub const MUTATORS: [&str; 18] = [
@@ -38,6 +39,17 @@ pub struct Candidate {
     pub ignored: Option<String>,
     pub regex: Option<(String, String)>,
     pub guard_offset: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weak: Option<WeakBinary>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WeakBinary {
+    pub operator: String,
+    pub replacement_operator: String,
+    pub left_end: u32,
+    pub right_start: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -57,6 +69,7 @@ pub enum Status {
     NoCoverage,
     Timeout,
     RuntimeError,
+    CompileError,
     Ignored,
     Pending,
 }
@@ -73,6 +86,8 @@ pub struct TestResult {
     pub duration: f64,
     pub errors: Vec<String>,
     pub hits: BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub infected: std::collections::BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -126,6 +141,9 @@ pub fn validate_execution(result: &Execution, selected: &[String]) -> Result<(),
             || test.duration < 0.0
         {
             return Err("Invalid test result".into());
+        }
+        if test.infected.iter().any(|key| !test.hits.contains_key(key)) {
+            return Err("Infection recorded without reaching a mutant".into());
         }
     }
     Ok(())
@@ -226,6 +244,14 @@ pub struct Mutant {
     pub killed_by: Vec<String>,
     pub failed_modules: Vec<String>,
     pub attempts: Vec<Attempt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub critical: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub infected_by: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -248,6 +274,8 @@ pub struct Summary {
     pub no_coverage: usize,
     pub timeout: usize,
     pub runtime_error: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub compile_error: usize,
     pub ignored: usize,
     pub pending: usize,
     pub score: Option<f64>,
@@ -279,6 +307,27 @@ pub struct Report {
     pub diagnostics: Vec<Diagnostic>,
     #[serde(skip)]
     pub interrupted: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typecheck: Option<TypecheckInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy: Option<policy::PolicyReport>,
+    #[serde(skip)]
+    fail_on_undetected: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TypecheckInfo {
+    pub version: String,
+    pub package: String,
+    pub project: String,
+    pub checked: usize,
+    pub compile_errors: usize,
+    pub equivalent: usize,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 impl Report {
     pub fn new(gate: bool) -> Self {
@@ -305,6 +354,9 @@ impl Report {
             },
             diagnostics: vec![],
             interrupted: None,
+            typecheck: None,
+            policy: None,
+            fail_on_undetected: gate,
         }
     }
     pub fn error(&mut self, code: &str, message: impl Into<String>) {
@@ -325,6 +377,7 @@ impl Report {
                 Status::NoCoverage => s.no_coverage += 1,
                 Status::Timeout => s.timeout += 1,
                 Status::RuntimeError => s.runtime_error += 1,
+                Status::CompileError => s.compile_error += 1,
                 Status::Ignored => s.ignored += 1,
                 Status::Pending => s.pending += 1,
             }
@@ -333,7 +386,7 @@ impl Report {
         if self.run_complete && denominator > 0 {
             s.score = Some((s.killed + s.timeout + s.runtime_error) as f64 / denominator as f64);
         }
-        if self.run_complete && self.gate.enabled {
+        if self.run_complete && self.fail_on_undetected {
             let passed = s.survived + s.no_coverage == 0;
             self.gate.passed = Some(passed);
             if !passed {
@@ -343,13 +396,28 @@ impl Report {
                 );
             }
         }
+        if let Some(policy) = &mut self.policy {
+            policy.judge(&self.mutants, self.run_complete, s.score);
+            let failures = policy.quality_failures.clone();
+            if self.run_complete
+                && (policy.options.fail_on_survived
+                    || policy.options.threshold_break.is_some()
+                    || self.mutants.iter().any(|m| m.critical))
+            {
+                self.gate.enabled = true;
+                self.gate.passed = Some(self.gate.passed != Some(false) && failures.is_empty());
+            }
+            for message in failures {
+                self.error("EC_MUTATION_QUALITY", message);
+            }
+        }
         self.ok = self.run_complete && self.diagnostics.is_empty();
         self.summary = s;
     }
     pub fn exit_code(&self) -> u8 {
         self.interrupted.unwrap_or(if !self.run_complete {
             2
-        } else if self.gate.passed == Some(false) {
+        } else if !self.ok {
             1
         } else {
             0

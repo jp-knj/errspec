@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use tsrs_ast::{Kind, Node, SourceFile, is_type_node_kind};
 use tsrs_core::P;
+mod facts;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -17,10 +18,18 @@ pub(crate) struct SourceRequest {
     pub validate_only: bool,
     #[serde(default)]
     pub exclude_mutators: Vec<String>,
+    #[serde(default)]
+    pub weak_mutation: bool,
+    #[serde(default)]
+    pub facts: bool,
 }
 #[derive(Serialize)]
 pub(crate) struct SourceResult {
     pub candidates: Vec<Candidate>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub critical: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<facts::Metadata>,
 }
 
 pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
@@ -36,6 +45,13 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
         excluded: &request.exclude_mutators,
         candidates: vec![],
         owner_counts: std::collections::BTreeMap::new(),
+        critical: BTreeSet::new(),
+        in_critical: false,
+        weak_mutation: request.weak_mutation,
+        facts: request.facts,
+        owners: std::collections::BTreeMap::new(),
+        scopes: std::collections::BTreeMap::from([("module".into(), file.as_node())]),
+        parents: std::collections::BTreeMap::new(),
     };
     if !request.validate_only {
         rules.visit(file.as_node(), "module", &[]);
@@ -50,7 +66,15 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
     rules
         .candidates
         .retain(|c| seen.insert((c.location.byte_offset, c.end, c.replacement.clone())));
+    let metadata = request.facts.then(|| facts::collect(&rules));
     Ok(SourceResult {
+        metadata,
+        critical: rules
+            .candidates
+            .iter()
+            .filter(|c| rules.critical.contains(&c.key))
+            .map(|c| c.key.clone())
+            .collect(),
         candidates: rules.candidates,
     })
 }
@@ -61,6 +85,13 @@ struct Rules<'a> {
     excluded: &'a [String],
     candidates: Vec<Candidate>,
     owner_counts: std::collections::BTreeMap<String, usize>,
+    critical: BTreeSet<String>,
+    in_critical: bool,
+    weak_mutation: bool,
+    facts: bool,
+    owners: std::collections::BTreeMap<String, String>,
+    scopes: std::collections::BTreeMap<String, P<Node>>,
+    parents: std::collections::BTreeMap<String, String>,
 }
 impl Rules<'_> {
     fn start(&self, node: P<Node>) -> usize {
@@ -94,6 +125,12 @@ impl Rules<'_> {
         let end = self.end(node) as u32;
         let identity = serde_json::to_vec(&(self.name, owner, path, family, &replacement)).unwrap();
         let key = format!("{:x}", Sha256::digest(identity));
+        if self.facts {
+            self.owners.insert(key.clone(), owner.into());
+        }
+        if self.in_critical {
+            self.critical.insert(key.clone());
+        }
         let guard_offset = if placement == Placement::Body {
             let mut offset = start + 1;
             for statement in node.statements() {
@@ -126,6 +163,7 @@ impl Rules<'_> {
             ignored,
             regex,
             guard_offset,
+            weak: None,
         });
     }
     fn expression(
@@ -179,6 +217,28 @@ impl Rules<'_> {
                     Some("Mutation would change an assignment or delete reference".into());
             }
         }
+        let weak = if self.weak_mutation
+            && target.kind() == Kind::BinaryExpression
+            && matches!(family, "EqualityOperator" | "ArithmeticOperator")
+        {
+            let binary = target.as_binary_expression();
+            let operator = binary.operator_token();
+            let prefix = self.start(operator) - self.start(target);
+            let suffix = self.end(target) - self.end(operator);
+            value
+                .len()
+                .checked_sub(suffix)
+                .and_then(|end| value.get(prefix..end))
+                .map(|replacement| errspec::mutation::WeakBinary {
+                    operator: self.raw(operator).into(),
+                    replacement_operator: replacement.into(),
+                    left_end: self.end(binary.left()) as u32,
+                    right_start: self.start(binary.right()) as u32,
+                })
+        } else {
+            None
+        };
+        let count = self.candidates.len();
         self.add(
             target,
             family,
@@ -189,6 +249,9 @@ impl Rules<'_> {
             unsafe_reason,
             None,
         );
+        if self.candidates.len() > count {
+            self.candidates.last_mut().unwrap().weak = weak;
+        }
     }
     fn splice(&self, outer: P<Node>, inner: P<Node>, value: &str) -> String {
         let a = self.start(outer);
@@ -243,12 +306,38 @@ impl Rules<'_> {
             let count = self.owner_counts.entry(base.clone()).or_default();
             owned = format!("{base}#{count}");
             *count += 1;
+            if self.facts {
+                self.scopes.insert(owned.clone(), node);
+                self.parents.insert(owned.clone(), owner.into());
+            }
         }
         let (owner, path) = if owned.is_empty() {
             (owner, path)
         } else {
             (owned.as_str(), &[][..])
         };
+        let was_critical = self.in_critical;
+        if matches!(
+            kind,
+            Kind::FunctionDeclaration
+                | Kind::VariableStatement
+                | Kind::ClassDeclaration
+                | Kind::ClassExpression
+                | Kind::MethodDeclaration
+                | Kind::PropertyDeclaration
+        ) {
+            let full = node.pos().source_offset().unwrap_or(0) as usize;
+            let leading = self.file.text().get(full..self.start(node)).unwrap_or("");
+            self.in_critical |= leading
+                .lines()
+                .filter_map(|line| line.trim().strip_prefix("//"))
+                .any(|body| {
+                    matches!(
+                        body.split_whitespace().next(),
+                        Some("mutator-critical" | "errspec-critical")
+                    )
+                });
+        }
         self.apply(node, owner, path);
         let mut index = 0;
         node.for_each_child(&mut |child| {
@@ -258,6 +347,7 @@ impl Rules<'_> {
             self.visit(child, owner, &child_path);
             false
         });
+        self.in_critical = was_critical;
     }
     fn apply(&mut self, node: P<Node>, owner: &str, path: &[usize]) {
         let raw = self.raw(node).to_string();

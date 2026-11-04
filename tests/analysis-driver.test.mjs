@@ -193,6 +193,12 @@ s.check('tag',submit(n)._tag,tag);
       },
       { "async.ts": fixture("async.ts") },
       { "result.ts": fixture("result.ts") },
+      {
+        "node_modules/sdk/package.json": '{"name":"sdk","types":"index.d.ts"}',
+        "node_modules/sdk/index.d.ts": "export interface SdkFailure {kind:'Remote'; path:string}",
+        "types.ts": "import type {SdkFailure} from 'sdk'; export type RemoteFailure=Omit<SdkFailure,'path'>; export type LocalFailure={kind:'Local'}; export function fail():{error:LocalFailure} {return {error:{kind:'Local'}}}",
+        "barrel.ts": "export type {RemoteFailure,LocalFailure} from './types';",
+      },
       { "bindings.ts": fixture("bindings.ts") },
       { "thenables.ts": fixture("thenables.ts") },
       {

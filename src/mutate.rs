@@ -63,6 +63,7 @@ pub(crate) fn run(request: MutationRequest) -> Report {
         }
     }
     if let Err(error) = run_inner(request, &mut report, signal.clone(), started.clone()) {
+        report.run_complete = false;
         report.error(&error.code, error.message);
     }
     report.tests_executed |= started.load(Ordering::SeqCst);
@@ -225,10 +226,14 @@ impl Driver {
             }
             match message["type"].as_str() {
                 Some("progress") => {
-                    if message["event"] != "testStart" {
-                        return Err(Failure::protocol("Unknown progress event"));
+                    match message["event"].as_str() {
+                        Some("testStart") if request["op"] != "typecheck" => {
+                            self.started.store(true, Ordering::SeqCst)
+                        }
+                        Some("typecheck")
+                            if request["op"] == "typecheck" && message["key"].is_string() => {}
+                        _ => return Err(Failure::protocol("Unknown progress event")),
                     }
-                    self.started.store(true, Ordering::SeqCst);
                     progress = Instant::now();
                     messages.push(message);
                 }
@@ -246,7 +251,9 @@ impl Driver {
                         timeout: false,
                     });
                 }
-                Some("baseline" | "prepared" | "file" | "attempt") => messages.push(message),
+                Some("baseline" | "prepared" | "file" | "attempt" | "typechecked") => {
+                    messages.push(message)
+                }
                 _ => return Err(Failure::protocol("Unknown driver message")),
             }
         }
@@ -293,6 +300,14 @@ fn run_inner(
     signal: Arc<AtomicI32>,
     started: Arc<AtomicBool>,
 ) -> Result<(), Failure> {
+    request
+        .policy
+        .validate()
+        .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e))?;
+    if request.policy.active() {
+        report.policy = Some(mutation::policy::PolicyReport::new(request.policy.clone()));
+    }
+    let beginning = Instant::now();
     for family in &request.exclude_mutator {
         if !mutation::MUTATORS.contains(&family.as_str()) {
             return Err(Failure::new(
@@ -304,8 +319,38 @@ fn run_inner(
     request.root = absolute(request.root)?
         .canonicalize()
         .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e.to_string()))?;
+    if request.policy.accepted_file.is_none()
+        && request.root.join("errspec.accepted.json").is_file()
+    {
+        request.policy.accepted_file = Some("errspec.accepted.json".into());
+        report.policy = Some(mutation::policy::PolicyReport::new(request.policy.clone()));
+    }
+    let accepted = if let Some(file) = &request.policy.accepted_file {
+        let file = request.root.join(file);
+        let accepted: std::collections::BTreeMap<String, mutation::policy::Acceptance> =
+            match fs::read(&file) {
+                Ok(bytes) => serde_json::from_slice(&bytes)
+                    .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e.to_string()))?,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Default::default(),
+                Err(e) => return Err(e.into()),
+            };
+        if accepted
+            .values()
+            .any(|entry| entry.reason.trim().is_empty())
+        {
+            return Err(Failure::new(
+                "EC_MUTATION_CONFIG",
+                "Acceptance reasons must not be empty",
+            ));
+        }
+        accepted
+    } else {
+        std::collections::BTreeMap::new()
+    };
     request.vitest_config = request.vitest_config.map(absolute).transpose()?;
     request.vitest_package = request.vitest_package.map(absolute).transpose()?;
+    request.typecheck_project = request.typecheck_project.map(absolute).transpose()?;
+    request.typecheck_package = request.typecheck_package.map(absolute).transpose()?;
     if request.node.components().count() > 1 {
         request.node = absolute(request.node)?;
     }
@@ -321,6 +366,10 @@ fn run_inner(
     fs::write(
         &setup,
         include_str!("../packages/mutation-driver/setup.mjs"),
+    )?;
+    fs::write(
+        temp.path().join("weak-runtime.mjs"),
+        include_str!("../packages/mutation-driver/weak-runtime.mjs"),
     )?;
     let run_id = temp
         .path()
@@ -371,6 +420,18 @@ fn run_inner(
         }
         let candidates: Vec<Candidate> = serde_json::from_value(file["candidates"].clone())
             .map_err(|e| Failure::protocol(e.to_string()))?;
+        let critical: BTreeSet<String> =
+            serde_json::from_value(file.get("critical").cloned().unwrap_or(json!([])))
+                .map_err(|e| Failure::protocol(e.to_string()))?;
+        if critical
+            .iter()
+            .any(|key| !candidates.iter().any(|c| &c.key == key))
+        {
+            return Err(Failure::protocol("Unknown critical mutant key"));
+        }
+        if !critical.is_empty() && report.policy.is_none() {
+            report.policy = Some(mutation::policy::PolicyReport::new(request.policy.clone()));
+        }
         for candidate in candidates {
             if candidate.location.file != name
                 || !keys.insert(candidate.key.clone())
@@ -386,12 +447,16 @@ fn run_inner(
                 Status::Pending
             };
             report.mutants.push(Mutant {
+                critical: critical.contains(&candidate.key),
+                accepted: None,
+                infected_by: None,
                 candidate,
                 status,
                 covered_by: vec![],
                 killed_by: vec![],
                 failed_modules: vec![],
                 attempts: vec![],
+                reason: None,
             });
         }
     }
@@ -429,13 +494,99 @@ fn run_inner(
         .keys()
         .chain(baseline.static_hits.keys())
         .chain(baseline.tests.iter().flat_map(|t| t.hits.keys()))
+        .chain(baseline.tests.iter().flat_map(|t| t.infected.iter()))
         .any(|k| !keys.contains(k))
     {
         return Err(Failure::protocol("Baseline contains an unknown mutant key"));
     }
     report.baseline = baseline.tests.clone();
+    let selected_keys: BTreeSet<_> = request.policy.only.iter().cloned().collect();
+    if let Some(key) = selected_keys.iter().find(|key| !keys.contains(*key)) {
+        return Err(Failure::new(
+            "EC_MUTATION_CONFIG",
+            format!("Unknown --only mutant key: {key}"),
+        ));
+    }
+    if !selected_keys.is_empty() {
+        report
+            .mutants
+            .retain(|m| selected_keys.contains(&m.candidate.key));
+    }
+    if request.typecheck {
+        let response = driver.request(json!({"op":"typecheck", "keys":report.mutants.iter().map(|m| &m.candidate.key).collect::<Vec<_>>()}), Duration::MAX, startup)?;
+        if response.timeout {
+            return Err(Failure::new(
+                "EC_MUTATION_TYPECHECK",
+                "Mutant typechecker timed out",
+            ));
+        }
+        response.check_error()?;
+        let result = only(&response.messages, "typechecked")?;
+        let outcomes = result["outcomes"]
+            .as_array()
+            .ok_or_else(|| Failure::protocol("Missing typecheck outcomes"))?;
+        expected(
+            &response.messages,
+            &["progress", "typechecked", "done"],
+            outcomes.len(),
+        )?;
+        let info: mutation::TypecheckInfo = serde_json::from_value(result["info"].clone())
+            .map_err(|e| Failure::protocol(e.to_string()))?;
+        let wanted: BTreeSet<_> = report
+            .mutants
+            .iter()
+            .filter(|m| {
+                m.status != Status::Ignored
+                    && [".ts", ".tsx", ".mts", ".cts"]
+                        .iter()
+                        .any(|ext| m.candidate.location.file.ends_with(ext))
+            })
+            .map(|m| m.candidate.key.clone())
+            .collect();
+        let mut seen = BTreeSet::new();
+        let mut errors = 0;
+        let mut equivalent = 0;
+        for outcome in outcomes {
+            let key = outcome["key"]
+                .as_str()
+                .ok_or_else(|| Failure::protocol("Missing typecheck key"))?;
+            if !wanted.contains(key) || !seen.insert(key.to_owned()) {
+                return Err(Failure::protocol("Unknown or duplicate typecheck key"));
+            }
+            let mutant = report
+                .mutants
+                .iter_mut()
+                .find(|m| m.candidate.key == key)
+                .unwrap();
+            let reason = outcome["reason"].as_str();
+            match outcome["status"].as_str() {
+                Some("checked") if outcome["reason"].is_null() => (),
+                Some("CompileError") if reason.is_some_and(|r| !r.is_empty()) => {
+                    mutant.status = Status::CompileError;
+                    mutant.reason = reason.map(String::from);
+                    errors += 1;
+                }
+                Some("Ignored") if reason.is_some_and(|r| r.starts_with("equivalent:")) => {
+                    mutant.status = Status::Ignored;
+                    mutant.reason = reason.map(String::from);
+                    equivalent += 1;
+                }
+                _ => return Err(Failure::protocol("Invalid typecheck outcome")),
+            }
+        }
+        if wanted != seen
+            || info.checked != outcomes.len()
+            || info.compile_errors != errors
+            || info.equivalent != equivalent
+            || info.version.is_empty()
+        {
+            return Err(Failure::protocol("Incomplete typecheck results or counts"));
+        }
+        report.engine.typecheck = "complete";
+        report.typecheck = Some(info);
+    }
     for mutant in &mut report.mutants {
-        if mutant.status == Status::Ignored {
+        if mutant.status != Status::Pending {
             continue;
         }
         let key = &mutant.candidate.key;
@@ -460,10 +611,60 @@ fn run_inner(
                 "Hit mutant has no attributable baseline tests",
             ));
         }
+        if request.weak_mutation && mutant.candidate.weak.is_some() {
+            let infected = baseline
+                .tests
+                .iter()
+                .filter(|test| {
+                    mutant.covered_by.contains(&test.id)
+                        && (static_files.is_some() || test.infected.contains(key))
+                })
+                .map(|test| test.id.clone())
+                .collect::<Vec<_>>();
+            if infected.is_empty() {
+                mutant.status = Status::Survived;
+                mutant.reason =
+                    Some("not infected: no covering test observes a different value".into());
+            }
+            mutant.infected_by = Some(infected);
+        }
+    }
+    let sampled = request
+        .policy
+        .mutants_per_line
+        .map(|maximum| mutation::policy::sample_per_line(&report.mutants, maximum));
+    for mutant in &mut report.mutants {
+        if mutant.status != Status::Pending {
+            continue;
+        }
+        let key = &mutant.candidate.key;
+        let selected = mutant
+            .infected_by
+            .as_ref()
+            .unwrap_or(&mutant.covered_by)
+            .clone();
+        if sampled
+            .as_ref()
+            .is_some_and(|selected| !selected.contains(key))
+        {
+            mutant.reason = Some("Not selected by per-line sampling".into());
+            report.policy.as_mut().unwrap().sampled += 1;
+            continue;
+        }
+        if request
+            .policy
+            .time_budget
+            .is_some_and(|seconds| beginning.elapsed().as_secs_f64() >= seconds)
+        {
+            mutant.reason = Some("Time budget exhausted before execution".into());
+            report.policy.as_mut().unwrap().budget += 1;
+            continue;
+        }
+        let static_files = baseline.static_hits.get(key);
         let mut durations: Vec<_> = baseline
             .tests
             .iter()
-            .filter(|t| mutant.covered_by.contains(&t.id))
+            .filter(|t| selected.contains(&t.id))
             .map(|t| t.duration)
             .collect();
         if let Some(files) = static_files {
@@ -509,13 +710,13 @@ fn run_inner(
             } else {
                 1
             };
-            let response=driver.request(json!({"op":"run","key":key,"selected":mutant.covered_by,"hitLimit":hit_limit,"multiplier":multiplier}),
+            let response=driver.request(json!({"op":"run","key":key,"selected":selected,"hitLimit":hit_limit,"multiplier":multiplier}),
                 Duration::from_secs_f64(total_ms*multiplier as f64/1000.0),Duration::from_secs_f64(stall_ms*multiplier as f64/1000.0))?;
             report.tests_executed |= response.messages.iter().any(|m| m["type"] == "progress");
             response.check_error()?;
             let result = if response.timeout {
                 Execution {
-                    selected: mutant.covered_by.clone(),
+                    selected: selected.clone(),
                     wall_timeout: true,
                     ..Execution::default()
                 }
@@ -527,17 +728,18 @@ fn run_inner(
                 }
                 execution(value)?
             };
-            mutation::validate_execution(&result, &mutant.covered_by).map_err(Failure::protocol)?;
+            mutation::validate_execution(&result, &selected).map_err(Failure::protocol)?;
             if result
                 .hits
                 .keys()
                 .chain(result.static_hits.keys())
                 .chain(result.tests.iter().flat_map(|t| t.hits.keys()))
+                .chain(result.tests.iter().flat_map(|t| t.infected.iter()))
                 .any(|k| !keys.contains(k))
             {
                 return Err(Failure::protocol("Attempt contains an unknown mutant key"));
             }
-            let attempt = mutation::judge(&result, &mutant.covered_by, number);
+            let attempt = mutation::judge(&result, &selected, number);
             let final_result = matches!(attempt.status, Status::Killed | Status::Survived)
                 || attempt.reason.contains("hit limit");
             mutant.attempts.push(attempt);
@@ -592,5 +794,9 @@ fn run_inner(
     close.check_error()?;
     expected(&close.messages, &["done"], 0)?;
     report.run_complete = true;
+    if !accepted.is_empty() {
+        report.policy.as_mut().unwrap().acceptance =
+            mutation::policy::accept_results(&mut report.mutants, &accepted, &keys);
+    }
     Ok(())
 }
