@@ -296,7 +296,7 @@ async function handle(request) {
     if(!options.cache)throw failure("EC_MUTATION_PROTOCOL","Result caching was not requested");
     verifyInputs();send(request,"done",{count:0,cacheFacts:cacheFacts()});return;
   }
-  if(request.op==="prepare") {
+  if(request.op==="prepare"||request.op==="discover") {
     plain=await execute("plain",request);
     send(request,"baseline",{execution:plain});
     if(plain.failedModules.length||plain.errors.length||!plain.tests.some(t=>t.started&&t.status==="passed")||plain.tests.some(t=>t.status==="failed"))
@@ -321,12 +321,14 @@ async function handle(request) {
       const critical=options.policy?.critical.some(pattern=>matchesGlob(rel(file),pattern))?entry.candidates.map(c=>c.key):entry.critical;
       send(request,"file",{file:rel(file),candidates:entry.candidates,critical,...(options.since?{metadata:generated.metadata}: {})});count++;
     }
-    baseline=await execute("probe",request);
-    const identity=e=>e.tests.map(t=>[t.id,t.status,t.started]);
-    if(JSON.stringify(identity(plain))!==JSON.stringify(identity(baseline))||baseline.errors.length||baseline.failedModules.length)
-      throw failure("EC_MUTATION_INSTRUMENTATION","Probe baseline changed test registration or results");
-    writeFileSync(options.state,JSON.stringify({baseline,plain,testSpecs,projectName,inventory:[...inventory],fingerprints:[...fingerprints]}));
-    send(request,"prepared",{execution:baseline,...(options.reuseSession?{sessionReuse:reuseMode}:{}),...(options.cache?{cacheFacts:cacheFacts()}:{})});send(request,"done",{count});return;
+    if(request.op==="discover"){
+      send(request,"discovered",{cacheFacts:cacheFacts()});send(request,"done",{count});return;
+    }
+    await prepareProbe(request,count);return;
+  }
+  if(request.op==="probe"){
+    if(!plain||baseline)throw failure("EC_MUTATION_PROTOCOL","Probe requires an unprepared current baseline");
+    await prepareProbe(request,0);return;
   }
   if(request.op==="run") {
     if(!baseline)throw failure("EC_MUTATION_PROTOCOL","Missing baseline");
@@ -355,6 +357,17 @@ async function handle(request) {
     verifyInputs();send(request,"done",{count:0,...(options.cache?{cacheFacts:cacheFacts()}:{})});return;
   }
   throw failure("EC_MUTATION_PROTOCOL",`Unknown operation: ${request.op}`);
+}
+async function prepareProbe(request,count){
+    if(request.coverage){
+      baseline=request.coverage;
+      await execute("inspect",request);
+    }else baseline=await execute("probe",request);
+    const identity=e=>e.tests.map(t=>[t.id,t.status,t.started]);
+    if(JSON.stringify(identity(plain))!==JSON.stringify(identity(baseline))||baseline.errors.length||baseline.failedModules.length)
+      throw failure("EC_MUTATION_INSTRUMENTATION","Probe baseline changed test registration or results");
+    writeFileSync(options.state,JSON.stringify({baseline,plain,testSpecs,projectName,inventory:[...inventory],fingerprints:[...fingerprints]}));
+    send(request,"prepared",{execution:baseline,...(options.reuseSession?{sessionReuse:reuseMode}:{}),...(options.cache?{cacheFacts:cacheFacts()}:{})});send(request,"done",{count});return;
 }
 const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
 for await(const line of lines) {

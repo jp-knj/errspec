@@ -26,6 +26,7 @@ export interface MutationOptions {
   reuseSession?: boolean;
   cache?: boolean;
   cacheDir?: string | null;
+  fullDryRun?: boolean;
   typecheckProject?: string | null;
   typecheckPackage?: string | null;
   policy?: MutationPolicy;
@@ -100,6 +101,7 @@ export interface MutationReport {
   cache?: {
     directory: string; reused: number; executed: number; saved: number;
     invalidated: boolean; fingerprint?: string; disabledReason?: string; warnings?: string[];
+    coverageReused?: boolean;
   };
   selection?: {
     since: string; base: string; unit: "node" | "scope";

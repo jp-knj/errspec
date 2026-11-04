@@ -177,7 +177,7 @@ assert.equal(result.report.runComplete,true);
 assert.equal(result.report.engine.sessionReuse,'available');
 if(diff){assert.equal(result.report.selection.selected,1);assert.ok(result.report.selection.omitted>0);assert.ok(result.report.mutants.every(m=>m.line===2));}
 else assert.equal(result.report.summary.killed,2);
-if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equal(result.report.cache.reused,warm?2:0);assert.equal(result.report.cache.executed,warm?0:2);assert.equal(result.report.cache.saved,2);}
+if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equal(result.report.cache.reused,warm?2:0);assert.equal(result.report.cache.executed,warm?0:2);assert.equal(result.report.cache.saved,2);assert.equal(result.report.cache.coverageReused,warm?true:undefined);}
 `);
     run(process.execPath,["api.mjs"]);
     run(process.execPath,["api.mjs","--cache"]);
