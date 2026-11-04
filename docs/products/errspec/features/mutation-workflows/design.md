@@ -50,6 +50,8 @@ nodeは変異する式・文の範囲、scopeは最も近い名前付き関数�
 
 基準実行で到達と値の差を分けて取得します。値の差を確認できる式についてだけweak mutationを適用し、評価回数、受信オブジェクト、短絡を維持できない式は実行による検証へ進めます。arid、disable、Strykerコメント、pluginの除外は理由を候補へ含めます。
 
+除外コメントはparserのtriviaから位置・本文を取得し、string・regex・template・JSX textの範囲と重なる偽指示を除きます。所有されたコメントの値をRustの純粋な判定へ渡し、`errspec-`／`mutator-`のdisable-next-line、disable-line、disable/enableと、Stryker disable/restoreを解釈します。line指定をregionより優先し、regionは指定familyごとの最後の指示を使います。next-lineは複数行commentの終了行の次、regionはcomment終了offsetから適用します。IDを維持してcandidate.ignoredへdisabledと任意の理由を入れ、既存のignored経路でinstrumentation・trial・score・gateから除きます。builtinの安全な除外は元の理由を優先します。指示の削除はproject入力の変化としてcacheを無効にし、再検査します。
+
 ### ランナーと実行計画
 
 `-j`／`--concurrency`と設定・APIの`concurrency`は1〜64の整数とし、既定1を維持します。2以上ではRustのqueueから各workerへ候補を割り当て、逐次実行と同じtrial・再確認・判定を使います。samplingとcache照合は配分前に行い、時間予算は要求全体の開始時刻で共有します。開始済みのtrialは完了させ、開始前の候補はPendingにします。完了順によらずinventory順へ結果を戻し、engine.parallelに要求数と起動したtrial worker数を示します。

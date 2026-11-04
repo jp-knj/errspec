@@ -56,6 +56,140 @@ fn generate_options(source: &str, options: Value) -> Value {
 }
 
 #[test]
+fn comment_directives_select_families_and_preserve_position_independent_ids() {
+    let plain =
+        generate("export const before=true;\nexport const hidden=true;\nexport const after=true;");
+    for prefix in ["errspec", "mutator"] {
+        let marked = generate(&format!(
+            "export const before=true;\n// {prefix}-disable-next-line BooleanLiteral: specified behavior\nexport const hidden=true;\nexport const after=true;"
+        ));
+        let candidates = marked["candidates"].as_array().unwrap();
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates[0]["ignored"], Value::Null);
+        assert_eq!(candidates[1]["ignored"], "disabled: specified behavior");
+        assert_eq!(candidates[2]["ignored"], Value::Null);
+        for (before, after) in plain["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(candidates)
+        {
+            assert_eq!(before["key"], after["key"]);
+        }
+    }
+    let families = generate(
+        "// errspec-disable-next-line ArithmeticOperator, BooleanLiteral: intentional\nexport const value=true ? 1+2 : 3;",
+    );
+    for candidate in families["candidates"].as_array().unwrap() {
+        assert_eq!(
+            candidate["ignored"].is_string(),
+            ["ArithmeticOperator", "BooleanLiteral"]
+                .contains(&candidate["mutator"].as_str().unwrap())
+        );
+    }
+}
+
+#[test]
+fn stryker_regions_and_restores_are_family_specific_and_line_overrides_remain_explicit() {
+    let result = generate(
+        "/* Stryker disable all: fixed */\nconst a=true;\n// Stryker restore BooleanLiteral\nconst b=true;\nconst s='text';\n// errspec-enable all\nconst c=true; // mutator-disable-line BooleanLiteral: line only\nconst d=true;",
+    );
+    let candidates = result["candidates"].as_array().unwrap();
+    let reasons = candidates
+        .iter()
+        .map(|candidate| candidate["ignored"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reasons,
+        vec![
+            json!("disabled: fixed"),
+            Value::Null,
+            json!("disabled: fixed"),
+            json!("disabled: line only"),
+            Value::Null
+        ]
+    );
+    let next = generate(
+        "// Stryker disable next-line BooleanLiteral: intended\nconst a=true;\nconst b=true;",
+    );
+    assert_eq!(next["candidates"][0]["ignored"], "disabled: intended");
+    assert_eq!(next["candidates"][1]["ignored"], Value::Null);
+}
+
+#[test]
+fn block_trailing_and_embedded_comments_follow_javascript_line_boundaries() {
+    let result = generate(
+        "/* 日本🧪\r\n * errspec-disable-next-line BooleanLiteral: multiline\r\n */\r\nconst a=true;\r\nconst b=true;",
+    );
+    // A description before the directive is not itself a directive.
+    assert!(
+        result["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|candidate| candidate["ignored"].is_null())
+    );
+    for newline in ["\n", "\r", "\r\n", "\u{2028}", "\u{2029}"] {
+        let source = format!(
+            "/* errspec-disable-next-line BooleanLiteral:{newline} Unicode reason */{newline}const a=true;{newline}const b=true; // errspec-disable-line BooleanLiteral: trailing"
+        );
+        let result = generate(&source);
+        assert_eq!(
+            result["candidates"][0]["ignored"],
+            "disabled: Unicode reason"
+        );
+        assert_eq!(result["candidates"][1]["ignored"], "disabled: trailing");
+    }
+    let inline = generate(
+        "const a=true && /* errspec-disable BooleanLiteral: inline */ false; /* errspec-enable all */ const b=true;",
+    );
+    let booleans = inline["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|candidate| candidate["mutator"] == "BooleanLiteral")
+        .collect::<Vec<_>>();
+    assert_eq!(booleans[0]["ignored"], Value::Null);
+    assert_eq!(booleans[1]["ignored"], "disabled: inline");
+    assert_eq!(booleans[2]["ignored"], Value::Null);
+}
+
+#[test]
+fn directive_text_inside_literals_regex_templates_and_jsx_cannot_exclude_code() {
+    let source = "const a='// errspec-disable all';const b=`\n// mutator-disable all\n${true}`;const re=/[/* Stryker disable all */]/;const jsx=<div>\n// errspec-disable all\n</div>;export const flag=true;";
+    let result = generate_options(source, json!({"file":"src/rules.tsx"}));
+    assert!(
+        result["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|candidate| candidate["mutator"] == "BooleanLiteral")
+            .all(|candidate| candidate["ignored"].is_null())
+    );
+    let malformed = generate(
+        "// errspec-disable-next-line BooleanLiteral-nope\nconst a=true;\n// Stryker disable\nconst b=true;",
+    );
+    assert!(
+        malformed["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|candidate| candidate["ignored"].is_null())
+    );
+    let expression = generate(
+        "const text=`raw ${ /* errspec-disable-line BooleanLiteral: embedded expression */ true } tail`;\nconst enabled=true;",
+    );
+    let booleans = expression["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|candidate| candidate["mutator"] == "BooleanLiteral")
+        .collect::<Vec<_>>();
+    assert_eq!(booleans[0]["ignored"], "disabled: embedded expression");
+    assert_eq!(booleans[1]["ignored"], Value::Null);
+}
+
+#[test]
 fn owned_syntax_facts_keep_scope_hashes_stable_across_position_changes() {
     let source = "export function a(x:number){return x+1;}\nexport function b(){return 1;}";
     let original = generate_options(source, json!({"facts":true}));

@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use tsrs_ast::{Kind, Node, SourceFile, is_type_node_kind};
 use tsrs_core::P;
+mod comments;
 mod facts;
 
 #[derive(Deserialize)]
@@ -47,6 +48,10 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
         owner_counts: std::collections::BTreeMap::new(),
         critical: BTreeSet::new(),
         in_critical: false,
+        disabled: errspec::mutation::exclusions::Disabled::new(
+            file.text(),
+            comments::acquire(file),
+        ),
         weak_mutation: request.weak_mutation,
         facts: request.facts,
         owners: std::collections::BTreeMap::new(),
@@ -87,6 +92,7 @@ struct Rules<'a> {
     owner_counts: std::collections::BTreeMap<String, usize>,
     critical: BTreeSet<String>,
     in_critical: bool,
+    disabled: errspec::mutation::exclusions::Disabled,
     weak_mutation: bool,
     facts: bool,
     owners: std::collections::BTreeMap<String, String>,
@@ -160,7 +166,10 @@ impl Rules<'_> {
             original: self.raw(node).into(),
             replacement,
             placement,
-            ignored,
+            ignored: ignored.or_else(|| {
+                self.disabled
+                    .reason(self.file.text(), family, start as usize)
+            }),
             regex,
             guard_offset,
             weak: None,

@@ -49,6 +49,18 @@ function run(root, args = [], expected = 0) {
   assert.equal(output.status, expected, output.stderr + output.stdout);
   return JSON.parse(output.stdout);
 }
+test("explicit comments exclude trials with visible reasons and removing one invalidates cached evidence",t=>{
+  const source='// errspec-disable-next-line: intentional weak check\nexport const yes=()=>true;\n/* Stryker disable all: unused API */\nexport const no=()=>false;\n// Stryker restore all\nexport const checked=true;';
+  const root=project(t,source);
+  writeFileSync(join(root,'package.json'),JSON.stringify({type:'module',dependencies:{vitest:'5.0.5'}}));
+  writeFileSync(join(root,'value.test.ts'),'import {test,expect} from "vitest";import {yes,checked} from "./src/value";test("value",()=>{expect(yes()).toBeDefined();expect(checked).toBe(true)});');
+  const args=['--cache','--reuse-session','--weak-mutation','-j','2','--fail-on-undetected'];
+  const cold=run(root,args);assert.equal(cold.summary.ignored,4);assert.equal(cold.summary.killed,1);assert.equal(cold.summary.score,1);
+  assert.ok(cold.mutants.filter(m=>m.status==='Ignored').every(m=>m.ignored.startsWith('disabled:')&&m.attempts.length===0));
+  const warm=run(root,args);assert.equal(warm.cache.reused,1);assert.equal(warm.cache.executed,0);assert.equal(warm.summary.ignored,4);
+  writeFileSync(join(root,'src/value.ts'),source.replace('// errspec-disable-next-line: intentional weak check\n',''));
+  const restored=run(root,args,1);assert.equal(restored.cache.reused,0);assert.equal(restored.cache.invalidated,true);assert.equal(restored.summary.ignored,2);assert.equal(restored.summary.survived,1);assert.equal(restored.gate.passed,false);
+});
 test("only IDs, deterministic sampling, and time budgets retain explicit pending states", (t) => {
   const root = project(t),
     original = readFileSync(join(root, "src/value.ts"), "utf8"),

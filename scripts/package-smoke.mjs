@@ -163,11 +163,12 @@ assert.equal(result.report.diagnostics[0].code,'EC_MUTATION_CONFIG');
   }
   if(process.env.ERRSPEC_VITEST_PACKAGE) {
     mkdirSync(join(dir,"src"));
-    writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\n");
+    writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\n// errspec-disable-next-line: explicit installed-package exclusion\nexport const intentionallyUntested=()=>true;\n");
     writeFileSync(join(dir,"mutation.test.ts"),'import {test,expect} from "vitest";import {add} from "./src/mutation";test("adds",()=>expect(add(2,3)).toBe(5));');
     writeFileSync(join(dir,"vitest.config.mjs"),'export default {test:{include:["mutation.test.ts"]}};');
     const mutation=JSON.parse(run(process.execPath,[launcher,"mutate","--node",process.execPath,"--vitest-package",resolve(process.env.ERRSPEC_VITEST_PACKAGE),"--fail-on-undetected","--format","json"]));
-    assert.equal(mutation.runComplete,true);assert.equal(mutation.summary.killed,2);
+    assert.equal(mutation.runComplete,true);assert.equal(mutation.summary.killed,2);assert.equal(mutation.summary.ignored,2);
+    assert.ok(mutation.mutants.filter(m=>m.status==='Ignored').every(m=>m.ignored==='disabled: explicit installed-package exclusion'&&m.attempts.length===0));
     writeFileSync(join(dir,"api.mjs"), `
 import assert from 'node:assert/strict';
 import {defineConfig,runMutation} from '@errspec/core';
@@ -191,7 +192,7 @@ if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equa
     run(process.execPath,["api.mjs","--shard"]);
     run(process.execPath,["api.mjs","--parallel"]);
     run(process.execPath,["api.mjs","--parallel","--cache","--cached"]);
-    extraChecks.push("embedded-mutation-driver","installed-core-mutation","installed-core-result-cache","installed-core-shard-selection","installed-core-parallel-execution");
+    extraChecks.push("embedded-mutation-driver","installed-core-mutation","installed-core-result-cache","installed-core-shard-selection","installed-core-parallel-execution","installed-comment-exclusions");
     writeFileSync(join(dir,".gitignore"),"node_modules/\ncache/\n.errspec/mutation-cache/\n");
     run("git",["init","--quiet"]);
     run("git",["add","."]);
