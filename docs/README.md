@@ -22,7 +22,7 @@
 - [Vitestによる変異の生成・実行・判定のRequirements](products/errspec/features/mutation-testing/requirements.md) / [Design](products/errspec/features/mutation-testing/design.md)（`mutate`として実装）
 - [障害を差し込んだ状態検査のRequirements](products/errspec/features/failure-atomicity/requirements.md) / [Design](products/errspec/features/failure-atomicity/design.md)
 
-全機能提供の目標と、目標に対する実装済みの範囲は[mutator 0.2.0との機能対応表](products/errspec/mutator-coverage.md)を参照してください。最初のミューテーション機能は、Vitestによる生成・実行・判定です。差分実行や永続キャッシュなどは後続の機能です。
+全機能提供の目標と、目標に対する実装済みの範囲は[mutator 0.2.0との機能対応表](products/errspec/mutator-coverage.md)を参照してください。Vitestによる生成・実行・判定に加え、差分選択、セッション再利用、並列・分割、明示的な結果・到達記録のキャッシュと除外を提供しています。残る要件と受け入れ検証は[実装状況](products/errspec/implementation-status.md)にまとめています。
 
 CLIの責任分離、検証済み入力の型、判定とレポートの分離は実装済みです。共通機能の配置と期待値の確認は[Rustコードとsnaptestの基準](engineering/guidelines/rust-code.md)に従います。
 機能追加や出力の意味の変更は、別の要件として判断します。

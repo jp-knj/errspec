@@ -125,6 +125,8 @@ impl File {
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Info {
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub relocation: bool,
     pub directory: String,
     pub reused: usize,
     pub executed: usize,

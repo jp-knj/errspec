@@ -164,10 +164,36 @@ and configurations whose resolved values cannot be serialized disable the cache
 until their external inputs and lifecycle can be acquired. Persistence errors
 remain visible as incomplete execution.
 
-The first cache is deliberately strict within a checkout: position-only edits
-keep mutant IDs but invalidate results and coverage. Cross-checkout reuse,
-scope-aware invalidation and experimental callgraph selection are subsequent
+Position-only edits keep mutant IDs but still invalidate results and coverage.
+Scope-aware invalidation and experimental callgraph selection are subsequent
 stages.
+
+### Reusing a cache in another checkout
+
+`--cache --cache-relocation` / `cache: true, cacheRelocation: true` allows the
+project root to move. This is off by default. Enable it only when deterministic
+tests and dependencies have the same meaning after relocation: their assertions
+and behavior must not depend on the absolute project location, `cwd`, `PWD` or
+`INIT_CWD`. `--no-cache-relocation` overrides configured true. `cache.relocation`
+marks this mode; switching modes invalidates stored evidence.
+
+Owned project paths, dependency edges under the project, known runner setup paths
+and the project portion of invocation/runtime locations use tagged relative
+identities. Actual current files and installed dependency contents are still
+hashed, including external packages and resolved dependency edges. External
+locations retain their absolute identity. Other environment values, provided
+context, configuration values and file contents are compared exactly; a value
+containing an absolute path there can deliberately prevent cross-checkout reuse.
+This mode does not rewrite project files, runtime paths, user configuration or
+test values. It changes only fingerprint identities for the declared locations.
+
+Copy the dedicated cache directory alongside an otherwise identical checkout.
+The current ordinary baseline must still pass and registration must match before
+probe/results reuse. Current task IDs are rebound, and final input validation
+still detects changes. Dependency/test/configuration/environment changes or
+deleted killing checks trigger fresh verification, including after relocation.
+Inputs such as a different CI run ID remain bound and may prevent reuse; storing
+the cache alone does not establish that two environments are interchangeable.
 
 ## Sharded execution
 
