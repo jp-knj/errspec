@@ -25,6 +25,7 @@ pub struct Options {
     pub policy: super::policy::Policy,
     pub since: Option<String>,
     pub diff_unit: Option<super::selection::Unit>,
+    pub shard: Option<super::sharding::Shard>,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -49,12 +50,16 @@ impl Default for Options {
             policy: Default::default(),
             since: None,
             diff_unit: None,
+            shard: None,
         }
     }
 }
 impl Options {
     pub fn validate(&self) -> Result<(), String> {
         self.policy.validate()?;
+        if let Some(shard) = &self.shard {
+            shard.validate()?;
+        }
         if self.since.as_ref().is_some_and(|s| s.is_empty()) {
             return Err("since must not be empty".into());
         }

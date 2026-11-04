@@ -714,6 +714,20 @@ fn run_inner(
             .retain(|m| selected.contains(&m.candidate.key));
         report.selection = Some(selection);
     }
+    if let Some(shard) = request.shard {
+        let (selected, info) = shard
+            .select(
+                report
+                    .mutants
+                    .iter()
+                    .map(|mutant| mutant.candidate.key.as_str()),
+            )
+            .map_err(Failure::protocol)?;
+        report
+            .mutants
+            .retain(|mutant| selected.contains(&mutant.candidate.key));
+        report.shard = Some(info);
+    }
     if request.typecheck {
         let response = driver.request(json!({"op":"typecheck", "keys":report.mutants.iter().map(|m| &m.candidate.key).collect::<Vec<_>>()}), Duration::MAX, startup)?;
         if response.timeout {

@@ -139,6 +139,9 @@ enum Action {
         since: Option<String>,
         #[arg(long, value_enum)]
         diff_unit: Option<MutationDiffUnit>,
+        /// Execute one deterministic partition, e.g. --shard 1/4.
+        #[arg(long)]
+        shard: Option<errspec::mutation::sharding::Shard>,
         /// Mutation settings; separate from the error-contract configuration.
         #[arg(long)]
         config_file: Option<PathBuf>,
@@ -337,6 +340,7 @@ impl Cli {
             Action::Mutate {
                 since,
                 diff_unit,
+                shard,
                 config_file,
                 root,
                 include,
@@ -379,6 +383,7 @@ impl Cli {
                         options: errspec::mutation::options::Options {
                             since,
                             diff_unit: diff_unit.map(Into::into),
+                            shard,
                             root,
                             include,
                             exclude,

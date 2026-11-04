@@ -169,6 +169,27 @@ keep mutant IDs but invalidate results and coverage. Cross-checkout reuse,
 scope-aware invalidation and experimental callgraph selection are subsequent
 stages.
 
+## Sharded execution
+
+`--shard 1/4` selects one deterministic partition of the requested candidates.
+The API/configuration form is `shard: { index: 1, total: 4 }`; indices start at
+one. Explicit CLI/API selection replaces the configured shard, API `null` clears
+it, and `--shard 1/1` includes the whole requested inventory.
+
+Partitioning uses the stable mutant key, after Git and `only` filters. Iteration
+order and position-only edits do not alter assignments. The union of all shards
+contains each requested candidate once. `report.shard` reports the algorithm,
+eligible, selected and omitted counts. Scores and quality gates apply to that
+shard; they do not establish a combined full-project result. Pending selected
+candidates still leave the score unknown and cannot pass a full-score gate.
+
+Baselines and cached probe observations cover the whole selected runner project.
+Typechecking and mutant trials use only the shard. Compatible results from
+sequential shards can accumulate in the same cache and support a later unsharded
+repeat. Concurrent writes remain atomic but may lose cache entries, requiring
+fresh verification. Sampling and time budgets apply separately within each shard
+invocation. Sharding does not start parallel workers by itself.
+
 ## Worker ownership and orphan recovery
 
 Mutation runners use a native supervisor as their process-group leader. The

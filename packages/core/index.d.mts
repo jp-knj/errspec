@@ -12,6 +12,7 @@ export interface MutationPolicy {
 export interface MutationOptions {
   since?: string | null;
   diffUnit?: "node" | "scope" | null;
+  shard?: { index: number; total: number } | null;
   root?: string;
   node?: string;
   include?: string[];
@@ -99,6 +100,7 @@ export interface MutationReport {
   diagnostics: { code: string; message: string }[];
   mutants: Mutant[];
   workers?: { active: number; recovered: number; unverified: number; endpointUnavailable?: number; warnings?: string[] };
+  shard?: { index: number; total: number; algorithm: "sha256_prefix_v1"; eligible: number; selected: number; omitted: number };
   cache?: {
     directory: string; reused: number; executed: number; saved: number;
     invalidated: boolean; fingerprint?: string; disabledReason?: string; warnings?: string[];

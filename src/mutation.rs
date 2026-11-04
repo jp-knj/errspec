@@ -7,6 +7,7 @@ pub mod options;
 pub mod ownership;
 pub mod policy;
 pub mod selection;
+pub mod sharding;
 pub mod syntax;
 
 pub const RULES_VERSION: &str = "1";
@@ -357,6 +358,8 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workers: Option<ownership::Info>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard: Option<sharding::Info>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<policy::PolicyReport>,
     #[serde(skip)]
     fail_on_undetected: bool,
@@ -406,6 +409,7 @@ impl Report {
             selection: None,
             cache: None,
             workers: None,
+            shard: None,
             policy: None,
             fail_on_undetected: gate,
         }

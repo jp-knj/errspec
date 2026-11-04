@@ -190,6 +190,17 @@
     "fullDryRun": {
       "type": "boolean"
     },
+    "shard": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "object", "additionalProperties": false, "required": ["index", "total"],
+          "properties": {
+            "index": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+            "total": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+          }
+        }
+      ]
+    },
     "cacheDir": {
       "type": [
         "string",

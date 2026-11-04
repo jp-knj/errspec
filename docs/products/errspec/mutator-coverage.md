@@ -32,7 +32,7 @@
 | disableコメントとStrykerコメントによる除外 | 未実装 |
 | `accept`、理由付きの同値mutant承認、古くなった承認の案内 | `accept --reason`と`errspec.accepted.json`で提供 |
 | custom mutator／ignorer plugin、モジュール・パッケージからの読取、mutator単位の除外、plugin変更時のキャッシュ無効化 | `--exclude-mutator`を提供。custom pluginとキャッシュは未実装 |
-| `-j`による並列実行、長い実行の分割 | 未実装 |
+| `-j`による並列実行、長い実行の分割 | `--shard INDEX/TOTAL`と設定・APIで候補を決定的に分割する。Git／only後の集合を重複・欠落なく分け、score・gate・予算は各shardの範囲。並列worker poolは未実装 |
 | `--mutants-per-line`の決定的な標本選択、`--time-budget`、未実行の`Pending`表示 | 同名の指定と、理由付きの`Pending`で提供 |
 | hit limit、stall／total timeout、予算を延長した再実行、RuntimeErrorの再確認 | `mutate`で提供。再試行は一候補につき一度まで |
 | SIGINT／SIGTERM時の子プロセス終了、前回の孤立プロセスの検査と終了 | Native supervisorが所有するrunner groupを終了。親の異常終了を自動検出し、次回の起動でもcapabilityを照合して孤立groupを回収する。古いPIDへsignalを送らない。Unix endpoint禁止時は親監視を維持し、その状態をreportへ示す |

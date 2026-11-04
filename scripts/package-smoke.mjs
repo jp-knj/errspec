@@ -172,19 +172,22 @@ assert.equal(result.report.diagnostics[0].code,'EC_MUTATION_CONFIG');
 import assert from 'node:assert/strict';
 import {defineConfig,runMutation} from '@errspec/core';
 const diff=process.argv.includes('--diff');
+const sharded=process.argv.includes('--shard');
 const cache=process.argv.includes('--cache'),warm=process.argv.includes('--cached');
-const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},reuseSession:true,cache,...(diff?{since:'HEAD',policy:{timeBudget:0}}:{failOnUndetected:true})}));
+const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},reuseSession:true,cache,...(diff?{since:'HEAD',policy:{timeBudget:0}}:sharded?{shard:{index:1,total:2},policy:{timeBudget:0}}:{failOnUndetected:true})}));
 assert.equal(result.exitCode,0);
 assert.equal(result.report.runComplete,true);
 assert.equal(result.report.engine.sessionReuse,'available');
-if(diff){assert.equal(result.report.selection.selected,1);assert.ok(result.report.selection.omitted>0);assert.ok(result.report.mutants.every(m=>m.line===2));}
+if(sharded){assert.equal(result.report.shard.index,1);assert.equal(result.report.shard.total,2);assert.equal(result.report.shard.selected,result.report.summary.total);assert.equal(result.report.shard.selected+result.report.shard.omitted,result.report.shard.eligible);assert.ok(result.report.mutants.every(m=>BigInt('0x'+m.key.slice(0,16))%2n===0n));}
+else if(diff){assert.equal(result.report.selection.selected,1);assert.ok(result.report.selection.omitted>0);assert.ok(result.report.mutants.every(m=>m.line===2));}
 else assert.equal(result.report.summary.killed,2);
 if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equal(result.report.cache.reused,warm?2:0);assert.equal(result.report.cache.executed,warm?0:2);assert.equal(result.report.cache.saved,2);assert.equal(result.report.cache.coverageReused,warm?true:undefined);}
 `);
     run(process.execPath,["api.mjs"]);
     run(process.execPath,["api.mjs","--cache"]);
     run(process.execPath,["api.mjs","--cache","--cached"]);
-    extraChecks.push("embedded-mutation-driver","installed-core-mutation","installed-core-result-cache");
+    run(process.execPath,["api.mjs","--shard"]);
+    extraChecks.push("embedded-mutation-driver","installed-core-mutation","installed-core-result-cache","installed-core-shard-selection");
     writeFileSync(join(dir,".gitignore"),"node_modules/\ncache/\n.errspec/mutation-cache/\n");
     run("git",["init","--quiet"]);
     run("git",["add","."]);
