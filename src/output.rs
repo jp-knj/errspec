@@ -158,6 +158,18 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                     ));
                 }
             }
+            if let Some(workers) = &report.workers {
+                lines.push(format!(
+                    "workers: {} active, {} recovered, {} unverified",
+                    workers.active, workers.recovered, workers.unverified
+                ));
+                if workers.endpoint_unavailable > 0 {
+                    lines.push("  ownership endpoint unavailable; automatic parent monitoring remains active".into());
+                }
+                for warning in &workers.warnings {
+                    lines.push(format!("  warning: {warning}"));
+                }
+            }
             if let Some(cache) = &report.cache {
                 lines.push(format!(
                     "cache: {} reused, {} executed, {} records saved",

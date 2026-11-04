@@ -168,3 +168,25 @@ The first cache is deliberately strict within a checkout: position-only edits
 keep mutant IDs but invalidate results and coverage. Cross-checkout reuse,
 scope-aware invalidation and experimental callgraph selection are subsequent
 stages.
+
+## Worker ownership and orphan recovery
+
+Mutation runners use a native supervisor as their process-group leader. The
+native owner retains its child handle until group termination. If the owner
+exits unexpectedly, the supervisor detects its changed kernel parent and ends
+its own group, including blocked Node workers and ordinary descendants.
+
+Versioned ownership records and capability-authenticated Unix endpoints live
+under a private `/tmp/errspec-workers-v1-<uid>` directory. Startup recovery asks a
+live supervisor to verify its owner and group before terminating itself. It never
+signals a PID from an old record. Active runs, mismatched identities and tokens
+are left alone. Scanning is bounded to three seconds and 256 records; unresolved
+records are reported in optional `workers` statistics and warnings.
+
+When Unix endpoints are prohibited, automatic parent monitoring remains active.
+Set `ERRSPEC_WORKER_ENDPOINT=0` to select that mode explicitly;
+`workers.endpointUnavailable` identifies it. Immediate recovery through an
+endpoint is unavailable in that mode. Normal interrupts and deadlines still end
+the currently owned group. Orphan cleanup removes only recognized temporary
+files and leaves unexpected files alone. Workers deliberately detached into a
+different group remain outside this ownership contract.

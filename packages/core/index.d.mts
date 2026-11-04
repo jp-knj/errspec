@@ -98,6 +98,7 @@ export interface MutationReport {
   };
   diagnostics: { code: string; message: string }[];
   mutants: Mutant[];
+  workers?: { active: number; recovered: number; unverified: number; endpointUnavailable?: number; warnings?: string[] };
   cache?: {
     directory: string; reused: number; executed: number; saved: number;
     invalidated: boolean; fingerprint?: string; disabledReason?: string; warnings?: string[];

@@ -10,6 +10,7 @@ mod mutation_api;
 mod mutation_cache;
 mod mutation_config;
 mod mutation_git;
+mod mutation_ownership;
 mod mutation_source;
 mod onboard;
 mod output;
@@ -26,6 +27,10 @@ use clap::{CommandFactory, FromArgMatches};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    if let Err(error) = owned_process::retain_children() {
+        eprintln!("Cannot retain child-process ownership: {error}");
+        return ExitCode::from(2);
+    }
     let matches = cli::Cli::command().get_matches();
     let explicit_config =
         matches.value_source("config") == Some(clap::parser::ValueSource::CommandLine);
@@ -68,6 +73,9 @@ fn main() -> ExitCode {
     }
     if matches!(request, request::Request::MutationApi) {
         return mutation_api::entry();
+    }
+    if let request::Request::MutationSupervisor(path) = &request {
+        return mutation_ownership::entry(path);
     }
     output::write(app::execute(request), format)
 }

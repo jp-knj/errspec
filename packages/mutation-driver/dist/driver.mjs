@@ -2025,13 +2025,13 @@ function verifyInputs() {
 }
 function native(source, file, validateOnly = false) {
   const result = spawnSync(options.binary, ["__mutation-source"], {
-    input: JSON.stringify({ source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation, facts: !!options.since }),
+    input: JSON.stringify({ source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation, facts: !!options.since, engineFingerprint: options.engineFingerprint }),
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     timeout: 60000
   });
   if (result.status !== 0)
-    throw failure("EC_MUTATION_INSTRUMENTATION", result.stderr || "Native parser failed");
+    throw failure(result.stderr?.startsWith("EC_MUTATION_INPUT:") ? "EC_MUTATION_INPUT" : "EC_MUTATION_INSTRUMENTATION", result.stderr || "Native parser failed");
   try {
     return JSON.parse(result.stdout);
   } catch {
