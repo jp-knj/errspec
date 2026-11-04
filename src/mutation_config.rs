@@ -165,6 +165,8 @@ pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) 
         ("cache", "cache"),
         ("cache_relocation", "cacheRelocation"),
         ("no_cache_relocation", "cacheRelocation"),
+        ("cache_scope", "cacheScope"),
+        ("no_cache_scope", "cacheScope"),
         ("no_cache", "cache"),
         ("cache_dir", "cacheDir"),
         ("full_dry_run", "fullDryRun"),

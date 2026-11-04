@@ -6,7 +6,10 @@ type Entries<'a> = BTreeMap<(usize, usize), Vec<&'a Candidate>>;
 
 fn pure(node: P<Node>) -> bool {
     match node.kind() {
-        Kind::FunctionDeclaration | Kind::FunctionExpression | Kind::ArrowFunction => true,
+        // Anonymous default declarations have no independently tracked owner.
+        // Their bodies must therefore stay in the module's envelope.
+        Kind::FunctionDeclaration => node.name().is_some(),
+        Kind::FunctionExpression | Kind::ArrowFunction => true,
         Kind::VariableDeclaration => {
             node.name().is_some_and(|n| n.kind() == Kind::Identifier)
                 && node.initializer().is_some_and(|n| {
@@ -217,6 +220,12 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
             fingerprint(rules, *node, false, &mut full);
             let mut effects = Sha256::new();
             fingerprint(rules, *node, name == "module", &mut effects);
+            // Compiler pragmas can alter behavior without changing syntax. Until
+            // their attachments are acquired, commented files require raw identity.
+            if name == "module" && !comments::acquire(rules.file).is_empty() {
+                effects.update(b"comment-sensitive-source-v1\0");
+                effects.update(rules.file.text().as_bytes());
+            }
             let mut refs = BTreeSet::new();
             let mut unknown = false;
             references(*node, *node, &mut refs, &mut unknown);

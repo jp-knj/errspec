@@ -354,6 +354,24 @@ fn owned_syntax_facts_keep_scope_hashes_stable_across_position_changes() {
 }
 
 #[test]
+fn unowned_anonymous_default_function_bodies_remain_module_inputs() {
+    for declaration in [
+        "export default function",
+        "export default async function",
+        "export default function*",
+    ] {
+        let source = format!("{declaration}(){{const value=1;return value-value;}}");
+        let before = generate_options(&source, json!({"facts":true}));
+        let after = generate_options(&source.replace("value=1", "value=0"), json!({"facts":true}));
+        assert_ne!(
+            before["metadata"]["scopes"]["module"]["effectHash"],
+            after["metadata"]["scopes"]["module"]["effectHash"],
+            "Anonymous bodies have no independently tracked function owner: {declaration}"
+        );
+    }
+}
+
+#[test]
 fn scope_entries_identify_the_direct_body_and_exclude_ignored_or_removed_guards() {
     let source = "export function outer(n:number){const callback=()=>true;return callback();}\nexport const arrow=(n:number)=>n+1;";
     let generated = generate_options(source, json!({"facts":true}));

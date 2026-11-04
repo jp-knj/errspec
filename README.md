@@ -24,7 +24,7 @@ npm CLIとLinux/macOS向けバイナリは配布準備中です。[配布物の�
 ## 製品目標と実装状況
 
 製品目標は、[mutator 0.2.0](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/README.md)の全機能と、errspecのエラー型・失敗シナリオ検証を併せて提供することです。
-現在は`scan`、`init`、`check`、`verify`、`snapshot`、`coverage`と、Vitest用の`mutate`を提供しています。mutationの差分選択、セッション再利用、並列・分割、明示的なキャッシュと除外も利用できます。[機能対応表](docs/products/errspec/mutator-coverage.md)に対象の全機能と実装状況をまとめています。再利用の粒度改善と追加ランナーなどは開発中です。
+現在は`scan`、`init`、`check`、`verify`、`snapshot`、`coverage`と、Vitest用の`mutate`を提供しています。mutationの差分選択、セッション再利用、並列・分割、明示的なキャッシュと除外も利用できます。[機能対応表](docs/products/errspec/mutator-coverage.md)に対象の全機能と実装状況をまとめています。関数単位の再利用は`--cache --cache-scope`で有効にでき、追加ランナーなどは開発中です。
 
 互換性は機能の包含を基準とし、既存errspecのCLI・終了コード・設定・JSON・testkit APIを維持します。ミューテーション機能は追加機能として個別のRequirements・Designで具体化します。
 

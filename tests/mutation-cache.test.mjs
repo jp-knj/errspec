@@ -201,7 +201,7 @@ test("cache storage cannot overlap the project root or unrelated existing data",
   assert.equal(run(root,["--cache","--cache-dir","."],2).testsExecuted,false);
   assert.equal(readFileSync(join(root,"src/value.ts"),"utf8"),"export const add=(a:number,b:number)=>a+b;");
 });
-for(const kind of ["source","test","dependency","compilation"])test(`reused evidence detects a ${kind} change during final inspection`,{timeout:60000},t=>{
+for(const kind of ["source","test","dependency","compilation","scope"])test(`reused evidence detects a ${kind} change during final inspection`,{timeout:60000},t=>{
   const root=fixture(t),control=realpathSync(mkdtempSync(join(tmpdir(),"errspec-cache-control-"))),marker=join(control,"enabled");
   t.after(()=>rmSync(control,{recursive:true,force:true}));
   const directory=join(root,"runner"),dist=join(directory,"dist"),vitest=join(repo,"examples/checkout/node_modules/vitest");
@@ -215,8 +215,8 @@ for(const kind of ["source","test","dependency","compilation"])test(`reused evid
     writeFileSync(join(root,"package.json"),JSON.stringify({type:"module",dependencies:{vitest:"5.0.5","local-value":"1.0.0"}}));
     writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";test("smoke",()=>expect(1).toBe(1));');
   }
-  const path=kind==="compilation"?join(control,'define'):join(root,kind==="source"?"src/added.ts":kind==="test"?"new.test.ts":"node_modules/local-value/index.js");
-  const code=kind==="compilation"?'0':kind==="source"?"export const added=true;":kind==="test"?'import {test} from "vitest";test("new",()=>{});':'export const unused=2;';
+  const path=kind==="compilation"?join(control,'define'):join(root,kind==="source"||kind==="scope"?"src/added.ts":kind==="test"?"new.test.ts":"node_modules/local-value/index.js");
+  const code=kind==="compilation"?'0':kind==="source"||kind==="scope"?"export const added=true;":kind==="test"?'import {test} from "vitest";test("new",()=>{});':'export const unused=2;';
   writeFileSync(join(dist,"node.js"),`import {existsSync,writeFileSync} from 'node:fs';import {createVitest as actual} from ${JSON.stringify(pathToFileURL(join(vitest,"dist/node.js")).href)};let contexts=0;export async function createVitest(...args){if(++contexts===3&&existsSync(${JSON.stringify(marker)}))writeFileSync(${JSON.stringify(path)},${JSON.stringify(code)});return actual(...args);}`);
   writeFileSync(join(root,"vitest.config.mjs"),'export default {test:{include:["*.test.ts"]}};');
   if(kind==="compilation"){
@@ -224,11 +224,14 @@ for(const kind of ["source","test","dependency","compilation"])test(`reused evid
     writeFileSync(join(root,'value.test.ts'),`import {test,expect} from 'vitest';import {add} from './src/value';test('cancellation',()=>expect(add(__ERRSPEC_INPUT__)).toBe(0));`);
     writeFileSync(join(root,'vitest.config.mjs'),`import {readFileSync} from 'node:fs';export default {define:{__ERRSPEC_INPUT__:readFileSync(${JSON.stringify(path)},'utf8')},test:{include:['*.test.ts']}};`);
   }
-  const cold=run(root,["--cache","--vitest-package",directory]);
+  const args=["--cache","--vitest-package",directory,...(kind==="scope"?["--cache-scope"]:[])];
+  const cold=run(root,args);
   if(kind==="dependency")assert.ok(cold.summary.noCoverage>0);else assert.ok(cold.cache.saved>0);
   writeFileSync(marker,"enabled");
-  const report=run(root,["--cache","--vitest-package",directory],2);
-  assert.equal(report.cache.coverageReused,true,JSON.stringify(report.cache));
+  if(kind==="scope")writeFileSync(join(root,"src/value.ts"),"\n"+readFileSync(join(root,"src/value.ts"),"utf8"));
+  const report=run(root,args,2);
+  assert.equal(report.cache.coverageReused,kind==="scope"?undefined:true,JSON.stringify(report.cache));
+  if(kind==="scope")assert.ok(report.cache.scopeReused>0,JSON.stringify(report.cache));
   if(kind==="dependency"){assert.equal(report.cache.reused,0);assert.equal(report.cache.invalidated,true);}
   else assert.ok(report.cache.reused>0,JSON.stringify(report.cache));
   assert.equal(report.runComplete,false);assert.equal(report.summary.score,null);

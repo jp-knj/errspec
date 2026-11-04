@@ -176,9 +176,43 @@ and configurations whose resolved values cannot be serialized disable the cache
 until their external inputs and lifecycle can be acquired. Persistence errors
 remain visible as incomplete execution.
 
-Position-only edits keep mutant IDs but still invalidate results and coverage.
-Scope-aware invalidation and experimental callgraph selection are subsequent
-stages.
+By default, position-only edits keep mutant IDs but invalidate results and
+coverage. Experimental callgraph selection remains a subsequent stage.
+
+### Reusing unchanged functions after edits
+
+`--cache --cache-scope` / `cache: true, cacheScope: true` enables conservative
+function-level result reuse. This is off by default; `--no-cache-scope` overrides
+configured true. Enable it for deterministic, isolated test files whose behavior
+does not depend on source text, source positions or stack-trace locations.
+Source reflection is outside this mode's contract.
+
+Every source edit still refreshes the full instrumented probe. Syntax without
+positions identifies unchanged function bodies. The native planner compares the
+test files that entered changed functions both before and after the edit. It
+reuses an unchanged function's assertion outcome only when those files are
+disjoint from all of the mutant's current covering test files, and its covering
+and selected test IDs still match. Different tests in one file are treated as
+sharing state. Calls connected only through test code therefore still revalidate.
+Unchanged position-only edits can reuse results across all functions.
+
+Changed scopes with missing/excluded entry guards or opaque calls, changed scope
+inventories and overlapping file cohorts revalidate. Compiler comments currently require the raw
+identity of their entire file, so even moving a commented file's code revalidates;
+comment attachment semantics are not inferred. Module initialization/signatures,
+anonymous default declarations without a function owner, test/helper files,
+dependencies, resolved compilation/plugins, environment and
+other execution inputs remain bound. Unknown compilation inputs disable both
+forms of cache reuse. New timeouts, retries and typechecks use the ordinary
+verification rules.
+
+`cache.scope` identifies the mode, `cache.scopeReused` counts outcomes recovered
+from the scoped document, and `cache.reused` includes exact and scope hits.
+`cache.invalidated` can be true when exact inputs changed but a subset of scoped
+outcomes was retained. `scope-results-v1.json` is separate from strict results and
+coverage. Both paths check actual raw inputs again before saving. Unselected
+scoped records are retained only when their complete acquired context is
+unchanged; an edited context may require another invocation to fill its cache.
 
 ### Reusing a cache in another checkout
 

@@ -10,7 +10,7 @@ pub struct Observation {
     pub entry_key: String,
     pub files: BTreeSet<String>,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Scope {
     pub file: String,
@@ -20,7 +20,7 @@ pub struct Scope {
     /// None means entry observation was unavailable, not that the scope was unused.
     pub observation: Option<Observation>,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Context {
     pub eligible: bool,
@@ -219,6 +219,25 @@ fn affected(before: &Context, current: &Context) -> Affected {
     Affected::Files(files)
 }
 impl File {
+    pub fn refreshed(self, context: Context) -> Option<Self> {
+        let mut current = Self::new(context)?;
+        // Carry unselected records only when their complete acquired context is
+        // unchanged. Otherwise this run must establish each retained outcome.
+        if self.kind == current.kind
+            && self.schema_version == current.schema_version
+            && self.acquisition_mode == current.acquisition_mode
+            && self.context == current.context
+        {
+            current.records = self.records;
+        }
+        Some(current)
+    }
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
     pub fn new(context: Context) -> Option<Self> {
         context.valid().then_some(Self {
             kind: "errspec/mutation-scope-results".into(),

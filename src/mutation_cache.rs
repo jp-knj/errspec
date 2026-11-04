@@ -1,5 +1,5 @@
 //! Acquire cache inputs and persist results. Reuse judgments live in mutation::cache.
-use errspec::mutation::{cache, options::Options};
+use errspec::mutation::{cache, options::Options, scope_cache};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -74,13 +74,24 @@ impl Facts {
 }
 pub(crate) struct Stamp {
     pub hash: String,
+    pub scope_envelope: Option<String>,
     pub baseline_paths: BTreeSet<PathBuf>,
 }
 pub(crate) struct Store {
     pub directory: PathBuf,
     pub data: cache::File,
     pub stamp: Stamp,
+    pub scope: Option<ScopeStore>,
 }
+pub(crate) struct ScopeStore {
+    pub context: scope_cache::Context,
+    pub previous: Option<scope_cache::File>,
+}
+pub(crate) struct Projection {
+    pub source_hash: String,
+    pub semantic_hash: String,
+}
+pub(crate) type Projections = BTreeMap<PathBuf, Projection>;
 #[derive(Debug)]
 pub(crate) enum Error {
     Unavailable(String),
@@ -97,9 +108,18 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-fn part(hash: &mut Sha256, bytes: &[u8]) {
+fn digest_part(hash: &mut Sha256, bytes: &[u8]) {
     hash.update((bytes.len() as u64).to_le_bytes());
     hash.update(bytes);
+}
+#[derive(Default)]
+struct Hashes {
+    raw: Sha256,
+    scoped: Sha256,
+}
+fn part(hash: &mut Hashes, bytes: &[u8]) {
+    digest_part(&mut hash.raw, bytes);
+    digest_part(&mut hash.scoped, bytes);
 }
 fn digest(path: &Path) -> Result<String, Error> {
     let mut file = fs::OpenOptions::new()
@@ -124,13 +144,14 @@ fn digest(path: &Path) -> Result<String, Error> {
     Ok(format!("{:x}", hash.finalize()))
 }
 struct Inputs<'a> {
-    hash: Sha256,
+    hash: Hashes,
     files: BTreeMap<PathBuf, String>,
     packages: BTreeSet<PathBuf>,
     cache_directory: &'a Path,
     temp: &'a Path,
     signal: &'a AtomicI32,
     relocation_root: Option<&'a Path>,
+    projections: Option<&'a Projections>,
 }
 fn path_identity(path: &Path, relocation_root: Option<&Path>) -> Vec<u8> {
     let mut identity = vec![];
@@ -159,6 +180,28 @@ fn relocate_value(value: &mut serde_json::Value, root: &Path) {
     }
 }
 impl Inputs<'_> {
+    fn content(&mut self, path: &Path, value: &str) -> Result<(), Error> {
+        digest_part(&mut self.hash.raw, value.as_bytes());
+        if let Some(projection) = self.projections.and_then(|all| all.get(path)) {
+            if value != projection.source_hash
+                || projection.semantic_hash.len() != 64
+                || !projection
+                    .semantic_hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(Error::Changed(format!(
+                    "Scope source changed since syntax acquisition: {}",
+                    path.display()
+                )));
+            }
+            digest_part(&mut self.hash.scoped, b"syntax-module-envelope-v1");
+            digest_part(&mut self.hash.scoped, projection.semantic_hash.as_bytes());
+        } else {
+            digest_part(&mut self.hash.scoped, value.as_bytes());
+        }
+        Ok(())
+    }
     fn path(&mut self, path: &Path) {
         part(&mut self.hash, &path_identity(path, self.relocation_root));
     }
@@ -221,7 +264,7 @@ impl Inputs<'_> {
             let value = digest(path)?;
             part(&mut self.hash, b"file");
             part(&mut self.hash, relative.as_os_str().as_encoded_bytes());
-            part(&mut self.hash, value.as_bytes());
+            self.content(path, &value)?;
             self.files.insert(path.to_owned(), value);
         } else {
             return Err(Error::Unavailable(format!(
@@ -324,12 +367,23 @@ pub(crate) fn directory(options: &Options) -> PathBuf {
             .unwrap_or_else(|| Path::new(".errspec/mutation-cache")),
     )
 }
-pub(crate) fn acquire(
+#[cfg(test)]
+fn acquire(
     options: &Options,
     facts: &Facts,
     temp: &Path,
     baseline_paths: Option<&BTreeSet<PathBuf>>,
     signal: &AtomicI32,
+) -> Result<Stamp, Error> {
+    acquire_scoped(options, facts, temp, baseline_paths, signal, None)
+}
+pub(crate) fn acquire_scoped(
+    options: &Options,
+    facts: &Facts,
+    temp: &Path,
+    baseline_paths: Option<&BTreeSet<PathBuf>>,
+    signal: &AtomicI32,
+    projections: Option<&Projections>,
 ) -> Result<Stamp, Error> {
     // Node records real paths. macOS TMPDIR commonly goes through /var while
     // its canonical path starts with /private/var; compare in one namespace.
@@ -367,13 +421,14 @@ pub(crate) fn acquire(
     }
     let cache_directory = directory(options);
     let mut input = Inputs {
-        hash: Sha256::new(),
+        hash: Hashes::default(),
         files: BTreeMap::new(),
         packages: BTreeSet::new(),
         cache_directory: &cache_directory,
         temp: &temp,
         signal,
         relocation_root: options.cache_relocation.then_some(options.root.as_path()),
+        projections,
     };
     part(&mut input.hash, cache::ENGINE_FINGERPRINT.as_bytes());
     let mut settings = serde_json::to_value(options).unwrap();
@@ -498,7 +553,7 @@ pub(crate) fn acquire(
         if baseline_paths.contains(&path) {
             part(&mut input.hash, b"resolved");
             input.path(&path);
-            part(&mut input.hash, value.as_bytes());
+            input.content(&path, &value)?;
         } else if input.files.get(&path) != Some(&value) {
             return Err(Error::Unavailable(format!(
                 "New runtime input was not acquired before execution: {}",
@@ -506,49 +561,33 @@ pub(crate) fn acquire(
             )));
         }
     }
+    if projections.is_some_and(|all| all.keys().any(|path| !input.files.contains_key(path))) {
+        return Err(Error::Unavailable(
+            "Scope inventory was not completely acquired".into(),
+        ));
+    }
     Ok(Stamp {
-        hash: format!("{:x}", input.hash.finalize()),
+        hash: format!("{:x}", input.hash.raw.finalize()),
+        scope_envelope: projections.map(|_| format!("{:x}", input.hash.scoped.finalize())),
         baseline_paths,
     })
 }
 
 pub(crate) fn load(directory: PathBuf, stamp: Stamp, info: &mut cache::Info) -> Store {
     let path = directory.join("results-v1.json");
-    let read = || -> Result<cache::File, String> {
-        let mut file = fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(&path)
-            .map_err(|e| e.to_string())?;
-        if !file.metadata().map_err(|e| e.to_string())?.is_file() {
-            return Err("Cache is not a regular file".into());
+    let data = match read_document::<cache::File>(&path) {
+        Ok(Some(data)) if data.compatible(&stamp.hash) => data,
+        Ok(None) => cache::File::new(stamp.hash.clone()),
+        Ok(Some(_)) => {
+            info.invalidated = true;
+            cache::File::new(stamp.hash.clone())
         }
-        let mut bytes = vec![];
-        Read::by_ref(&mut file)
-            .take(64 * 1024 * 1024 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| e.to_string())?;
-        if bytes.len() > 64 * 1024 * 1024 {
-            return Err("Result cache exceeds 64 MiB".into());
-        }
-        serde_json::from_slice(&bytes).map_err(|e| e.to_string())
-    };
-    let data = if !path.exists() {
-        cache::File::new(stamp.hash.clone())
-    } else {
-        match read() {
-            Ok(data) if data.compatible(&stamp.hash) => data,
-            Ok(_) => {
-                info.invalidated = true;
-                cache::File::new(stamp.hash.clone())
-            }
-            Err(error) => {
-                info.invalidated = true;
-                info.warnings.push(format!(
-                    "Result cache was not reusable: {error}; revalidating"
-                ));
-                cache::File::new(stamp.hash.clone())
-            }
+        Err(error) => {
+            info.invalidated = true;
+            info.warnings.push(format!(
+                "Result cache was not reusable: {error}; revalidating"
+            ));
+            cache::File::new(stamp.hash.clone())
         }
     };
     info.fingerprint = Some(stamp.hash.clone());
@@ -556,6 +595,7 @@ pub(crate) fn load(directory: PathBuf, stamp: Stamp, info: &mut cache::Info) -> 
         directory,
         data,
         stamp,
+        scope: None,
     }
 }
 pub(crate) fn save(store: &Store) -> Result<(), std::io::Error> {
@@ -567,35 +607,81 @@ pub(crate) fn save(store: &Store) -> Result<(), std::io::Error> {
     )
 }
 
+fn read_document<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {
+    let mut file = match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("Cache is not a regular file".into());
+    }
+    let mut bytes = vec![];
+    Read::by_ref(&mut file)
+        .take(64 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > 64 * 1024 * 1024 {
+        return Err("Cache exceeds 64 MiB".into());
+    }
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+pub(crate) fn load_scope(store: &mut Store, context: scope_cache::Context, info: &mut cache::Info) {
+    let previous = match read_document(&store.directory.join("scope-results-v1.json")) {
+        Ok(previous) => previous,
+        Err(error) => {
+            info.invalidated = true;
+            info.warnings.push(format!(
+                "Scope cache was not reusable: {error}; revalidating"
+            ));
+            None
+        }
+    };
+    store.scope = Some(ScopeStore { context, previous });
+}
+pub(crate) fn save_scope(
+    store: &mut Store,
+    mutants: &[errspec::mutation::Mutant],
+) -> Result<usize, std::io::Error> {
+    let Some(scope) = store.scope.take() else {
+        return Ok(0);
+    };
+    let data = if let Some(previous) = scope.previous {
+        previous.refreshed(scope.context)
+    } else {
+        scope_cache::File::new(scope.context)
+    };
+    let Some(mut data) = data else { return Ok(0) };
+    for mutant in mutants {
+        data.record(
+            mutant,
+            mutant.infected_by.as_ref().unwrap_or(&mutant.covered_by),
+        );
+    }
+    save_document(
+        &store.directory,
+        "scope-results-v1.json",
+        "errspec-scope-",
+        &data,
+    )?;
+    Ok(data.len())
+}
+
 pub(crate) fn load_coverage(
     directory: &Path,
     info: &mut cache::Info,
 ) -> Option<errspec::mutation::coverage_cache::File> {
-    let result = (|| -> Result<_, String> {
-        let path = directory.join("coverage-v1.json");
-        if !path.exists() {
-            return Ok(None);
-        }
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(path)
-            .map_err(|e| e.to_string())?;
-        if !file.metadata().map_err(|e| e.to_string())?.is_file() {
-            return Err("Coverage cache is not a regular file".into());
-        }
-        let mut bytes = vec![];
-        file.take(64 * 1024 * 1024 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| e.to_string())?;
-        if bytes.len() > 64 * 1024 * 1024 {
-            return Err("Coverage cache exceeds 64 MiB".into());
-        }
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|e| e.to_string())
-    })();
-    match result {
+    match read_document(&directory.join("coverage-v1.json")) {
         Ok(value) => value,
         Err(reason) => {
             info.warnings.push(format!(
@@ -640,9 +726,13 @@ fn save_document(
 
 pub(crate) fn managed_file(name: &std::ffi::OsStr) -> bool {
     name.to_str().is_some_and(|name| {
-        matches!(name, "results-v1.json" | "coverage-v1.json")
-            || (name.starts_with("errspec-result-") || name.starts_with("errspec-coverage-"))
-                && name.ends_with(".tmp")
+        matches!(
+            name,
+            "results-v1.json" | "coverage-v1.json" | "scope-results-v1.json"
+        ) || (name.starts_with("errspec-result-")
+            || name.starts_with("errspec-coverage-")
+            || name.starts_with("errspec-scope-"))
+            && name.ends_with(".tmp")
     })
 }
 pub(crate) fn check_directory(path: &Path) -> Result<(), String> {
@@ -798,6 +888,51 @@ mod tests {
                 cache: true,
                 ..Default::default()
             };
+            let project_file = options.root.join("index.js");
+            let mut projections = Projections::from([(
+                project_file.clone(),
+                Projection {
+                    source_hash: digest(&project_file).unwrap(),
+                    semantic_hash: "a".repeat(64),
+                },
+            )]);
+            let raw_before = acquire_scoped(
+                &options,
+                &facts,
+                &temp,
+                None,
+                &AtomicI32::new(0),
+                Some(&projections),
+            )
+            .unwrap();
+            fs::write(&project_file, "\nexport const value=true;").unwrap();
+            let mut moved_facts = facts.clone();
+            moved_facts.inputs[0].1 = digest(&project_file).unwrap();
+            assert!(matches!(
+                acquire_scoped(
+                    &options,
+                    &moved_facts,
+                    &temp,
+                    None,
+                    &AtomicI32::new(0),
+                    Some(&projections)
+                ),
+                Err(Error::Changed(_))
+            ));
+            projections.get_mut(&project_file).unwrap().source_hash =
+                moved_facts.inputs[0].1.clone();
+            let raw_after = acquire_scoped(
+                &options,
+                &moved_facts,
+                &temp,
+                None,
+                &AtomicI32::new(0),
+                Some(&projections),
+            )
+            .unwrap();
+            assert_ne!(raw_before.hash, raw_after.hash);
+            assert_eq!(raw_before.scope_envelope, raw_after.scope_envelope);
+            fs::write(&project_file, "export const value=true;").unwrap();
             let exact = acquire(&options, &facts, &temp, None, &AtomicI32::new(0)).unwrap();
             options.cache_relocation = true;
             let portable = acquire(&options, &facts, &temp, None, &AtomicI32::new(0)).unwrap();

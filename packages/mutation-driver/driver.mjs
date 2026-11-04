@@ -47,7 +47,7 @@ function verifyInputs() {
 }
 function native(source,file,validateOnly=false) {
   const result=spawnSync(options.binary,["__mutation-source"], {
-    input:JSON.stringify({source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation,arid:options.arid,aridCallees:options.aridCallees,facts:!!options.since,engineFingerprint:options.engineFingerprint}),
+    input:JSON.stringify({source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation,arid:options.arid,aridCallees:options.aridCallees,facts:!!(options.since || options.cache && options.cacheScope),engineFingerprint:options.engineFingerprint}),
     encoding:"utf8",maxBuffer:64*1024*1024,timeout:60000,
   });
   if(result.status!==0) throw failure(result.stderr?.startsWith("EC_MUTATION_INPUT:")?"EC_MUTATION_INPUT":"EC_MUTATION_INSTRUMENTATION",result.stderr||"Native parser failed");
@@ -330,8 +330,12 @@ async function handle(request) {
         entry.emitted=instrument(entry.source,entry.candidates,file,runId);
         native(entry.emitted.code,rel(file),true);
       }
+      // Entry facts describe guards actually present in the accepted switch.
+      // A placement rejected above supplies no entry observation.
+      if(generated.metadata)for(const scope of Object.values(generated.metadata.scopes))
+        if(scope.entryKey&&!entry.candidates.some(c=>c.key===scope.entryKey&&!c.ignored))delete scope.entryKey;
       const critical=options.policy?.critical.some(pattern=>matchesGlob(rel(file),pattern))?entry.candidates.map(c=>c.key):entry.critical;
-      send(request,"file",{file:rel(file),candidates:entry.candidates,critical,...(options.since?{metadata:generated.metadata}: {})});count++;
+      send(request,"file",{file:rel(file),candidates:entry.candidates,critical,...(generated.metadata?{metadata:generated.metadata}: {})});count++;
     }
     if(request.op==="discover"){
       send(request,"discovered",{cacheFacts:cacheFacts()});send(request,"done",{count});return;
