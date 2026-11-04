@@ -8,6 +8,7 @@ use errspec::{
 use std::collections::{BTreeMap, BTreeSet};
 fn context() -> Context {
     Context {
+        static_calls: None,
         eligible: true,
         envelope: "f".repeat(64),
         scopes: BTreeMap::from([

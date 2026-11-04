@@ -372,6 +372,139 @@ fn unowned_anonymous_default_function_bodies_remain_module_inputs() {
 }
 
 #[test]
+fn runtime_calls_and_import_bindings_are_acquired_without_inventing_dynamic_targets() {
+    let source = "import defaultFn, {foo as local, type OnlyType, 'literal-name' as literal} from './de\\u0070';\nimport * as namespace from './other';import type TypeOnly from './types';import './effect';\nexport function outer(parameter:()=>number){const nested=()=>local();return defaultFn()+namespace.method()+this.method()+parameter()+handlers[index]()+literal()+(local as ()=>number)();}";
+    let result = generate_options(source, json!({"facts":true}));
+    let facts: errspec::mutation::syntax::Metadata =
+        serde_json::from_value(result["metadata"].clone()).unwrap();
+    let candidates: Vec<mutation::Candidate> =
+        serde_json::from_value(result["candidates"].clone()).unwrap();
+    errspec::mutation::selection::validate(&facts, source, &candidates).unwrap();
+    let imports = facts
+        .imports
+        .iter()
+        .map(|value| {
+            (
+                value.source.as_str(),
+                value.imported.as_str(),
+                value.local.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        imports,
+        vec![
+            ("./dep", "default", "defaultFn"),
+            ("./dep", "foo", "local"),
+            ("./dep", "literal-name", "literal"),
+            ("./other", "*", "namespace")
+        ]
+    );
+    let calls = facts
+        .calls
+        .iter()
+        .map(|call| call.callee.as_deref())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls,
+        vec![
+            Some("local"),
+            Some("defaultFn"),
+            Some("namespace.method"),
+            Some("this.method"),
+            Some("parameter"),
+            None,
+            Some("literal"),
+            Some("local")
+        ]
+    );
+    assert!(facts.calls[0].scope.contains("VariableDeclaration:nested"));
+    assert!(
+        facts.calls[1..]
+            .iter()
+            .all(|call| call.scope.ends_with("FunctionDeclaration:outer#0"))
+    );
+    let mut invalid = facts.clone();
+    invalid.calls[0].scope = "missing".into();
+    assert!(errspec::mutation::selection::validate(&invalid, source, &candidates).is_err());
+    let mut duplicate = facts.clone();
+    duplicate.calls.push(facts.calls[0].clone());
+    assert!(errspec::mutation::selection::validate(&duplicate, source, &candidates).is_err());
+}
+
+#[test]
+fn static_call_relationships_follow_imports_methods_and_direction_without_joining_sibling_callers()
+{
+    use errspec::mutation::{
+        callgraph::Graph,
+        syntax::{Metadata, scope_key},
+    };
+    use std::collections::BTreeMap;
+    fn facts(source: &str) -> Metadata {
+        serde_json::from_value(generate_options(source, json!({"facts":true}))["metadata"].clone())
+            .unwrap()
+    }
+    fn owner(file: &str, metadata: &Metadata, name: &str) -> String {
+        let key = metadata
+            .scopes
+            .iter()
+            .find(|(_, scope)| scope.function && scope.name.as_deref() == Some(name))
+            .unwrap()
+            .0;
+        scope_key(file, key)
+    }
+    let mut a = facts(
+        "import defaultFn,{f as alias} from './b';import * as ns from './b';export function left(){return alias();}export function sibling(){return alias();}export function namespaced(){return ns.f();}export function fromDefault(){return defaultFn();}export function shadow(alias:()=>number){return alias();}export function separate(){return 1;}export const obj={a(){return 1},b(){return this.a();}};export function member(){return obj.b();}",
+    );
+    let b = facts(
+        "export default function main(){return 1;}export function f(){return 1;}export function separateB(){return 1;}",
+    );
+    for binding in &mut a.imports {
+        binding.resolved = Some("src/b.ts".into());
+    }
+    let graph = Graph::build(&BTreeMap::from([
+        ("src/a.ts".into(), &a),
+        ("src/b.ts".into(), &b),
+    ]))
+    .unwrap();
+    let left = owner("src/a.ts", &a, "left");
+    let sibling = owner("src/a.ts", &a, "sibling");
+    let f = owner("src/b.ts", &b, "f");
+    assert!(graph.related(&left, &f));
+    assert!(graph.related(&f, &left));
+    assert!(
+        !graph.related(&left, &sibling),
+        "A common callee is not a directed path between its callers"
+    );
+    assert!(graph.related(&owner("src/a.ts", &a, "namespaced"), &f));
+    let default = owner("src/a.ts", &a, "fromDefault");
+    assert!(graph.related(&default, &owner("src/b.ts", &b, "main")));
+    assert!(!graph.related(&default, &owner("src/b.ts", &b, "separateB")));
+    assert!(graph.related(
+        &owner("src/a.ts", &a, "member"),
+        &owner("src/a.ts", &a, "a")
+    ));
+    assert!(!graph.related(&left, &owner("src/a.ts", &a, "separate")));
+    assert!(
+        graph.related(
+            &owner("src/a.ts", &a, "shadow"),
+            &owner("src/b.ts", &b, "separateB")
+        ),
+        "Unknown parameter calls cannot establish independence"
+    );
+    let restored: Graph = serde_json::from_value(serde_json::to_value(&graph).unwrap()).unwrap();
+    assert!(restored.valid());
+    assert!(!restored.related(&left, &sibling));
+    a.imports[1].resolved = None;
+    let unavailable = Graph::build(&BTreeMap::from([
+        ("src/a.ts".into(), &a),
+        ("src/b.ts".into(), &b),
+    ]))
+    .unwrap();
+    assert!(unavailable.related(&left, &owner("src/b.ts", &b, "separateB")));
+}
+
+#[test]
 fn scope_entries_identify_the_direct_body_and_exclude_ignored_or_removed_guards() {
     let source = "export function outer(n:number){const callback=()=>true;return callback();}\nexport const arrow=(n:number)=>n+1;";
     let generated = generate_options(source, json!({"facts":true}));

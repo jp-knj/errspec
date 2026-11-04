@@ -21,6 +21,9 @@ pub(super) struct Record {
     attempt: Attempt,
 }
 impl Record {
+    pub(super) fn survived(&self) -> bool {
+        self.attempt.status == Status::Survived
+    }
     pub(super) fn capture(mutant: &Mutant, selected: &[String]) -> Option<Self> {
         if mutant.attempts.len() != 1 || mutant.attempts[0].status != mutant.status {
             return None;
@@ -129,6 +132,10 @@ impl File {
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Info {
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub experimental_callgraph: bool,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub callgraph_reused: usize,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub scope: bool,
     #[serde(skip_serializing_if = "is_zero")]

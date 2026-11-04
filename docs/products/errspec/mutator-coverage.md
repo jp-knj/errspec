@@ -24,7 +24,7 @@
 | `--since`によるGit差分の限定、`node`/`scope`単位の選択、検出テストの削除による再検査、未収集の変更テストの警告 | `--since`と`--diff-unit node/scope`を提供。テスト変更・削除やinventory外の変更では全候補を再検査し、未収集の変更テストを警告。検出テストを保存する履歴との照合は後続 |
 | `--only`で指定したmutantだけの再検査 | `mutate --only`で提供。未知のIDはエラー |
 | `--full-dry-run`による到達記録の再取得 | 同名の指定と`fullDryRun`設定・APIを提供。結果cacheとは独立に、全テストでprobeを実行する |
-| `--experimental-callgraph`による生存mutantの再検査範囲の限定 | 未実装。`scan`はエラーの伝播先を調査し、テストの省略には使わない |
+| `--experimental-callgraph`による生存mutantの再検査範囲の限定 | `--cache --cache-scope --experimental-callgraph`で既存の生存結果だけをstatic callの双方向到達で追加再利用。既定off、mode変更で再検証。実際のimport解決を取得し、未知call・入口不足は再検証する。call間の値の流れは表せず不正確になり得ることをwarningと省略件数に示す。 |
 | weak mutation、値の差によるテストの絞り込み、`not infected`の判定、無効化 | 比較・算術演算を`--weak-mutation`で提供。適用できない式と初期化・concurrentは全到達テストへ広げる |
 | 利用先のTypeScript 6以前／7以降でのmutantの型検査、`CompileError`、無効化 | `--typecheck` / `--no-typecheck`で提供。TS 5.9.3・6.0.3・7.0.2で検証 |
 | 型で同値と分かるoptional chaining mutantの除外と理由の提示 | 型検査で提供。strictNullChecksとnoUncheckedIndexedAccessを必要とする |

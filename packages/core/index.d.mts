@@ -33,6 +33,7 @@ export interface MutationOptions {
   cache?: boolean;
   cacheRelocation?: boolean;
   cacheScope?: boolean;
+  experimentalCallgraph?: boolean;
   cacheDir?: string | null;
   fullDryRun?: boolean;
   typecheckProject?: string | null;

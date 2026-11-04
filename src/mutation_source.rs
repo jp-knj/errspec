@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use tsrs_ast::{Kind, Node, SourceFile, is_type_node_kind};
 use tsrs_core::P;
 mod arid;
+mod callgraph;
 mod comments;
 mod dependencies;
 mod facts;
@@ -64,6 +65,7 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
         owners: std::collections::BTreeMap::new(),
         scopes: std::collections::BTreeMap::from([("module".into(), file.as_node())]),
         parents: std::collections::BTreeMap::new(),
+        calls: vec![],
     };
     if !request.validate_only {
         rules.visit(file.as_node(), "module", &[]);
@@ -106,6 +108,7 @@ struct Rules<'a> {
     owners: std::collections::BTreeMap<String, String>,
     scopes: std::collections::BTreeMap<String, P<Node>>,
     parents: std::collections::BTreeMap<String, String>,
+    calls: Vec<errspec::mutation::syntax::Call>,
 }
 impl Rules<'_> {
     fn start(&self, node: P<Node>) -> usize {
@@ -340,6 +343,16 @@ impl Rules<'_> {
             (owned.as_str(), &[][..])
         };
         let was_critical = self.in_critical;
+        if self.facts && matches!(kind, Kind::CallExpression | Kind::NewExpression) {
+            self.calls.push(errspec::mutation::syntax::Call {
+                scope: owner.into(),
+                start: self.start(node),
+                end: self.end(node),
+                callee: node
+                    .expression()
+                    .and_then(|callee| callgraph::path(self, callee)),
+            });
+        }
         if matches!(
             kind,
             Kind::FunctionDeclaration

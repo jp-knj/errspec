@@ -13,6 +13,33 @@ pub struct Metadata {
     /// Literal runtime module specifiers, including side-effect/re-export/literal calls.
     #[serde(default)]
     pub dependencies: Vec<String>,
+    #[serde(default)]
+    pub calls: Vec<Call>,
+    #[serde(default)]
+    pub imports: Vec<Import>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Call {
+    pub scope: String,
+    pub start: usize,
+    pub end: usize,
+    /// None is an acquired dynamic/unknown callee, never an absent edge proof.
+    pub callee: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Import {
+    pub source: String,
+    pub imported: String,
+    pub local: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<String>,
+}
+
+pub fn scope_key(file: &str, owner: &str) -> String {
+    serde_json::to_string(&(file, owner)).unwrap()
 }
 
 pub fn source_matches(metadata: &Metadata, source: &str) -> bool {
@@ -51,7 +78,7 @@ pub struct SyntaxNode {
 }
 
 /// Return the direct runtime body, never a nested callback's body.
-pub fn function_body<'a>(metadata: &'a Metadata, scope: &Scope) -> Option<&'a SyntaxNode> {
+pub fn function_node<'a>(metadata: &'a Metadata, scope: &Scope) -> Option<&'a SyntaxNode> {
     if !scope.function {
         return None;
     }
@@ -78,5 +105,9 @@ pub fn function_body<'a>(metadata: &'a Metadata, scope: &Scope) -> Option<&'a Sy
             .filter_map(|index| metadata.nodes.get(*index))
             .find(|node| matches!(node.kind.as_str(), "ArrowFunction" | "FunctionExpression"))?;
     }
+    Some(function)
+}
+pub fn function_body<'a>(metadata: &'a Metadata, scope: &Scope) -> Option<&'a SyntaxNode> {
+    let function = function_node(metadata, scope)?;
     metadata.nodes.get(*function.children.last()?)
 }

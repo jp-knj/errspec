@@ -375,11 +375,17 @@ fn run_inner(
     if request.cache {
         let directory = crate::mutation_cache::directory(&request);
         report.cache = Some(mutation::cache::Info {
+            experimental_callgraph: request.experimental_callgraph,
             scope: request.cache_scope,
             directory: directory.display().to_string(),
             relocation: request.cache_relocation,
             ..Default::default()
         });
+        if request.experimental_callgraph {
+            report.cache.as_mut().unwrap().warnings.push(
+                "Experimental static-call reuse can miss dependencies carried through values or shared state; only old survivors may be pruned".into()
+            );
+        }
         fs::create_dir_all(&directory)
             .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
         let directory = directory
@@ -751,9 +757,25 @@ fn run_inner(
                 )
             })
             .collect();
-        let context =
+        let mut context =
             mutation::scope_cache::from_probe(envelope.clone(), &source_facts, &baseline, true)
                 .map_err(Failure::protocol)?;
+        if request.experimental_callgraph {
+            context.static_calls = mutation::callgraph::Graph::build(
+                &syntax
+                    .iter()
+                    .map(|(file, metadata)| (file.clone(), metadata))
+                    .collect(),
+            );
+            if context.static_calls.is_none() {
+                report
+                    .cache
+                    .as_mut()
+                    .unwrap()
+                    .warnings
+                    .push("Static calls were not acquired; keeping full scope revalidation".into());
+            }
+        }
         crate::mutation_cache::load_scope(store, context, report.cache.as_mut().unwrap());
     }
     if request.reuse_session {
@@ -972,6 +994,22 @@ fn run_inner(
             let info = report.cache.as_mut().unwrap();
             info.reused += 1;
             info.scope_reused += 1;
+            continue;
+        }
+        if request.experimental_callgraph
+            && cache_store
+                .as_ref()
+                .and_then(|store| store.scope.as_ref())
+                .is_some_and(|scope| {
+                    scope.previous.as_ref().is_some_and(|data| {
+                        data.reuse_with_static_calls(&scope.context, mutant, &selected)
+                    })
+                })
+        {
+            let info = report.cache.as_mut().unwrap();
+            info.reused += 1;
+            info.scope_reused += 1;
+            info.callgraph_reused += 1;
             continue;
         }
         if request.concurrency > 1 {

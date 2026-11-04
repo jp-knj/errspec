@@ -2087,6 +2087,7 @@ var infrastructureFailure;
 var warmContext;
 var reuseMode = "fresh_lifecycle_unknown";
 var configurationHash = null;
+var pendingGenerated = new Map;
 var normalize = (s) => s.replaceAll("\\", "/");
 var rel = (file) => normalize(relative2(root, file));
 var hash = (data) => createHash("sha256").update(data).digest("hex");
@@ -2491,6 +2492,8 @@ async function execute(phase, request) {
       throw state.failure;
     if (infrastructureFailure)
       throw infrastructureFailure;
+    if (phase === "plain" && options.experimentalCallgraph && !execution.failedModules.length && !execution.errors.length && execution.tests.some((test) => test.started && test.status === "passed") && !execution.tests.some((test) => test.status === "failed"))
+      await acquireStaticImports(project);
     for (const project of ctx.projects)
       for (const environment of Object.values(project.vite.environments))
         for (const module of environment.moduleGraph?.idToModuleMap?.values() || []) {
@@ -2523,6 +2526,31 @@ function send(request, type, payload = {}) {
 function cacheFacts() {
   return { version: 1, inputs: [...fingerprints], runnerPackage: packageDir, runtime: { node: process.versions.node, platform: process.platform, arch: process.arch, executable: process.execPath, cwd: process.cwd(), execArgv: process.execArgv, configurationHash, envHash: hash(JSON.stringify(Object.entries(process.env).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([name, value]) => [name, options.cacheRelocation && ["PWD", "INIT_CWD"].includes(name) ? relocatedPath(value) : value]))) } };
 }
+async function generateSource(source, file, base) {
+  return base ?? native(source, file);
+}
+async function acquireStaticImports(project) {
+  const container = project.vite.environments?.__vitest__?.pluginContainer ?? project.vite.environments?.ssr?.pluginContainer;
+  for (const [file, entry] of inventory) {
+    const generated = await generateSource(entry.source, rel(file), native(entry.source, rel(file)));
+    pendingGenerated.set(file, generated);
+    for (const binding of generated.metadata?.imports || []) {
+      binding.resolved = null;
+      try {
+        const resolved = await container?.resolveId(binding.source, file);
+        let target = resolved?.id?.split("?")[0];
+        if (target?.startsWith("/@fs/"))
+          target = target.slice(4);
+        if (!target || !isAbsolute(target) || !existsSync2(target))
+          continue;
+        target = normalize(realpathSync2(target));
+        remember(target);
+        if (inventory.has(target))
+          binding.resolved = rel(target);
+      } catch {}
+    }
+  }
+}
 async function handle(request) {
   if (request.version !== PROTOCOL || typeof request.runId !== "string" || !Number.isSafeInteger(request.requestId))
     throw failure("EC_MUTATION_PROTOCOL", "Invalid request envelope");
@@ -2531,6 +2559,7 @@ async function handle(request) {
   runId = request.runId;
   if (request.op === "open") {
     options = request.options;
+    pendingGenerated.clear();
     if (Number(process.versions.node.split(".")[0]) < 24)
       throw failure("EC_MUTATION_CONFIG", "mutate requires Node 24 or newer");
     root = realpathSync2(options.root);
@@ -2584,7 +2613,8 @@ async function handle(request) {
       throw failure("EC_MUTATION_BASELINE", "Unmodified baseline failed or executed no tests");
     let count = 0;
     for (const [file, entry] of inventory) {
-      const generated = native(entry.source, rel(file));
+      const generated = pendingGenerated.get(file) ?? await generateSource(entry.source, rel(file));
+      pendingGenerated.delete(file);
       entry.candidates = generated.candidates;
       entry.critical = generated.critical || [];
       for (const c of entry.candidates)

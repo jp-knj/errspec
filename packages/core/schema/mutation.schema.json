@@ -193,6 +193,7 @@
     "cacheScope": {
       "type": "boolean"
     },
+    "experimentalCallgraph": { "type": "boolean" },
     "fullDryRun": {
       "type": "boolean"
     },

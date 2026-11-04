@@ -22,6 +22,7 @@ pub struct Options {
     pub cache: bool,
     pub cache_relocation: bool,
     pub cache_scope: bool,
+    pub experimental_callgraph: bool,
     pub cache_dir: Option<PathBuf>,
     pub full_dry_run: bool,
     pub typecheck_project: Option<PathBuf>,
@@ -54,6 +55,7 @@ impl Default for Options {
             cache: false,
             cache_relocation: false,
             cache_scope: false,
+            experimental_callgraph: false,
             cache_dir: None,
             full_dry_run: false,
             typecheck_project: None,
@@ -72,6 +74,9 @@ impl Options {
     pub fn validate(&self) -> Result<(), String> {
         self.policy.validate()?;
         super::reporting::validate_reporters(&self.reporters)?;
+        if self.experimental_callgraph && (!self.cache || !self.cache_scope) {
+            return Err("experimentalCallgraph requires cache and cacheScope".into());
+        }
         if self.arid_callees.as_ref().is_some_and(|patterns| {
             patterns
                 .iter()

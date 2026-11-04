@@ -276,5 +276,7 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
             .collect(),
         nodes,
         dependencies: dependencies::collect(rules.file),
+        calls: rules.calls.clone(),
+        imports: callgraph::imports(rules),
     }
 }
