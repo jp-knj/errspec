@@ -381,7 +381,7 @@ fn fake_bun(fixture: &Fixture, lcov: Option<&str>) -> String {
 if [ "$1" = --version ]; then echo 1.4.4; exit 0; fi
 if [ "$2" = --coverage ]; then
   printf '%s\n' "$@" > coverage-args
-  env | grep '^ERRSPEC_' > coverage-env || true
+  env | grep -E '^ERRSPEC_(OBSERVATIONS|RUN_ID)=' > coverage-env || true
   {lcov_step}
   exit 0
 fi

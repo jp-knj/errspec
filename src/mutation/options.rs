@@ -17,6 +17,8 @@ pub struct Options {
     pub typecheck: bool,
     pub weak_mutation: bool,
     pub reuse_session: bool,
+    pub cache: bool,
+    pub cache_dir: Option<PathBuf>,
     pub typecheck_project: Option<PathBuf>,
     pub typecheck_package: Option<PathBuf>,
     pub policy: super::policy::Policy,
@@ -38,6 +40,8 @@ impl Default for Options {
             typecheck: false,
             weak_mutation: false,
             reuse_session: false,
+            cache: false,
+            cache_dir: None,
             typecheck_project: None,
             typecheck_package: None,
             policy: Default::default(),
@@ -71,6 +75,7 @@ impl Options {
             return Err("include and exclude patterns must not be empty".into());
         }
         if [
+            &self.cache_dir,
             &self.vitest_config,
             &self.vitest_package,
             &self.typecheck_project,

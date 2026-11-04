@@ -1,6 +1,7 @@
 //! Mutation results and judgments. No compiler handles, processes, or file I/O.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub mod cache;
 pub mod options;
 pub mod policy;
 pub mod selection;
@@ -284,6 +285,8 @@ pub struct Mutant {
     pub accepted: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub critical: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reused: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub infected_by: Option<Vec<String>>,
 }
@@ -348,6 +351,8 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection: Option<selection::SelectionReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache: Option<cache::Info>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<policy::PolicyReport>,
     #[serde(skip)]
     fail_on_undetected: bool,
@@ -395,6 +400,7 @@ impl Report {
             interrupted: None,
             typecheck: None,
             selection: None,
+            cache: None,
             policy: None,
             fail_on_undetected: gate,
         }

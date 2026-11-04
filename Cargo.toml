@@ -29,6 +29,9 @@ tsrs_vfs = { git = "https://github.com/oxc-project/tsrs", rev = "1bfd1e65be95131
 [dev-dependencies]
 insta = { version = "1.49.0", features = ["json"] }
 
+[build-dependencies]
+sha2 = "0.10"
+
 [profile.dev]
 debug = false
 

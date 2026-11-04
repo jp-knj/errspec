@@ -321,6 +321,7 @@ fn score_and_gate_depend_on_completion() {
         attempts: vec![],
         reason: None,
         accepted: None,
+        reused: false,
         critical: false,
         infected_by: None,
     });

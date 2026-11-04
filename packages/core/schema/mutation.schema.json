@@ -183,6 +183,16 @@
     },
     "reuseSession": {
       "type": "boolean"
+    },
+    "cache": {
+      "type": "boolean"
+    },
+    "cacheDir": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
     }
   },
   "allOf": [

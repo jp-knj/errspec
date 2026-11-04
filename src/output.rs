@@ -158,6 +158,18 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                     ));
                 }
             }
+            if let Some(cache) = &report.cache {
+                lines.push(format!(
+                    "cache: {} reused, {} executed, {} records saved",
+                    cache.reused, cache.executed, cache.saved
+                ));
+                if let Some(reason) = &cache.disabled_reason {
+                    lines.push(format!("  cache disabled: {reason}"));
+                }
+                for warning in &cache.warnings {
+                    lines.push(format!("  warning: {warning}"));
+                }
+            }
             for m in &report.mutants {
                 lines.push(format!(
                     "{}:{} {} {:?}: {} -> {}",
@@ -173,6 +185,9 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                 }
                 if let Some(reason) = &m.reason {
                     lines.push(format!("  {reason}"));
+                }
+                if m.reused {
+                    lines.push("  reused result (matching inputs)".into());
                 }
                 if !m.covered_by.is_empty() {
                     lines.push(format!("  covered by: {}", m.covered_by.join(", ")));

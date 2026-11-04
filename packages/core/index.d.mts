@@ -24,6 +24,8 @@ export interface MutationOptions {
   typecheck?: boolean;
   weakMutation?: boolean;
   reuseSession?: boolean;
+  cache?: boolean;
+  cacheDir?: string | null;
   typecheckProject?: string | null;
   typecheckPackage?: string | null;
   policy?: MutationPolicy;
@@ -72,6 +74,7 @@ export interface Mutant {
   reason?: string;
   accepted?: string;
   critical?: boolean;
+  reused?: boolean;
   infectedBy?: string[];
 }
 export interface MutationReport {
@@ -94,6 +97,10 @@ export interface MutationReport {
   };
   diagnostics: { code: string; message: string }[];
   mutants: Mutant[];
+  cache?: {
+    directory: string; reused: number; executed: number; saved: number;
+    invalidated: boolean; fingerprint?: string; disabledReason?: string; warnings?: string[];
+  };
   selection?: {
     since: string; base: string; unit: "node" | "scope";
     total: number; selected: number; omitted: number;
