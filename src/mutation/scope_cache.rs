@@ -1,6 +1,6 @@
 //! Conservative reuse over acquired, complete scope-entry and test-file cohorts.
 //! The acquiring adapter must establish envelope hashes and entry-probe ownership.
-use super::{Mutant, cache::Record};
+use super::{Candidate, Execution, Mutant, cache::Record, syntax::Metadata};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -33,6 +33,122 @@ pub struct Context {
 }
 fn hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+pub struct Source<'a> {
+    pub text: &'a str,
+    pub metadata: &'a Metadata,
+    pub candidates: &'a [Candidate],
+}
+fn owner_id(file: &str, owner: &str) -> String {
+    serde_json::to_string(&(file, owner)).unwrap()
+}
+
+/// Build a cohort from the current full probe. Module effects and all other
+/// inputs belong in the caller-acquired envelope. No old observations stand in
+/// for missing current entry evidence.
+pub fn from_probe(
+    envelope: String,
+    sources: &BTreeMap<String, Source<'_>>,
+    probe: &Execution,
+    eligible: bool,
+) -> Result<Context, String> {
+    super::validate_execution(probe, &[])?;
+    super::validate_baseline(probe, "Current scope probe")?;
+    let tests = probe
+        .tests
+        .iter()
+        .map(|test| (test.id.clone(), test.file.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut scopes = BTreeMap::new();
+    let mut candidates = BTreeMap::new();
+    for (file, source) in sources {
+        super::selection::validate(source.metadata, source.text, source.candidates)?;
+        if !source.metadata.scopes.contains_key("module") {
+            return Err("Missing module scope".into());
+        }
+        for (name, scope) in &source.metadata.scopes {
+            if name != "module" && !scope.function {
+                continue;
+            }
+            let observation = scope.entry_key.as_ref().and_then(|key| {
+                let mut files = probe
+                    .tests
+                    .iter()
+                    .filter(|test| {
+                        test.started
+                            && test.status == "passed"
+                            && test.hits.get(key).is_some_and(|count| *count > 0)
+                    })
+                    .map(|test| test.file.clone())
+                    .collect::<BTreeSet<_>>();
+                files.extend(probe.static_hits.get(key).into_iter().flatten().cloned());
+                if files.is_empty() && probe.hits.get(key).is_some_and(|count| *count > 0) {
+                    return None;
+                }
+                Some(Observation {
+                    entry_key: key.clone(),
+                    files,
+                })
+            });
+            scopes.insert(
+                owner_id(file, name),
+                Scope {
+                    file: file.clone(),
+                    hash: if name == "module" {
+                        scope.effect_hash.clone()
+                    } else {
+                        scope.hash.clone()
+                    },
+                    opaque: scope.unknown_calls,
+                    observation,
+                },
+            );
+        }
+        for candidate in source.candidates {
+            if &candidate.location.file != file {
+                return Err("Scope candidate file mismatch".into());
+            }
+            let mut owner = source
+                .metadata
+                .owners
+                .get(&candidate.key)
+                .ok_or("Missing candidate owner")?
+                .as_str();
+            while owner != "module" && !source.metadata.scopes[owner].function {
+                owner = source.metadata.scopes[owner]
+                    .parent
+                    .as_deref()
+                    .ok_or("Missing enclosing function or module")?;
+            }
+            if candidates
+                .insert(candidate.key.clone(), owner_id(file, owner))
+                .is_some()
+            {
+                return Err("Duplicate scope candidate key".into());
+            }
+        }
+    }
+    if probe
+        .hits
+        .keys()
+        .chain(probe.static_hits.keys())
+        .chain(probe.tests.iter().flat_map(|test| test.hits.keys()))
+        .chain(probe.tests.iter().flat_map(|test| test.infected.iter()))
+        .any(|key| !candidates.contains_key(key))
+    {
+        return Err("Unknown scope probe candidate".into());
+    }
+    let context = Context {
+        eligible,
+        envelope,
+        scopes,
+        candidates,
+        tests,
+    };
+    if !context.valid() {
+        return Err("Incomplete or invalid scope cache context".into());
+    }
+    Ok(context)
 }
 impl Context {
     fn valid(&self) -> bool {

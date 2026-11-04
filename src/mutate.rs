@@ -527,6 +527,12 @@ fn run_inner(
                 serde_json::from_value(file["metadata"].clone())
                     .map_err(|e| Failure::protocol(e.to_string()))?;
             let source = fs::read_to_string(request.root.join(name))?;
+            if !mutation::syntax::source_matches(&metadata, &source) {
+                return Err(Failure::new(
+                    "EC_MUTATION_INPUT",
+                    "Source changed since syntax acquisition",
+                ));
+            }
             mutation::selection::validate(&metadata, &source, &candidates)
                 .map_err(Failure::protocol)?;
             syntax.insert(name.to_owned(), metadata);
