@@ -57,6 +57,11 @@ pub(crate) fn source_entry() -> ExitCode {
 
 pub(crate) fn run(request: MutationRequest) -> Report {
     let mut report = Report::new(request.fail_on_undetected);
+    report.presentation = mutation::reporting::Presentation {
+        root: request.root.clone(),
+        reporters: request.reporters.clone(),
+        directory: request.report_dir.clone(),
+    };
     let signal = Arc::new(AtomicI32::new(0));
     let started = Arc::new(AtomicBool::new(false));
     let mut registrations = vec![];

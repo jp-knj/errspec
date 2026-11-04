@@ -121,6 +121,12 @@ impl From<CliAnalysisEngine> for crate::analysis_backend::Engine {
 
 #[derive(clap::Args)]
 struct MutationArgs {
+    /// Additional presentation: text, json (MTE file), html, agent, simplify, annotations.
+    #[arg(long, value_delimiter = ',')]
+    reporter: Vec<errspec::mutation::reporting::Reporter>,
+    /// Directory for mutation.json and index.html (default: <root>/.errspec/report).
+    #[arg(long)]
+    report_dir: Option<PathBuf>,
     /// Git revision used to select changed mutation nodes or scopes.
     #[arg(long)]
     since: Option<String>,
@@ -227,6 +233,8 @@ enum Action {
     MutationSource,
     #[command(name = "__mutation-api", hide = true)]
     MutationApi,
+    #[command(name = "__format-report", hide = true)]
+    FormatReport,
     #[command(name = "__mutation-supervisor", hide = true)]
     MutationSupervisor { configuration: PathBuf },
     /// Generate configuration and intentionally failing tests for one exported type.
@@ -358,11 +366,14 @@ impl Cli {
             }
             Action::MutationSource => return Ok((Request::MutationSource, self.format)),
             Action::MutationApi => return Ok((Request::MutationApi, self.format)),
+            Action::FormatReport => return Ok((Request::FormatReport, self.format)),
             Action::MutationSupervisor { configuration } => {
                 return Ok((Request::MutationSupervisor(configuration), self.format));
             }
             Action::Mutate(args) => {
                 let MutationArgs {
+                    reporter,
+                    report_dir,
                     since,
                     diff_unit,
                     shard,
@@ -414,6 +425,8 @@ impl Cli {
                         config_file,
                         overrides,
                         options: errspec::mutation::options::Options {
+                            reporters: reporter,
+                            report_dir,
                             since,
                             diff_unit: diff_unit.map(Into::into),
                             shard,

@@ -11,6 +11,7 @@ mod mutation_cache;
 mod mutation_config;
 mod mutation_git;
 mod mutation_ownership;
+mod mutation_reporting;
 mod mutation_source;
 mod onboard;
 mod output;
@@ -70,6 +71,9 @@ fn main() -> ExitCode {
     };
     if matches!(request, request::Request::MutationSource) {
         return mutate::source_entry();
+    }
+    if matches!(request, request::Request::FormatReport) {
+        return mutation_reporting::entry();
     }
     if matches!(request, request::Request::MutationApi) {
         return mutation_api::entry();

@@ -187,26 +187,82 @@
     "cache": {
       "type": "boolean"
     },
-    "cacheRelocation": { "type": "boolean" },
-    "cacheScope": { "type": "boolean" },
+    "cacheRelocation": {
+      "type": "boolean"
+    },
+    "cacheScope": {
+      "type": "boolean"
+    },
     "fullDryRun": {
       "type": "boolean"
     },
-    "concurrency": { "type": "integer", "minimum": 1, "maximum": 64 },
-    "arid": { "type": "boolean" },
-    "aridCallees": { "type": ["array", "null"], "items": { "type": "string", "minLength": 1 } },
+    "concurrency": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64
+    },
+    "arid": {
+      "type": "boolean"
+    },
+    "aridCallees": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "shard": {
       "anyOf": [
-        { "type": "null" },
-        { "type": "object", "additionalProperties": false, "required": ["index", "total"],
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "total"
+          ],
           "properties": {
-            "index": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
-            "total": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+            "index": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            }
           }
         }
       ]
     },
     "cacheDir": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "reporters": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "text",
+          "json",
+          "html",
+          "agent",
+          "simplify",
+          "annotations"
+        ]
+      }
+    },
+    "reportDir": {
       "type": [
         "string",
         "null"

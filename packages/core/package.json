@@ -9,7 +9,8 @@
       "types": "./index.d.mts",
       "default": "./index.mjs"
     },
-    "./schema": "./schema/mutation.schema.json"
+    "./schema": "./schema/mutation.schema.json",
+    "./report-schema": "./schema/mutation-testing-report.schema.json"
   },
   "files": [
     "index.mjs",

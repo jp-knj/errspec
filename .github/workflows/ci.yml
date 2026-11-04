@@ -18,6 +18,7 @@ jobs:
             examples/checkout/package-lock.json
             packages/mutation-driver/package-lock.json
             packages/analysis-driver/package-lock.json
+            packages/report-tests/package-lock.json
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
@@ -25,6 +26,8 @@ jobs:
         working-directory: packages/mutation-driver
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: packages/analysis-driver
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: packages/report-tests
       - run: node scripts/build-mutation-driver.mjs --check
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
@@ -41,6 +44,7 @@ jobs:
       - run: node --test tests/package.test.mjs
       - run: node --test tests/vitest-recorder.test.mjs
       - run: node --test tests/analysis-driver.test.mjs
+      - run: node --test --test-concurrency=1 tests/mutation-reports.test.mjs
       - run: node --test tests/mutation-emitter.test.mjs
       - run: node --test tests/mutation-process.test.mjs
       - run: node --test tests/mutation-ownership.test.mjs

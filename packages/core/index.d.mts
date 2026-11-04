@@ -10,6 +10,8 @@ export interface MutationPolicy {
   acceptedFile?: string | null;
 }
 export interface MutationOptions {
+  reporters?: MutationReporter[];
+  reportDir?: string | null;
   since?: string | null;
   diffUnit?: "node" | "scope" | null;
   shard?: { index: number; total: number } | null;
@@ -146,3 +148,16 @@ export declare function runMutation(options?: MutationConfig, transport?: Mutati
   exitCode: number;
   report: MutationReport;
 }>;
+
+export type MutationReporter = 'text' | 'json' | 'html' | 'agent' | 'simplify' | 'annotations';
+export interface ReportFormatOptions {
+  /** json is the mutation-testing-elements schema v2, distinct from the native report. */
+  reporter?: MutationReporter;
+  /** Resolve relative report paths here; defaults to the formatter working directory. */
+  root?: string;
+  /** Original UTF-8 source snapshots, keyed by report file. Required after source edits/removal. */
+  sources?: Record<string,string>;
+}
+/** Same native formatter as the CLI; returns one string and does not write files or run tests. */
+export declare function formatReport(report: MutationReport, options?: ReportFormatOptions,
+  transport?: Pick<MutationTransport,'binary'|'cwd'>): Promise<string>;

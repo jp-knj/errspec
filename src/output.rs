@@ -122,6 +122,9 @@ pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
 }
 
 fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCode {
+    if !report.presentation.reporters.is_empty() {
+        return crate::mutation_reporting::write(report);
+    }
     let output = match format {
         Format::Json => serde_json::to_string_pretty(report).unwrap(),
         Format::Text | Format::Markdown => {
@@ -241,6 +244,12 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
         }
     };
     if writeln!(io::stdout().lock(), "{output}").is_err() {
+        return ExitCode::from(2);
+    }
+    if !matches!(format, Format::Json)
+        && let Err(error) = crate::mutation_reporting::automatic_annotations(report)
+    {
+        eprintln!("EC_MUTATION_REPORT: {error}");
         return ExitCode::from(2);
     }
     ExitCode::from(report.exit_code())

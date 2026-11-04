@@ -8,6 +8,7 @@ pub mod options;
 pub mod ownership;
 pub mod parallel;
 pub mod policy;
+pub mod reporting;
 pub mod scope_cache;
 pub mod selection;
 pub mod sharding;
@@ -275,7 +276,7 @@ pub fn confirmed(attempts: &[Attempt]) -> Status {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mutant {
     #[serde(flatten)]
@@ -289,9 +290,9 @@ pub struct Mutant {
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accepted: Option<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub critical: bool,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reused: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub infected_by: Option<Vec<String>>,
@@ -367,6 +368,8 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<policy::PolicyReport>,
     #[serde(skip)]
+    pub presentation: reporting::Presentation,
+    #[serde(skip)]
     fail_on_undetected: bool,
 }
 
@@ -418,6 +421,7 @@ impl Report {
             shard: None,
             policy: None,
             fail_on_undetected: gate,
+            presentation: Default::default(),
         }
     }
     pub fn error(&mut self, code: &str, message: impl Into<String>) {

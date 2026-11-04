@@ -67,9 +67,8 @@ the CLI/API `node` option (or `node` on PATH), before a file can supply its own
 execution option. Loader logs go to stderr, with a 10-second deadline and 1 MiB
 output limits. Configuration scripts run as local project code.
 
-`selectTests`, `formatReport`, plugin APIs and additional runner
-packages are subsequent implementation stages; this package currently exposes
-`defineConfig` and `runMutation`.
+`selectTests`, plugin APIs and additional runner packages are subsequent
+implementation stages. `formatReport` uses the same native presentation as the CLI.
 
 ## Git selection
 
@@ -360,3 +359,50 @@ their independent behavior checks. Empty function bodies are not classified as
 logging-only. Explicit source comments and built-in safety exclusions keep their
 own reasons. Candidates retain their IDs; changing the enablement or patterns
 invalidates cached outcomes and observations.
+
+## Report presentation
+
+The existing `--format json` remains errspec's native report on stdout. Additional
+reporters use `errspec mutate --reporter agent,json,html --report-dir reports`:
+
+- `text` describes verdicts, reasons and warnings on stdout.
+- `json` saves `mutation.json`, conforming to mutation-testing-elements schema v2.
+- `html` saves `index.html`, an offline viewer with embedded source, verdicts and
+  status/file filters. It loads no scripts, fonts or other resources from a network.
+- `agent` writes one JSON document containing gaps (`notDetected`, `notInfected`,
+  `notReached`), enclosing function source, reaching tests and suggested next steps.
+- `simplify` lists covered removal mutants that survive. These are review
+  candidates; a passing test suite does not establish that deletion is safe.
+- `annotations` writes GitHub warning commands for selected diff gaps and critical
+  gaps. In GitHub Actions, other explicit reporters also emit annotations except
+  `agent`, whose stdout remains a single JSON document.
+
+Choose at most one stdout reporter; combine it with `json` and/or `html`.
+File reporters default to `<root>/.errspec/report`. A configured `reportDir` is
+relative to the effective project root; an explicit CLI path is relative to the
+invoking directory. Configuration uses `reporters: ['agent', 'html']`; explicit
+`--reporter` replaces that array. File paths are announced on stderr. Reporter
+failures exit 2; completed runs preserve their existing quality exit code.
+Reports preserve `Pending`, an unknown score, reasons, acceptance and quality
+gates. The MTE schema requires integer thresholds, so fractional display thresholds
+are rounded up; the original policy and its native verdict remain in `errspec`.
+
+```js
+import { formatReport, runMutation } from '@errspec/core';
+import { writeFile } from 'node:fs/promises';
+const { report } = await runMutation({ include: ['src/**'] });
+const json = await formatReport(report, { reporter: 'json', root: process.cwd() });
+await writeFile('mutation.json', json);
+```
+
+`formatReport(report, { reporter, root, sources }, { binary, cwd })` returns a
+Promise of one string, using the CLI's Rust formatter. It runs no tests and writes
+no files. `runMutation` returns the native report; use `formatReport` to present
+it. For retained reports, supply original source snapshots through `sources`,
+keyed by relative report path, if the files have changed or been removed.
+The formatter verifies each original mutation span and line against that snapshot;
+it rejects mismatches instead of attaching stale evidence to changed code. This
+span check does not establish that unrelated source still matches an earlier run.
+Source acquisition for agent/simplify uses AST function boundaries rather than
+line-based guesses. The upstream MTE schema is exported as
+`@errspec/core/report-schema`, with its Apache-2.0 license in the schema directory.

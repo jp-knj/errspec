@@ -9,6 +9,7 @@ pub(crate) enum Request {
     Mutation(Box<MutationRequest>),
     MutationSource,
     MutationApi,
+    FormatReport,
     MutationSupervisor(PathBuf),
     Accept {
         root: PathBuf,

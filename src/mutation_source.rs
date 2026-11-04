@@ -35,7 +35,7 @@ pub(crate) struct SourceResult {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub critical: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<errspec::mutation::syntax::Metadata>,
+    pub(crate) metadata: Option<errspec::mutation::syntax::Metadata>,
 }
 
 pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
