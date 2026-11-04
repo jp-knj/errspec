@@ -158,6 +158,12 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                     ));
                 }
             }
+            if let Some(shard) = &report.shard {
+                lines.push(format!(
+                    "shard {}/{}: {} of {} candidates (score and gates apply to this shard)",
+                    shard.index, shard.total, shard.selected, shard.eligible
+                ));
+            }
             if let Some(workers) = &report.workers {
                 lines.push(format!(
                     "workers: {} active, {} recovered, {} unverified",

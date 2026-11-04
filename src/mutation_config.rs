@@ -143,6 +143,7 @@ pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) 
         ("root", "root"),
         ("since", "since"),
         ("diff_unit", "diffUnit"),
+        ("shard", "shard"),
         ("node", "node"),
         ("include", "include"),
         ("exclude", "exclude"),

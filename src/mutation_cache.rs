@@ -311,6 +311,7 @@ pub(crate) fn acquire(
         "cacheDir",
         "failOnUndetected",
         "fullDryRun",
+        "shard",
     ] {
         settings.as_object_mut().unwrap().remove(field);
     }
