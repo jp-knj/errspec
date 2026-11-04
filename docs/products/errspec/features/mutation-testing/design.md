@@ -216,9 +216,9 @@ errspec mutate --fail-on-undetected
 
 JSONは独立した`kind: "errspec/mutation"`、`schemaVersion: 1`を使います。必須のフィールドは`engine`、`runComplete`、`ok`、`testsExecuted`、`baseline`、`summary`、`mutants`、`gate`、`diagnostics`です。`engine`にはtsrs revision、規則の版、実際に利用したNode / Vitestの版、`typecheck: "not_run"`と、計測範囲`vitest_vite_workers`を持たせます。取得前に起動が失敗した環境の版はnullとします。
 
-`summary`は全件数と状態ごとの件数、任意の`score`を持ちます。完了した場合の分母は`Killed + Survived + NoCoverage + Timeout + RuntimeError`、分子は`Killed + Timeout + RuntimeError`です。`score`は0から1の比率とし、textでは百分率に変換します。分母0件または未完了なら`score: null`とします。各候補の`coveredBy`と`killedBy`はテスト一覧の順に並べ、試行結果と除外理由も保持します。実行時エラーのモジュールは`failedModules`へ分け、テストIDとして混在させません。
+`summary`は全件数と状態ごとの件数、任意の`score`を持ちます。完了した場合の分母は`Killed + Survived + NoCoverage + Timeout + RuntimeError`、分子は`Killed + Timeout + RuntimeError`です。`score`は0から1の比率とし、textでは百分率に変換します。分母0件、未完了、または選択した候補に`Pending`が残る場合は`score: null`とします。標本や予算で省略した候補を、実行済みの部分集合のスコアで合格にしません。各候補の`coveredBy`と`killedBy`はテスト一覧の順に並べ、試行結果と除外理由も保持します。実行時エラーのモジュールは`failedModules`へ分け、テストIDとして混在させません。
 
-`gate`は`enabled`と`passed`を持ち、無効または未完了なら`passed: null`です。有効かつ完了した場合だけ判定し、生存・未到達のいずれかがあればfalseと`EC_MUTATION_UNDETECTED`、どちらもなければtrueを返します。`ok`は完了・基準実行成功・エラーなし・gate不合格でない場合にtrueです。`testsExecuted`は実際のテスト開始を確認した場合にtrueとし、モジュール初期化の失敗だけでtrueにしません。
+`gate`は`enabled`と`passed`を持ち、無効または未完了なら`passed: null`です。有効かつ完了した場合だけ判定し、生存・未到達・未実行のいずれかがあればfalseと`EC_MUTATION_UNDETECTED`、いずれもなければtrueを返します。`ok`は完了・基準実行成功・エラーなし・gate不合格でない場合にtrueです。`testsExecuted`は実際のテスト開始を確認した場合にtrueとし、モジュール初期化の失敗だけでtrueにしません。
 
 | 終了コード | 条件 |
 | --- | --- |

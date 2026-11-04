@@ -72,6 +72,7 @@ test("only IDs, deterministic sampling, and time budgets retain explicit pending
   const budget = run(root, ["--time-budget", "0"]);
   assert.equal(budget.summary.pending, 2);
   assert.equal(budget.summary.noCoverage, 2);
+  assert.equal(budget.summary.score, null);
   assert.ok(
     budget.mutants
       .filter((m) => m.status === "Pending")
@@ -84,6 +85,19 @@ test("only IDs, deterministic sampling, and time budgets retain explicit pending
   );
   assert.equal(readFileSync(join(root, "src/value.ts"), "utf8"), original);
   assert.equal(run(root, ["--only", "a".repeat(64)], 2).runComplete, false);
+});
+test("a detected subset cannot pass full score or undetected gates while candidates remain pending",t=>{
+  const root=project(t,"export const yes=(value:number)=>value+1;");
+  writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";import {yes} from "./src/value";test("boundary",()=>expect(yes(2)).toBe(3));');
+  const partial=run(root,["--mutants-per-line","1"]);
+  assert.equal(partial.runComplete,true);assert.ok(partial.summary.killed>0);assert.ok(partial.summary.pending>0);
+  assert.equal(partial.summary.score,null);
+  const score=run(root,["--mutants-per-line","1","--threshold-break","50"],1);
+  assert.equal(score.gate.passed,false);assert.equal(score.policy.scoreLevel,null);
+  assert.ok(score.policy.qualityFailures.some(reason=>reason.includes("unavailable")));
+  const detection=run(root,["--time-budget","0","--fail-on-undetected"],1);
+  assert.equal(detection.summary.noCoverage,0);
+  assert.ok(detection.summary.pending>0);assert.equal(detection.gate.passed,false);
 });
 test("score thresholds, survival gates and critical globs fail independently of the baseline", (t) => {
   const root = project(t);

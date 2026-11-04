@@ -168,3 +168,58 @@ fn invalid_limits_and_thresholds_are_rejected_before_execution() {
         .is_ok()
     );
 }
+
+#[test]
+fn pending_candidates_never_establish_a_complete_score_or_detection_gate() {
+    for known in [Status::Killed, Status::NoCoverage, Status::Survived] {
+        let mut report = mutation::Report::new(true);
+        report.run_complete = true;
+        report.policy = Some(PolicyReport::new(Policy {
+            threshold_break: Some(50.0),
+            ..Default::default()
+        }));
+        report.mutants = vec![
+            mutant("known", "BooleanLiteral", known),
+            mutant("pending", "BooleanLiteral", Status::Pending),
+        ];
+        report.finish();
+        assert_eq!(report.summary.score, None);
+        assert_eq!(report.gate.passed, Some(false));
+        assert_eq!(report.exit_code(), 1);
+        assert!(
+            report
+                .policy
+                .as_ref()
+                .unwrap()
+                .quality_failures
+                .iter()
+                .any(|reason| reason.contains("unavailable"))
+        );
+    }
+    let mut report = mutation::Report::new(true);
+    report.run_complete = true;
+    report.mutants = vec![mutant("pending", "BooleanLiteral", Status::Pending)];
+    report.finish();
+    assert_eq!(report.gate.passed, Some(false));
+    assert_eq!(report.exit_code(), 1);
+}
+
+#[test]
+fn policy_cannot_accept_a_subset_score_when_pending_candidates_remain() {
+    let mutants = vec![
+        mutant("killed", "BooleanLiteral", Status::Killed),
+        mutant("pending", "BooleanLiteral", Status::Pending),
+    ];
+    let mut policy = PolicyReport::new(Policy {
+        threshold_break: Some(90.0),
+        ..Default::default()
+    });
+    policy.judge(&mutants, true, Some(1.0));
+    assert_eq!(policy.score_level, None);
+    assert!(
+        policy
+            .quality_failures
+            .iter()
+            .any(|reason| reason.contains("unavailable"))
+    );
+}
