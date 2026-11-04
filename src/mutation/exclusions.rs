@@ -1,4 +1,47 @@
 //! Explicit comment exclusions over owned lexical facts, independent of parsers.
+pub const ARID_CALLEES: [&str; 6] = [
+    "console.*",
+    "logger.*",
+    "log.*",
+    "*.debug",
+    "*.trace",
+    "debug",
+];
+
+pub fn valid_callee(pattern: &str) -> bool {
+    let parts = pattern.split('.').collect::<Vec<_>>();
+    let mut stars = 0;
+    !pattern.is_empty()
+        && parts.iter().enumerate().all(|(index, part)| {
+            if *part == "*" {
+                stars += 1;
+                parts.len() > 1 && stars == 1 && (index == 0 || index == parts.len() - 1)
+            } else {
+                let mut chars = part.chars();
+                chars
+                    .next()
+                    .is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$')
+                    && chars.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+            }
+        })
+}
+
+pub fn logging_path(path: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| {
+        if let Some(prefix) = pattern.strip_suffix(".*") {
+            path == prefix
+                || path.starts_with(&format!("{prefix}."))
+                || path
+                    .rsplit_once('.')
+                    .is_some_and(|(head, _)| head.split('.').any(|part| part == prefix))
+        } else if let Some(suffix) = pattern.strip_prefix("*.") {
+            path.ends_with(&format!(".{suffix}"))
+        } else {
+            path == pattern
+        }
+    })
+}
+
 #[derive(Debug)]
 pub struct Comment {
     pub start: usize,

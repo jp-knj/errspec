@@ -52,6 +52,8 @@ nodeは変異する式・文の範囲、scopeは最も近い名前付き関数�
 
 除外コメントはparserのtriviaから位置・本文を取得し、string・regex・template・JSX textの範囲と重なる偽指示を除きます。所有されたコメントの値をRustの純粋な判定へ渡し、`errspec-`／`mutator-`のdisable-next-line、disable-line、disable/enableと、Stryker disable/restoreを解釈します。line指定をregionより優先し、regionは指定familyごとの最後の指示を使います。next-lineは複数行commentの終了行の次、regionはcomment終了offsetから適用します。IDを維持してcandidate.ignoredへdisabledと任意の理由を入れ、既存のignored経路でinstrumentation・trial・score・gateから除きます。builtinの安全な除外は元の理由を優先します。指示の削除はproject入力の変化としてcacheを無効にし、再検査します。
 
+aridは既存結果を維持するため既定offとし、`--arid`／設定・APIのaridで明示的に有効化します。`--no-arid`で設定のtrueを解除します。console/logger/logのreceiver、debug/traceのproperty、debug関数を既定とし、aridCalleesと反復可能な`--arid-callee`でpattern集合を置換します。空集合は一致なし、nullは既定へ戻す指定です。ASTからcalleeのdotted pathを取得し、computed accessやcastは照合しません。callと、それだけからなる非空block／ifをaridとしてmemo化し、candidateの祖先をたどります。mixed statement・宣言・return・function境界では伝播を止め、candidate.ignoredへ理由を入れます。明示commentとbuiltin理由を優先し、有効化とpatternはcache指紋に含めます。これはloggingに関する命名heuristicであり、引数・条件を含む副作用の同値性は保証しません。
+
 ### ランナーと実行計画
 
 `-j`／`--concurrency`と設定・APIの`concurrency`は1〜64の整数とし、既定1を維持します。2以上ではRustのqueueから各workerへ候補を割り当て、逐次実行と同じtrial・再確認・判定を使います。samplingとcache照合は配分前に行い、時間予算は要求全体の開始時刻で共有します。開始済みのtrialは完了させ、開始前の候補はPendingにします。完了順によらずinventory順へ結果を戻し、engine.parallelに要求数と起動したtrial worker数を示します。

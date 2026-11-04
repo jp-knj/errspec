@@ -27,6 +27,8 @@ pub struct Options {
     pub diff_unit: Option<super::selection::Unit>,
     pub shard: Option<super::sharding::Shard>,
     pub concurrency: usize,
+    pub arid: bool,
+    pub arid_callees: Option<Vec<String>>,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -53,12 +55,21 @@ impl Default for Options {
             diff_unit: None,
             shard: None,
             concurrency: 1,
+            arid: false,
+            arid_callees: None,
         }
     }
 }
 impl Options {
     pub fn validate(&self) -> Result<(), String> {
         self.policy.validate()?;
+        if self.arid_callees.as_ref().is_some_and(|patterns| {
+            patterns
+                .iter()
+                .any(|pattern| !super::exclusions::valid_callee(pattern))
+        }) {
+            return Err("Invalid arid callee pattern".into());
+        }
         if !(1..=64).contains(&self.concurrency) {
             return Err("concurrency must be between 1 and 64".into());
         }

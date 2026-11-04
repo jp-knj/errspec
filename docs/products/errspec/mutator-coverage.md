@@ -28,7 +28,7 @@
 | weak mutation、値の差によるテストの絞り込み、`not infected`の判定、無効化 | 比較・算術演算を`--weak-mutation`で提供。適用できない式と初期化・concurrentは全到達テストへ広げる |
 | 利用先のTypeScript 6以前／7以降でのmutantの型検査、`CompileError`、無効化 | `--typecheck` / `--no-typecheck`で提供。TS 5.9.3・6.0.3・7.0.2で検証 |
 | 型で同値と分かるoptional chaining mutantの除外と理由の提示 | 型検査で提供。strictNullChecksとnoUncheckedIndexedAccessを必要とする |
-| aridなログ専用コードの除外、calleeパターンの追加、無効化 | 未実装 |
+| aridなログ専用コードの除外、calleeパターンの追加、無効化 | 明示的な`--arid`／`arid: true`でログ専用call・block・ifを除外。`--arid-callee`／`aridCallees`でpattern置換、`--no-arid`で設定を解除。従来の実行結果を維持するため既定off。命名によるheuristicであり、引数などの副作用が重要な場合は無効のまま使う |
 | disableコメントとStrykerコメントによる除外 | `errspec-`／`mutator-`のdisable-next-line・disable-line・disable/enable、Stryker disable/restoreを提供。family指定・region解除・理由の表示に対応。文字列・正規表現・template／JSX本文の偽指示は除外しない |
 | `accept`、理由付きの同値mutant承認、古くなった承認の案内 | `accept --reason`と`errspec.accepted.json`で提供 |
 | custom mutator／ignorer plugin、モジュール・パッケージからの読取、mutator単位の除外、plugin変更時のキャッシュ無効化 | `--exclude-mutator`を提供。custom pluginとキャッシュは未実装 |

@@ -190,6 +190,117 @@ fn directive_text_inside_literals_regex_templates_and_jsx_cannot_exclude_code() 
 }
 
 #[test]
+fn arid_excludes_logging_calls_and_compound_logging_only_statements_when_enabled() {
+    for source in [
+        "function logValue(){console.log('hello');}",
+        "const report=()=>this.logger?.trace('hello');",
+        "function report(n:number){if(n>1){logger.info('yes')}else{log.warn('no')}}",
+        "function report(){debug('hello');service.trace('other');}",
+        "function report(){data.logger.info('hello');}",
+        "async function report(){await logger.info('hello');}",
+    ] {
+        let normal = generate(source);
+        let arid = generate_options(source, json!({"arid":true}));
+        let original = normal["candidates"].as_array().unwrap();
+        let excluded = arid["candidates"].as_array().unwrap();
+        assert!(!excluded.is_empty());
+        assert!(
+            excluded
+                .iter()
+                .all(|candidate| candidate["ignored"] == "arid: logging-only code"),
+            "{source}: {arid}"
+        );
+        assert!(
+            original
+                .iter()
+                .all(|candidate| candidate["ignored"].is_null())
+        );
+        assert_eq!(
+            original
+                .iter()
+                .map(|candidate| &candidate["key"])
+                .collect::<Vec<_>>(),
+            excluded
+                .iter()
+                .map(|candidate| &candidate["key"])
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn arid_does_not_cross_mixed_statements_functions_computed_paths_or_casts() {
+    let mixed = generate_options(
+        "function run(flag:boolean){if(flag){logger.info('hello');updateState();}else{return 'value';}return flag;}console.log(()=>{const state=true;return state;});",
+        json!({"arid":true}),
+    );
+    let candidates = mixed["candidates"].as_array().unwrap();
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate["mutator"] == "ConditionalExpression"
+                && candidate["ignored"].is_null())
+    );
+    assert!(candidates.iter().any(
+        |candidate| candidate["mutator"] == "BooleanLiteral" && candidate["ignored"].is_null()
+    ));
+    let update = candidates
+        .iter()
+        .find(|candidate| candidate["original"] == "updateState();")
+        .unwrap();
+    assert!(update["ignored"].is_null());
+    for source in [
+        "logger['info']('hello');",
+        "(logger as any).debug('hello');",
+        "catalog.log('hello');",
+        "function empty(){}",
+        "async function resolved(){(await logger).debug('hello');}",
+    ] {
+        let result = generate_options(source, json!({"arid":true}));
+        assert!(
+            result["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|candidate| candidate["ignored"].is_null()),
+            "{source}: {result}"
+        );
+    }
+}
+
+#[test]
+fn custom_arid_patterns_replace_defaults_and_explicit_comments_keep_precedence() {
+    let source = "console.log('ordinary');metrics.record('suppressed');";
+    let result = generate_options(source, json!({"arid":true,"aridCallees":["metrics.*"]}));
+    for candidate in result["candidates"].as_array().unwrap() {
+        let position = candidate["byteOffset"].as_u64().unwrap() as usize;
+        assert_eq!(
+            candidate["ignored"].is_string(),
+            position >= source.find("metrics").unwrap()
+        );
+    }
+    let empty = generate_options(source, json!({"arid":true,"aridCallees":[]}));
+    assert!(
+        empty["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|candidate| candidate["ignored"].is_null())
+    );
+    let commented = generate_options(
+        "// errspec-disable-next-line: intentional trace\nconsole.log('hi');",
+        json!({"arid":true}),
+    );
+    assert!(
+        commented["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|candidate| candidate["ignored"] == "disabled: intentional trace")
+    );
+}
+
+#[test]
 fn owned_syntax_facts_keep_scope_hashes_stable_across_position_changes() {
     let source = "export function a(x:number){return x+1;}\nexport function b(){return 1;}";
     let original = generate_options(source, json!({"facts":true}));
