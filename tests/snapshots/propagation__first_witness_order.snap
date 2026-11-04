@@ -20,7 +20,8 @@ expression: report
       },
       "tags": [
         "Offline"
-      ]
+      ],
+      "flows": []
     },
     {
       "source": {
@@ -30,7 +31,8 @@ expression: report
       },
       "tags": [
         "Offline"
-      ]
+      ],
+      "flows": []
     }
   ],
   "origins": [

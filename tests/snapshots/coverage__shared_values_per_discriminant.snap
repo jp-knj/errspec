@@ -13,6 +13,7 @@ expression: results
     },
     "types": [
       {
+        "flows": [],
         "source": {
           "discriminant": "code",
           "export": "CodeFailure",
@@ -29,6 +30,7 @@ expression: results
         ]
       },
       {
+        "flows": [],
         "source": {
           "discriminant": "kind",
           "export": "KindFailure",
@@ -53,6 +55,7 @@ expression: results
     },
     "types": [
       {
+        "flows": [],
         "source": {
           "discriminant": "kind",
           "export": "KindFailure",
@@ -66,6 +69,7 @@ expression: results
         ]
       },
       {
+        "flows": [],
         "source": {
           "discriminant": "code",
           "export": "CodeFailure",

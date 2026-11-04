@@ -6,13 +6,20 @@ TypeScriptのエラー型・失敗シナリオ・テスト結果を対応付け�
 型の解決には[oxc-project/tsrs](https://github.com/oxc-project/tsrs/tree/1bfd1e65be95131f9242a03687d37006214a96f6)と、利用先に導入済みのTypeScript 6・7の公式APIを使用します。
 既存のResult型を使い続けられます。エディタ拡張は不要です。npm/crates.ioには未公開です。
 
-`scan`でプロジェクトからエラー候補と伝播経路を調べ、`init`で選んだ型の設定・テストを生成できます。
-npm CLIとLinux/macOS向けバイナリは配布準備中です。[配布物の作成と導入](packages/cli/README.md)を参照してください。
+使い方は2段階です。
+
+1. `errspec coverage`: 既存のVitestテストをそのまま実行し、どのエラータグが確かめられていないかを示します。設定ファイルも専用のテストAPIも要りません。
+2. `scenarioTest`と`verify`: 重要なエラーだけ、障害が本当に呼ばれたことと必須の比較がそろったことまで契約として検証します。
 
 ```text
-EC010 checkout.payment RateLimited rate-limit-retries:
-Required assertion did not pass: attempts
+coverage: 2 error types, 3 tags: 1 asserted, 1 mentioned only, 1 missing
+src/gateway.ts GatewayError [_tag]: 1/3 asserted
+  mentioned RateLimited
+  missing   Timeout
 ```
+
+`scan`でプロジェクトからエラー候補と伝播経路を調べ、`init`で選んだ型の設定・テストを生成することもできます。
+npm CLIとLinux/macOS向けバイナリは配布準備中です。[配布物の作成と導入](packages/cli/README.md)を参照してください。
 
 ## 製品目標と実装状況
 
@@ -27,8 +34,19 @@ Required assertion did not pass: attempts
 Bun 1.2.18以前はJUnitレポートにテストファイルを出力しないため、`verify`はテストを起動する前に`EC_RUNNER`で停止します。
 Rustはrust-toolchain.tomlで固定しています。Linux x86_64、Bun 1.4.4、Vitest 5.0.5、Node.js 24で検証しました。
 
+まず、既存テストだけで調べます。
+
 ```sh
 cargo build --locked
+(cd examples/checkout && npm ci --ignore-scripts --no-audit --no-fund)
+(cd examples/checkout && ../../target/debug/errspec coverage)
+```
+
+この例のテストは、決済の失敗をスタブから流し込み、HTTPステータスだけを比較しています。そのため`Declined`と`RateLimited`は`mentioned`になります。
+
+次に、契約として検証する例です。
+
+```sh
 ./target/debug/errspec verify --runner bun \
   --config examples/scenarios-bun/errspec.json --format json
 ```
@@ -75,15 +93,62 @@ errspec coverage --project apps/api/tsconfig.json -- --project api   # vitest ru
 
 | 状態 | 意味 |
 |---|---|
-| `asserted` | 成功したアサーション（`toEqual`、`toMatchObject`、`toBe`など）が、そのタグを持つ値を受け取った |
+| `asserted` | 成功したテストの比較が、期待値としてそのタグの一致を要求した |
 | `mentioned` | テストファイルにタグが書かれているが、値として確かめていない（モックの入力だけなど） |
 | `missing` | どのテストにも現れない |
 
+依存パッケージで宣言された型だけでできた候補（scanの`external`）は対象から外し、外した数を示します。関数から返す・throwする流れが見つからない型には、その旨を添えます。
 最も近い`vitest.config.*`と`node_modules/.bin/vitest`を親ディレクトリへ探します。利用者の設定とテストは変更せず、一時設定で記録用のsetup fileを追加して実行します。
 `--fail-on-missing`で`missing`があれば終了コード1にします。現在はVitestだけに対応します。
 集計は識別プロパティとタグの値の組で行います。同じ値でも`code`と`kind`は別々に数えます。
 テスト成功後に記録用ファイルを検証できない場合は、`EC_RUNNER`と終了コード2を返します。
+既存の漏れを認めたまま後退だけを止めるには、`--save-baseline coverage-baseline.json`で現在の状態を保存し、CIで`--baseline coverage-baseline.json`を付けて実行します。確認が弱くなったタグと、新しく現れた`missing`のタグがあれば終了コード1になります。
+`--format markdown`は表形式で出力します。GitHub Actionsでは`errspec coverage --format markdown >> "$GITHUB_STEP_SUMMARY"`でジョブの概要に表示できます。
+
+`expect(result).toMatchObject({ ok: false })`は、`result.error`にタグがあってもそのタグの検証には数えません。タグを指定しない`toHaveProperty`、オブジェクトの参照一致、非対称マッチャーも証拠にしません。比較の後にテストが失敗した場合も確認済みにはしません。判定が厳しくなるため、既存のbaselineでは回帰として表示される場合があります。`asserted`は期待値にタグがあることの確認であり、製品コードから来た値であることや、エラー処理の正しさの証明ではありません。
+
+## 障害時の部分更新を再現する
+
+`checkFailureAtomicity`は、正常系で通った依存呼び出しを一回ずつ失敗させ、操作が失敗を返したときに業務状態が元のままか検査します。エラーごとにテスト本体を複製する代わりに、操作・有効な障害値・保護する状態を一度定義します。Vitest、Bun、Nodeの普通のテストから呼べます。
+
+```ts
+import { test } from "vitest";
+import { checkFailureAtomicity } from "@errspec/testkit";
+import { submitOrder } from "./submit-order";
+
+test("保存失敗で部分更新を残さない", async () => {
+  await checkFailureAtomicity({
+    faults: [{
+      id: "StoreDown", dependency: "save",
+      inject: () => ({ ok: false, error: { code: "store_down" } }),
+    }],
+    isFailure: result => !result.ok,
+    setup() {
+      const state = { credits: 100, orders: [] as string[] };
+      return {
+        snapshot: () => state,
+        run: scope => submitOrder(state, {
+          save: scope.wrap("save", async () => ({ ok: true as const })),
+        }),
+      };
+    },
+  });
+});
+```
+
+部分更新が残ると、`StoreDown at save call 1: Failed operation changed the protected state`で失敗し、`FailureAtomicityError.report`に操作前後の状態が入ります。`only: { fault: "StoreDown", call: 1 }`でそのケースだけ再実行できます。各実行は新しいfixtureを使い、任意の`dispose()`で後処理します。途中で書き込んでも最終状態が戻れば成功です。
+
+再試行で操作が成功した場合は`recovered`とし、失敗時の状態維持を確認した`preserved`とは区別します。正常系で通らない経路や、複数障害の組合せは探索しません。有効な障害値、失敗の判定、業務状態の範囲は利用者が決めます。実プロジェクトでmutatorを上回る効果は未計測です。
 障害が本当に呼ばれたか、必須の比較がそろっているかまで保証したい箇所は、次の`scenarioTest`と`verify`を使います。
+
+coverageの注意点:
+
+- 毎回テストを全件実行します。大きいプロジェクトでは`--`の後に`vitest run`の引数（ファイルや`--project`）を渡して絞れます。
+- 実行中のVitestの表示はJSONレポートに置き換わります。テストのログはstderrに出ます。
+- 識別プロパティの既定は`_tag,kind,type,code`です。`reason`や`status`で分かれるエラーは`--discriminant type,reason`のように指定してください。
+- 成功した比較でも、テスト全体が失敗・スキップ・重複していれば確認済みには数えません。ランナーの失敗は`runnerOk: false`と終了コード1で示します。
+- `mentioned`はテストファイルに引用符付きの同じ文字列があるかで判定します。コメントや無関係な文字列も数えるため、`asserted`より弱い目安です。
+- `toThrow`は対象の関数を再実行しないため、投げたErrorの値は記録しません。`rejects`で受け取った値は記録します。
 
 ## 既存テストの変更検出
 
@@ -208,7 +273,7 @@ scenarioTest(test, import.meta.url, {
 - 設定に必須としたcheckが欠けていれば、テストが成功していてもRust側の照合が失敗します。
 - テスト名は`errspec ["契約ID","シナリオID"]`として自動生成します。設定の`test.name`は省略します。
 - 定義に`description`を渡すと、ランナーの表示名は`errspec ["checkout.payment","declined"] [異常系] 注文を作らない`のように説明付きになります。照合は先頭の固定部分で行うため、説明を変えてもシナリオの変更にはなりません。説明は1行の空でない文字列です。
-- `scenarioTest`はトップレベルで登録してください。`describe`内の登録は現在未対応で、完全なテスト名が一致せず失敗します。テストがtsconfigのプロジェクトに含まれていれば、`check`が実行前に`EC017`で報告します。
+- `scenarioTest`は`describe`の中でも登録できます。ランナーは`describe`の題名を前に付けた完全名を報告しますが、照合は空白で区切られた`errspec [...]`の部分で行います。同じシナリオを2つの`describe`に置くと曖昧として失敗します。
 - `test.concurrent`は対応済みです（BunではBun 1.3以降が提供します）。`test.skip`は未検証になります。retry/repeatで同一シナリオが複数回実行された場合は曖昧として拒否します。
 
 依存を引数で受け取らず直接importしているコードには、Bunの`mock.module`やVitestの`vi.mock`で`s.fault`を差し込みます。
@@ -226,7 +291,6 @@ scenarioTest(test, import.meta.url, {
 報告するのは、実行すれば必ず失敗する食い違いだけです。
 - 未登録のシナリオ、登録と違うタグやテストファイル、`withoutFaults`と`"faults": []`の不一致（EC015）
 - 設定にない障害IDや比較IDの使用（EC016）
-- `describe`の中での`scenarioTest`の登録（EC017）
 
 `string`型に広がった値、本体の外のヘルパーに渡した`s`、プロジェクト外のテストファイルは照合せず、実行時の観測の照合に任せます。
 必須のIDがテストに書かれていないことも、ヘルパー経由で呼ばれる可能性があるため、静的には報告しません。
@@ -252,6 +316,21 @@ JSON出力schemaVersionは2です。ケースには`testStatus`と`observationSt
 `check`はテストを実行しないため、成功しても`testsExecuted: false`、観測は`not_run`です。
 
 **`passed`は、その実行で登録した観測・比較が成立したという意味です。アプリケーション全体の正しさの証明ではありません。**
+
+### 失敗の経路
+
+契約に`entry`（エラー型を返す関数）を書くと、「コードの失敗 → エラー型 → シナリオ」を一続きに照合します。
+
+```json
+"entry": { "file": "src/submit.ts", "export": "submit" }
+```
+
+- `check`は`entry`の本体で、タグを返す`return`を経路として一覧にします（レポートの`paths`）。
+- `check`は、`entry`からcatchを通らずに外へ出る明示的な`throw`／`Promise.reject`を`EC018`で報告します。エラー型に表れない失敗です。catchが再throwし得る場合や、外部の関数・動的な呼出は報告しません。
+- Bunでの`verify`は、通常の実行の後にerrspecのシナリオだけをカバレッジ付きで1回実行します。どのシナリオも到達しなかった`return`を`EC019`で報告します。同じタグのシナリオがあっても、通っていない経路が分かります。
+
+到達は行単位で判定します。`if (x) return ...`のように条件と`return`を1行に書くと、条件の評価だけで到達と数えるため、未到達を見逃すことがあります。到達は、期待値の確認が正しいことを意味しません。
+Vitestでは経路の一覧だけを出し、到達は記録しません。例は[examples/failure-paths](examples/failure-paths)です。
 
 ## 保証の境界
 
@@ -305,6 +384,9 @@ CLIと補助APIは同じ版を使ってください。実行環境変数は`ERRS
 import、再export、paths、具体化したgeneric、union/intersectionを選択したコンパイラで解決します。
 `any`、`unknown`、広いstring、optionalな識別子は解析不能として報告します。`never`は0件です。
 型エラーや`noCheck: true`を無視して合格にはしません。
+tsrsを選択した場合はTypeScript 7に合わせて型検査します。TypeScript 7で廃止された`moduleResolution: node`（`node10`）は、TypeScript 7が未指定のCommonJSプロジェクトに使う`bundler`の解決として解析し、レポートの`assumptions`に記録します。この置き換えは合否に影響しません。
+
+TypeScript 5.xの`tsc`で通るtsconfigでも、その他の廃止設定や型検査の違いで失敗することがあります。`rootDir`は出力範囲の設定として扱い、範囲外のソースを参照することだけを理由とする`TS6059`では解析を停止しません。
 
 ## CLIと診断
 
@@ -313,7 +395,7 @@ import、再export、paths、具体化したgeneric、union/intersectionを選�
 `unknowns`は動的なsignature、外部実装、解決できないPromise使用などを示します。`--fail-on-unknown`で未解決箇所を終了コード1にできます。
 `scanComplete`は解析処理の完了であり、`allRuntimeErrorsKnown`は常にfalseです。getter/proxy、eval、任意callback、暗黙の例外、厳密な条件分岐やfinallyの上書きは完全にはモデル化しません。
 依存の型情報は使いますが、node_modulesとプロジェクトディレクトリ外の実装を走査対象に含めません。
-候補の既定識別子は`_tag,kind,type,code`です。`--discriminant code`などで変更できます。タグ型が業務上のエラーかはレビューしてください。
+候補は宣言ごとに1件で、barrelなどからの再exportは`reexports`に併記します。識別プロパティがすべて依存パッケージやプロジェクト外で宣言された型には`external: true`を付け、テキスト出力では後ろにまとめます。`flows`は、その型が実際に`error`プロパティの戻り値・throw・Promise.rejectのエラー型として現れる経路です。空の候補はデータ用の共用体であることが多く、登録対象を選ぶときの目安になります。候補の既定識別子は`_tag,kind,type,code`です。`--discriminant code`などで変更できます。タグ型が業務上のエラーかはレビューしてください。
 
 | コマンド／オプション | 用途 |
 |---|---|
@@ -347,7 +429,8 @@ Bunは起動前に`--version`で版を確認し、1.2.19未満なら実行しま
 | EC014 | strictモードでbaselineにあったシナリオが変更された |
 | EC015 | テストが未登録のシナリオを登録している、タグ・テストファイル・`withoutFaults`が設定と食い違う（実行前の静的照合） |
 | EC016 | シナリオ本体が、設定にない障害IDや比較IDを使っている（実行前の静的照合） |
-| EC017 | `scenarioTest`を`describe`の中で登録している（実行前の静的照合） |
+| EC018 | `entry`からエラー型に表れない失敗（catchされないthrow／reject）が外へ出る |
+| EC019 | `entry`のタグを返す`return`に、どのシナリオも到達しなかった（Bun） |
 | EC_EVIDENCE | 観測プロトコル・run ID・ファイルが不正 |
 | EC_CONFIG / EC_BASELINE / EC_RUNNER / EC_SNAPSHOT / EC_INTERNAL | 設定・比較対象・実行器・保存・内部処理のエラー |
 | TS… | 選択したコンパイラの診断 |
@@ -392,11 +475,13 @@ node scripts/demo-bun.mjs
 node scripts/demo-scenarios.mjs
 node scripts/demo-init.mjs
 node scripts/demo-module-mock.mjs
+node scripts/demo-failure-paths.mjs
 ```
 
 `demo-scenarios.mjs`は実際のBun/Vitestを起動し、一時コピーだけに変更を加えます。
 `mutate`の検証はNode 24以降で実行します。driver bundleの変更時はBun 1.4.4で`node scripts/build-mutation-driver.mjs`を実行し、生成物とライセンス通知を同じ変更に含めます。
 `demo-init.mjs`は初期生成したテストを両ランナーで実行し、未記入のTODOが通常実行でもverifyでも失敗することを確認します。
+`demo-failure-paths.mjs`は、実際のBunで経路の到達を記録し、未テストの経路（EC019）とエラー型の外へ出るthrow（EC018）を確認します。
 `demo-module-mock.mjs`は、依存を直接importするコードへモジュールのmockから障害を差し込めること、mockを外すと`EC009`になることを両ランナーで確認します。
 必要なら`node scripts/demo-scenarios.mjs /path/to/errspec /path/to/bun`で実行ファイルを指定できます。
 `demo-init.mjs`も同じ引数で実行ファイルを指定できます。

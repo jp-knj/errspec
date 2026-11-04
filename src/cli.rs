@@ -38,6 +38,8 @@ pub(crate) struct Cli {
 pub(crate) enum Format {
     Json,
     Text,
+    /// GitHub-flavored Markdown; coverage only.
+    Markdown,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -194,6 +196,9 @@ enum Action {
         /// Exit 1 when a tag is neither asserted nor mentioned by any test.
         #[arg(long)]
         fail_on_missing: bool,
+        /// Write the current per-tag statuses for --baseline. Refuses to overwrite.
+        #[arg(long, conflicts_with = "baseline")]
+        save_baseline: Option<PathBuf>,
         /// Extra arguments for `vitest run`, after `--` (e.g. `-- --project backend`).
         #[arg(last = true)]
         runner_args: Vec<String>,
@@ -233,6 +238,11 @@ impl From<CliRunner> for Runner {
 impl Cli {
     /// Translate CLI syntax once. Execution code never receives clap argument types.
     pub(crate) fn into_request(self, explicit_config: bool) -> Result<(Request, Format), String> {
+        if matches!(self.format, Format::Markdown)
+            && !matches!(self.command, Action::Coverage { .. })
+        {
+            return Err("--format markdown is supported only by coverage".into());
+        }
         let explicit_analysis = self.analysis_engine.is_some()
             || self.typescript_package.is_some()
             || self.analysis_node.is_some();
@@ -367,10 +377,11 @@ impl Cli {
                 vitest,
                 vitest_config,
                 fail_on_missing,
+                save_baseline,
                 runner_args,
             } => {
-                if self.baseline.is_some() || self.strict_baseline {
-                    return Err("coverage does not accept baseline options".into());
+                if self.strict_baseline {
+                    return Err("coverage does not accept --strict-baseline".into());
                 }
                 return Ok((
                     Request::Coverage(CoverageRequest {
@@ -381,6 +392,8 @@ impl Cli {
                         vitest_config,
                         fail_on_missing,
                         runner_args,
+                        baseline: self.baseline,
+                        save_baseline,
                     }),
                     self.format,
                 ));

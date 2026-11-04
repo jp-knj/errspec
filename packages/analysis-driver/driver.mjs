@@ -4,6 +4,7 @@ import { format } from "node:util";
 import { openCompiler, syntax, tags, TagError } from "./compiler.mjs";
 import { scan } from "./scan.mjs";
 import { scenarios } from "./scenarios.mjs";
+import { entryFacts } from "./entries.mjs";
 
 const output = process.stdout.write.bind(process.stdout);
 process.stdout.write = (chunk, encoding, callback) =>
@@ -23,6 +24,7 @@ try {
     tags: [],
     facts: null,
     scenarios: [],
+    entries: [],
   };
   if (compiler.noCheck)
     result.diagnostics.push({
@@ -55,6 +57,13 @@ try {
         (source) => tags(compiler, source),
       );
     result.scenarios = scenarios(compiler, syn, request.scenarioFiles);
+    for (const [id, entry] of (request.entries ?? []).entries()) {
+      try { result.entries.push({ id, facts: entryFacts(compiler, syn, request.root, entry), error: null }); }
+      catch (error) {
+        if (!(error instanceof TagError)) throw error;
+        result.entries.push({ id, facts: null, error: error.message });
+      }
+    }
     syn.verify();
   }
   output(JSON.stringify(result) + "\n");

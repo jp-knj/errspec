@@ -12,6 +12,7 @@ expression: "json!({\"types\": types, \"summary\": summary})"
   },
   "types": [
     {
+      "flows": [],
       "source": {
         "discriminant": "_tag",
         "export": "Failure",
@@ -43,6 +44,7 @@ expression: "json!({\"types\": types, \"summary\": summary})"
       ]
     },
     {
+      "flows": [],
       "source": {
         "discriminant": "_tag",
         "export": "StoreFailure",

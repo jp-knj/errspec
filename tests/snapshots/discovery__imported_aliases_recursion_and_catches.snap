@@ -14,17 +14,13 @@ expression: r
   ],
   "candidates": [
     {
-      "source": {
-        "discriminant": "_tag",
-        "export": "PublicFailure",
-        "file": "barrel.ts"
-      },
-      "tags": [
-        "Denied",
-        "Offline"
-      ]
-    },
-    {
+      "flows": [],
+      "reexports": [
+        {
+          "export": "PublicFailure",
+          "file": "barrel.ts"
+        }
+      ],
       "source": {
         "discriminant": "_tag",
         "export": "Failure",

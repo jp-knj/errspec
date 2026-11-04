@@ -116,6 +116,73 @@ function config(root, tags = ["Offline"]) {
 }
 
 for (const compiler of compilers) {
+  test(`TS ${compiler.major}: entry returns and escaping failures retain native judgments`, (t) => {
+    for (const body of [
+      `export function submit(n:number):Failure {
+  const nested=()=>{return {_tag:'Denied' as const}};
+  void nested;
+  if(n<0) throw new RangeError('bad');
+  if(n===0) return {_tag:'Offline'};
+  return {_tag:'Denied'};
+}`,
+      `export const submit=async(n:number):Promise<Failure>=>{
+  if(n<0) return Promise.reject(new RangeError('bad'));
+  try { if(n===0) throw new Error('caught'); } catch {}
+  return n===0 ? {_tag:'Offline'} : {_tag:'Denied'};
+};`,
+      `export const submit=(n:number):Failure=>n===0?{_tag:'Offline'}:{_tag:'Denied'};`,
+    ]) {
+      const root = project(t, {
+        "errors.ts": `// 日本🧪\r\nexport type Failure={_tag:'Offline'}|{_tag:'Denied'};\n${body}\n`,
+        "barrel.ts": "export {submit as send} from './errors';",
+        "case.test.ts": "export {};",
+      });
+      config(root, ["Denied", "Offline"]);
+      const path = join(root,"errspec.json"), cfg = JSON.parse(readFileSync(path,"utf8"));
+      cfg.schemaVersion=2;
+      cfg.contracts[0].cases=cfg.contracts[0].cases.map(c=>({id:c.tag,tag:c.tag,expect:c.expect,test:{file:"case.test.ts"},observe:{faults:[],assertions:["tag"]}}));
+      cfg.contracts[0].entry = {file:"barrel.ts",export:"send"};
+      writeFileSync(path,JSON.stringify(cfg));
+      const native=run(root,["check"]), official=run(root,["check"],compiler);
+      assert.equal(official.report.analysisComplete,true,JSON.stringify(official));
+      assert.deepEqual(semantic(official),native);
+      assert.ok(official.report.contracts[0].paths.length);
+      cfg.contracts[0].entry.export="missing";
+      writeFileSync(path,JSON.stringify(cfg));
+      const missing=run(root,["check"],compiler);
+      assert.equal(missing.code,2);
+      assert.equal(missing.report.analysisComplete,false);
+      assert.deepEqual(semantic(missing),run(root,["check"]));
+    }
+  });
+
+  test(`TS ${compiler.major}: Bun reachability checks use official entry locations`, (t) => {
+    const root=project(t,{"errors.ts":`export type Failure={_tag:'Offline'}|{_tag:'Denied'};
+export function submit(n:number):Failure {
+  if(n<0) return {_tag:'Denied'};
+  if(n===0) return {_tag:'Offline'};
+  return {_tag:'Offline'};
+}`});
+    const sdk=pathToFileURL(resolve(repo,"packages/testkit/index.mjs")).href;
+    const cases=["Denied","Offline"].map(tag=>({id:tag,tag,expect:"failure",test:{file:"case.test.mjs"},observe:{faults:[],assertions:["tag"]}}));
+    writeFileSync(join(root,"errspec.json"),JSON.stringify({schemaVersion:2,project:"tsconfig.json",contracts:[{id:"c",source:{file:"errors.ts",export:"Failure",discriminant:"_tag"},entry:{file:"errors.ts",export:"submit"},cases}]}));
+    const source=`import {test} from 'bun:test';
+import {scenarioTest} from ${JSON.stringify(sdk)};
+import {submit} from './errors.ts';
+for(const [tag,n] of [['Denied',-1],['Offline',0]]) scenarioTest(test,import.meta.url,{contract:'c',id:tag,tag,withoutFaults:true},async s=>{
+s.check('tag',submit(n)._tag,tag);
+// extra reach
+});`;
+    writeFileSync(join(root,"case.test.mjs"),source);
+    const incomplete=run(root,["verify","--runner","bun"],compiler);
+    assert.equal(incomplete.code,1,JSON.stringify(incomplete));
+    assert.ok(incomplete.report.diagnostics.some(d=>d.code==="EC019"));
+    writeFileSync(join(root,"case.test.mjs"),source.replace("// extra reach","submit(1);"));
+    const complete=run(root,["verify","--runner","bun"],compiler);
+    assert.equal(complete.code,0,JSON.stringify(complete));
+    assert.ok(complete.report.contracts[0].paths.every(p=>p.reached===true));
+  });
+
   test(`TS ${compiler.major}: scan facts and Rust propagation agree with native snapshots`, (t) => {
     for (const files of [
       {
@@ -126,6 +193,12 @@ for (const compiler of compilers) {
       },
       { "async.ts": fixture("async.ts") },
       { "result.ts": fixture("result.ts") },
+      {
+        "node_modules/sdk/package.json": '{"name":"sdk","types":"index.d.ts"}',
+        "node_modules/sdk/index.d.ts": "export interface SdkFailure {kind:'Remote'; path:string}",
+        "types.ts": "import type {SdkFailure} from 'sdk'; export type RemoteFailure=Omit<SdkFailure,'path'>; export type LocalFailure={kind:'Local'}; export function fail():{error:LocalFailure} {return {error:{kind:'Local'}}}",
+        "barrel.ts": "export type {RemoteFailure,LocalFailure} from './types';",
+      },
       { "bindings.ts": fixture("bindings.ts") },
       { "thenables.ts": fixture("thenables.ts") },
       {
@@ -226,7 +299,7 @@ for (const compiler of compilers) {
     );
   });
 
-  test(`TS ${compiler.major}: EC015/16/17 use the same static judgments and byte locations`, (t) => {
+  test(`TS ${compiler.major}: EC015/16 use the same static judgments and byte locations`, (t) => {
     const root = project(t, {
       "sdk/index.d.mts": readFileSync(
         resolve(repo, "packages/testkit/index.d.mts"),
@@ -274,7 +347,7 @@ describe('group',()=>scenario(test,'file:///x',{contract:'c',id:'offline',tag:'W
     assert.deepEqual(semantic(official), native);
     assert.deepEqual(
       official.report.diagnostics.map((d) => d.code),
-      ["EC017", "EC015", "EC015", "EC016", "EC016"],
+      ["EC015", "EC015", "EC016", "EC016"],
     );
   });
 
@@ -383,7 +456,7 @@ test("auto selects the nearest installed TS 6 and preserves node10/baseUrl", (t)
     assert.equal(result.report.engine.revision, "6.0.3");
     assert.equal(readFileSync(join(root, "tsconfig.json"), "utf8"), before);
     const native = run(root, ["check"], null, ["--analysis-engine", "tsrs"]);
-    assert.equal(native.code, 2);
+    assert.equal(native.code, options.moduleResolution === "node" ? 0 : 2, JSON.stringify(native));
     assert.equal(native.report.analysis.engine, "tsrs");
   }
 });

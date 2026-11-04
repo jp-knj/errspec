@@ -10,7 +10,7 @@ npm ci --ignore-scripts --no-audit --no-fund
 node --test tests/analysis-driver.test.mjs
 ```
 
-Protocol 1 accepts one JSON request on stdin: absolute `package`, `project`, and `root` paths, ordered `sources`, optional `discriminants`, and `scenarioFiles`. Stdout contains one JSON response with the actual compiler version, compiler diagnostics, indexed tag results, optional scan facts, and scenario call facts. Logs use stderr. Compiler errors stop acquisition; failures to access an API or decode a type fail the process. A tag that is not a finite discriminated type is a per-source error, distinct from a bridge failure and from the empty variant set of `never`.
+Protocol 1 accepts one JSON request on stdin: absolute `package`, `project`, and `root` paths, ordered `sources` and `entries`, optional `discriminants`, and `scenarioFiles`. Stdout contains one JSON response with the actual compiler version, compiler diagnostics, indexed tag and entry results, optional scan facts, and scenario call facts. Entry results carry the resolved function identity and return locations/tags; Rust applies contract filtering and escaping-failure judgments. Logs use stderr. Compiler errors stop acquisition; failures to access an API or decode a type fail the process. Invalid source types and unresolved entry exports are per-request errors, distinct from a bridge failure and from the empty variant set of `never`.
 
 Compiler handles stay inside this process. Rust validates response identity and references, computes propagation and static scenario judgments, and owns process-group cleanup, interruption, a 300-second deadline, and output limits. API snapshots and servers close in `finally`.
 

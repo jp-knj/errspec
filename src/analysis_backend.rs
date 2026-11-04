@@ -1,8 +1,8 @@
 //! Select and acquire semantic facts. Registration and propagation judgments stay in Rust.
-use crate::{scenario_source, tsrs_adapter::TsrsAdapter};
+use crate::{failure_paths, scenario_source, tsrs_adapter::TsrsAdapter};
 use errspec::{
     discovery::ScanFacts,
-    model::{AnalysisInfo, Finding, Source, TSRS_REVISION},
+    model::{AnalysisInfo, EntryRef, Finding, Source, TSRS_REVISION},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -36,6 +36,13 @@ pub(crate) struct Plan {
     pub sources: Vec<Source>,
     pub discriminants: Option<Vec<String>>,
     pub scenario_files: Vec<PathBuf>,
+    pub entries: Vec<EntryRequest>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct EntryRequest {
+    pub entry: EntryRef,
+    pub discriminant: String,
 }
 
 pub(crate) struct Failure {
@@ -63,6 +70,15 @@ pub(crate) struct Response {
     tags: Vec<Tags>,
     pub facts: Option<ScanFacts>,
     pub scenarios: Vec<scenario_source::ScenarioCall>,
+    pub entries: Vec<EntryResult>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EntryResult {
+    id: usize,
+    facts: Option<failure_paths::Facts>,
+    error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +90,24 @@ struct Tags {
 }
 
 impl Session {
+    pub fn entry(
+        &self,
+        index: usize,
+        root: &Path,
+        entry: &EntryRef,
+        discriminant: &str,
+    ) -> Result<failure_paths::Facts, String> {
+        match &self.backend {
+            Backend::Native(adapter) => failure_paths::collect(adapter, root, entry, discriminant),
+            Backend::Official(response) => {
+                let value = &response.entries[index];
+                value
+                    .facts
+                    .clone()
+                    .ok_or_else(|| value.error.clone().expect("validated entry result"))
+            }
+        }
+    }
     pub fn tags(&self, index: usize, root: &Path, source: &Source) -> Result<Vec<String>, String> {
         match &self.backend {
             Backend::Native(adapter) => adapter.tags(root, source),
@@ -200,6 +234,15 @@ fn validate(response: &Response, version: &str, plan: &Plan) -> Result<(), Strin
     {
         return Err(malformed());
     }
+    if response.entries.len() != plan.entries.len()
+        || response
+            .entries
+            .iter()
+            .enumerate()
+            .any(|(i, entry)| entry.id != i || entry.facts.is_some() == entry.error.is_some())
+    {
+        return Err(malformed());
+    }
     if response.facts.is_some() != plan.discriminants.is_some() {
         return Err(malformed());
     }
@@ -222,6 +265,17 @@ fn validate(response: &Response, version: &str, plan: &Plan) -> Result<(), Strin
         {
             return Err(malformed());
         }
+        for entry in response.entries.iter().filter_map(|e| e.facts.as_ref()) {
+            if !functions.contains(entry.function.as_str())
+                || entry.paths.iter().any(|p| {
+                    p.line == 0 || p.reached.is_some() || p.tags.windows(2).any(|w| w[0] >= w[1])
+                })
+            {
+                return Err(malformed());
+            }
+        }
+    } else if !response.entries.is_empty() {
+        return Err(malformed());
     }
     Ok(())
 }
@@ -236,6 +290,7 @@ struct Input<'a> {
     sources: &'a [Source],
     discriminants: &'a Option<Vec<String>>,
     scenario_files: &'a [PathBuf],
+    entries: &'a [EntryRequest],
 }
 
 // A dedicated process group owns both Node and the TypeScript 7 native API server.
@@ -285,6 +340,10 @@ fn invoke(
                 "scenarios.mjs",
                 include_str!("../packages/analysis-driver/scenarios.mjs"),
             ),
+            (
+                "entries.mjs",
+                include_str!("../packages/analysis-driver/entries.mjs"),
+            ),
         ] {
             fs::write(directory.path().join(name), source)?;
         }
@@ -299,6 +358,7 @@ fn invoke(
                 sources: &plan.sources,
                 discriminants: &plan.discriminants,
                 scenario_files: &plan.scenario_files,
+                entries: &plan.entries,
             })?,
         )?;
         let out = directory.path().join("stdout");
@@ -383,7 +443,7 @@ mod tests {
 
     fn response() -> serde_json::Value {
         json!({"protocol":1,"engine":"typescript","version":"7.0.2","diagnostics":[],
-            "tags":[{"id":0,"tags":["Offline"],"error":null}],"facts":null,"scenarios":[]})
+            "tags":[{"id":0,"tags":["Offline"],"error":null}],"facts":null,"scenarios":[],"entries":[]})
     }
 
     fn valid(value: serde_json::Value, plan: &Plan) -> bool {
@@ -446,5 +506,49 @@ mod tests {
             .unwrap()
             .push(duplicate);
         assert!(!valid(complete, &plan));
+    }
+
+    #[test]
+    fn entry_requests_require_results_and_valid_return_locations() {
+        let plan = Plan {
+            sources: vec![source()],
+            discriminants: Some(vec![]),
+            entries: vec![EntryRequest {
+                entry: EntryRef {
+                    file: "errors.ts".into(),
+                    export: "run".into(),
+                },
+                discriminant: "_tag".into(),
+            }],
+            ..Plan::default()
+        };
+        let mut complete = response();
+        complete["facts"] = json!({"files":["errors.ts"],"candidates":[],"functions":[{
+            "id":"f","name":"run","location":{"file":"errors.ts","byteOffset":0,"line":1},"isAsync":false
+        }],"origins":[],"edges":[],"unknowns":[]});
+        assert!(!valid(complete.clone(), &plan));
+        complete["entries"] = json!([{"id":0,"facts":{"function":"f","paths":[{
+            "file":"errors.ts","byteOffset":10,"line":2,"tags":["Offline"]
+        }]},"error":null}]);
+        assert!(valid(complete.clone(), &plan));
+        for (field, value) in [("id", json!(1)), ("error", json!("missing"))] {
+            let mut bad = complete.clone();
+            bad["entries"][0][field] = value;
+            assert!(!valid(bad, &plan));
+        }
+        let mut bad = complete.clone();
+        bad["entries"][0]["facts"]["function"] = json!("unknown");
+        assert!(!valid(bad, &plan));
+        for (field, value) in [
+            ("line", json!(0)),
+            ("reached", json!(true)),
+            ("tags", json!(["Z", "A"])),
+        ] {
+            let mut bad = complete.clone();
+            bad["entries"][0]["facts"]["paths"][0][field] = value;
+            assert!(!valid(bad, &plan));
+        }
+        complete["entries"] = json!([{"id":0,"facts":null,"error":"entry export not found"}]);
+        assert!(valid(complete, &plan));
     }
 }

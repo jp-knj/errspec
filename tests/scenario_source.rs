@@ -393,27 +393,35 @@ fn every_scenario_of_a_shared_body_reports_an_undeclared_id() {
     assert_eq!(scenarios, vec!["limit-first", "limit-retries"]);
 }
 
+fn nested(wrapper: &str, source: &str) -> String {
+    source
+        .replacen("import { test }", "import { describe, test }", 1)
+        .replacen(
+            "scenarioTest(test, 'file:///x', { contract: CONTRACT, id: 'invalid'",
+            &format!("{wrapper}() => scenarioTest(test, 'file:///x', {{ contract: CONTRACT, id: 'invalid'"),
+            1,
+        )
+        .replacen("s.check('status', 400, 400);\n});", "s.check('status', 400, 400);\n}));", 1)
+}
+
 #[test]
-fn describe_nesting_is_reported_for_each_describe_form() {
+fn scenarios_inside_describe_are_matched_like_top_level_ones() {
     let mut outcomes = Vec::new();
     for wrapper in [
         "describe('group', ",
         "describe.only('group', ",
         "describe.each([1])('group', ",
     ] {
-        let nested = GOOD
-            .replacen("import { test }", "import { describe, test }", 1)
-            .replacen(
-                "scenarioTest(test, 'file:///x', { contract: CONTRACT, id: 'invalid'",
-                &format!("{wrapper}() => scenarioTest(test, 'file:///x', {{ contract: CONTRACT, id: 'invalid'"),
-                1,
-            )
-            .replacen("s.check('status', 400, 400);\n});", "s.check('status', 400, 400);\n}));", 1);
-        let outcome = check_source(&nested);
-        assert_reports(&outcome, "EC017", "inside describe", wrapper);
-        outcomes.push(
-            json!({"wrapper": wrapper, "status": outcome.status, "findings": outcome.findings}),
+        let valid = check_source(&nested(wrapper, GOOD));
+        assert_clean(&valid, wrapper);
+        let broken = nested(wrapper, GOOD).replacen(
+            "s.check('status', 400, 400)",
+            "s.check('code', 400, 400)",
+            1,
         );
+        let invalid = check_source(&broken);
+        assert_reports(&invalid, "EC016", "check id \"code\"", wrapper);
+        outcomes.push(json!({"wrapper":wrapper,"valid":{"status":valid.status,"findings":valid.findings},"invalid":{"status":invalid.status,"findings":invalid.findings}}));
     }
     insta::assert_json_snapshot!("nested_scenario_registrations", outcomes);
 }

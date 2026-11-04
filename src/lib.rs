@@ -9,6 +9,7 @@ pub mod model;
 pub mod mutation;
 pub mod observation;
 pub mod observation_io;
+pub mod reach;
 pub mod report;
 pub mod snapshot;
 pub mod vitest;

@@ -12,6 +12,7 @@ expression: data.registrations
                 discriminant: "tag",
             },
             boundaries: [],
+            entry: None,
             cases: [
                 ValidatedCase {
                     tag: "A",
