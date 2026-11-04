@@ -15,12 +15,39 @@ pub struct File {
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Record {
+pub(super) struct Record {
     covered_by: Vec<String>,
     selected: Vec<String>,
     attempt: Attempt,
 }
 impl Record {
+    pub(super) fn capture(mutant: &Mutant, selected: &[String]) -> Option<Self> {
+        if mutant.attempts.len() != 1 || mutant.attempts[0].status != mutant.status {
+            return None;
+        }
+        let record = Self {
+            covered_by: mutant.covered_by.clone(),
+            selected: selected.into(),
+            attempt: mutant.attempts[0].clone(),
+        };
+        record.valid(mutant, selected).then_some(record)
+    }
+    pub(super) fn apply(&self, mutant: &mut Mutant, selected: &[String]) -> bool {
+        if mutant.status != Status::Pending || !self.valid(mutant, selected) {
+            return false;
+        }
+        mutant.status = self.attempt.status;
+        mutant.killed_by = mutant
+            .covered_by
+            .iter()
+            .filter(|id| self.attempt.killed_by.contains(id))
+            .cloned()
+            .collect();
+        mutant.failed_modules.clear();
+        mutant.attempts = vec![self.attempt.clone()];
+        mutant.reused = true;
+        true
+    }
     fn valid(&self, mutant: &Mutant, selected: &[String]) -> bool {
         if selected.is_empty()
             || self.selected != selected
@@ -75,39 +102,16 @@ impl File {
         if !self.compatible(fingerprint) || mutant.status != Status::Pending {
             return false;
         }
-        let Some(record) = self
-            .records
+        self.records
             .get(&mutant.candidate.key)
-            .filter(|record| record.valid(mutant, selected))
-        else {
-            return false;
-        };
-        mutant.status = record.attempt.status;
-        mutant.killed_by = mutant
-            .covered_by
-            .iter()
-            .filter(|id| record.attempt.killed_by.contains(id))
-            .cloned()
-            .collect();
-        mutant.failed_modules.clear();
-        mutant.attempts = vec![record.attempt.clone()];
-        mutant.reused = true;
-        true
+            .is_some_and(|record| record.apply(mutant, selected))
     }
     /// Only stable, first-attempt assertion outcomes are eligible. Timeout,
     /// runtime-error, compilation and reachability decisions are revalidated.
     pub fn record(&mut self, mutant: &Mutant, selected: &[String]) -> bool {
-        if mutant.attempts.len() != 1 || mutant.attempts[0].status != mutant.status {
+        let Some(record) = Record::capture(mutant, selected) else {
             return false;
-        }
-        let record = Record {
-            covered_by: mutant.covered_by.clone(),
-            selected: selected.into(),
-            attempt: mutant.attempts[0].clone(),
         };
-        if !record.valid(mutant, selected) {
-            return false;
-        }
         self.records.insert(mutant.candidate.key.clone(), record);
         true
     }

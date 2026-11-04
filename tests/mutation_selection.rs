@@ -1,5 +1,6 @@
 use errspec::mutation::selection::{Lines, hunks, validate};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 #[test]
 fn changed_lines_cover_insertions_deletions_and_single_line_hunks() {
@@ -20,7 +21,7 @@ fn changed_lines_cover_insertions_deletions_and_single_line_hunks() {
 fn invalid_scope_cycles_and_utf8_ranges_fail_before_selection() {
     let key = "a".repeat(64);
     let candidate=serde_json::from_value(json!({"key":key,"file":"src/a.ts","line":1,"byteOffset":0,"end":4,"mutator":"StringLiteral","original":"'é'","replacement":"''","placement":"expression","ignored":null,"regex":null,"guardOffset":null})).unwrap();
-    let mut facts:errspec::mutation::syntax::Metadata=serde_json::from_value(json!({"version":1,"scopes":{"module":{"hash":"a","effectHash":"a","start":0,"end":4,"line":1,"endLine":1,"parent":null,"name":null,"references":[],"pure":false,"function":false,"unknownCalls":false}},"owners":{key:"module"},"nodes":[]})).unwrap();
+    let mut facts:errspec::mutation::syntax::Metadata=serde_json::from_value(json!({"version":2,"sourceHash":format!("{:x}",Sha256::digest("'é'".as_bytes())),"scopes":{"module":{"hash":"a".repeat(64),"effectHash":"a".repeat(64),"start":0,"end":4,"line":1,"endLine":1,"parent":null,"name":null,"references":[],"pure":false,"function":false,"unknownCalls":false}},"owners":{key:"module"},"nodes":[]})).unwrap();
     assert!(validate(&facts, "'é'", std::slice::from_ref(&candidate)).is_ok());
     facts.scopes.get_mut("module").unwrap().parent = Some("module".into());
     assert!(validate(&facts, "'é'", &[]).unwrap_err().contains("Cyclic"));

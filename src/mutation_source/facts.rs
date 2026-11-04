@@ -1,6 +1,8 @@
 //! Owned syntax facts shared by selection, reuse, plugins and mutation reports.
 use super::*;
 use errspec::mutation::syntax::{Metadata, Scope, SyntaxNode};
+use std::collections::BTreeMap;
+type Entries<'a> = BTreeMap<(usize, usize), Vec<&'a Candidate>>;
 
 fn pure(node: P<Node>) -> bool {
     match node.kind() {
@@ -158,7 +160,55 @@ fn syntax(
     id
 }
 
+fn entry(rules: &Rules<'_>, entries: &Entries<'_>, owner: &str, node: P<Node>) -> Option<String> {
+    let function = if tsrs_ast::is_function_like_declaration(node) {
+        Some(node)
+    } else if matches!(
+        node.kind(),
+        Kind::VariableDeclaration | Kind::PropertyDeclaration
+    ) {
+        node.initializer()
+            .filter(|node| matches!(node.kind(), Kind::ArrowFunction | Kind::FunctionExpression))
+    } else {
+        None
+    }?;
+    let body = function.body()?;
+    entries
+        .get(&(rules.start(body), rules.end(body)))?
+        .iter()
+        .find(|candidate| {
+            candidate.ignored.is_none()
+                && rules
+                    .owners
+                    .get(&candidate.key)
+                    .is_some_and(|name| name == owner)
+                && (body.kind() == Kind::Block
+                    && candidate.mutator == "BlockStatement"
+                    && candidate.placement == Placement::Body
+                    || body.kind() != Kind::Block
+                        && candidate.mutator == "ArrowFunction"
+                        && candidate.placement == Placement::Expression)
+        })
+        .map(|candidate| candidate.key.clone())
+}
+
 pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
+    let mut entries = Entries::new();
+    for candidate in &rules.candidates {
+        if candidate.ignored.is_none()
+            && (candidate.mutator == "BlockStatement" && candidate.placement == Placement::Body
+                || candidate.mutator == "ArrowFunction"
+                    && candidate.placement == Placement::Expression)
+        {
+            entries
+                .entry((
+                    candidate.location.byte_offset as usize,
+                    candidate.end as usize,
+                ))
+                .or_default()
+                .push(candidate);
+        }
+    }
     let scopes = rules
         .scopes
         .iter()
@@ -198,6 +248,7 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
                         matches!(n.kind(), Kind::FunctionExpression | Kind::ArrowFunction)
                     }),
                     unknown_calls: unknown,
+                    entry_key: entry(rules, &entries, name, *node),
                 },
             )
         })
@@ -205,7 +256,8 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
     let mut nodes = vec![];
     syntax(rules, rules.file.as_node(), None, &mut nodes);
     Metadata {
-        version: 1,
+        version: 2,
+        source_hash: format!("{:x}", Sha256::digest(rules.file.text().as_bytes())),
         scopes,
         owners: rules
             .owners

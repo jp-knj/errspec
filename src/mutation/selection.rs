@@ -62,10 +62,19 @@ fn line(source: &str, offset: usize) -> usize {
 
 /// Validate compiler facts at the acquisition boundary before selecting anything.
 pub fn validate(metadata: &Metadata, source: &str, candidates: &[Candidate]) -> Result<(), String> {
-    if metadata.version != 1 {
+    if metadata.version != 2 {
         return Err("Unsupported syntax metadata version".into());
     }
+    if !super::syntax::source_matches(metadata, source) {
+        return Err("Syntax source digest mismatch".into());
+    }
     for (name, scope) in &metadata.scopes {
+        if [&scope.hash, &scope.effect_hash]
+            .iter()
+            .any(|value| value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        {
+            return Err("Invalid syntax scope hash".into());
+        }
         if scope.start > scope.end
             || !source.is_char_boundary(scope.start)
             || !source.is_char_boundary(scope.end)
@@ -108,11 +117,58 @@ pub fn validate(metadata: &Metadata, source: &str, candidates: &[Candidate]) -> 
         };
         if (c.location.byte_offset as usize) < scope.start
             || c.end as usize > scope.end
+            || source.get(c.location.byte_offset as usize..c.end as usize)
+                != Some(c.original.as_str())
             || !source.is_char_boundary(c.location.byte_offset as usize)
             || !source.is_char_boundary(c.end as usize)
             || c.location.line != line(source, c.location.byte_offset as usize)
         {
             return Err("Mutant outside its syntax scope".into());
+        }
+    }
+    let mut linked = BTreeSet::new();
+    for (index, node) in metadata.nodes.iter().enumerate() {
+        if node.start > node.end
+            || !source.is_char_boundary(node.start)
+            || !source.is_char_boundary(node.end)
+            || (index == 0) != (node.parent.is_none())
+            || node.parent.is_some_and(|parent| parent >= index)
+            || node.children.iter().any(|child| {
+                *child <= index
+                    || !linked.insert(*child)
+                    || metadata
+                        .nodes
+                        .get(*child)
+                        .is_none_or(|child| child.parent != Some(index))
+            })
+        {
+            return Err("Invalid syntax node graph".into());
+        }
+    }
+    if linked.len() != metadata.nodes.len().saturating_sub(1) {
+        return Err("Incomplete syntax node graph".into());
+    }
+    for (owner, scope) in &metadata.scopes {
+        if let Some(key) = &scope.entry_key {
+            let candidate = candidates
+                .iter()
+                .find(|candidate| &candidate.key == key)
+                .ok_or("Missing scope entry candidate")?;
+            let body = super::syntax::function_body(metadata, scope)
+                .ok_or("Missing function entry body")?;
+            if metadata.owners.get(key) != Some(owner)
+                || candidate.ignored.is_some()
+                || candidate.location.byte_offset as usize != body.start
+                || candidate.end as usize != body.end
+                || !(body.kind == "Block"
+                    && candidate.mutator == "BlockStatement"
+                    && candidate.placement == super::Placement::Body
+                    || body.kind != "Block"
+                        && candidate.mutator == "ArrowFunction"
+                        && candidate.placement == super::Placement::Expression)
+            {
+                return Err("Invalid scope entry candidate".into());
+            }
         }
     }
     Ok(())

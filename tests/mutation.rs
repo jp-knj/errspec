@@ -314,7 +314,7 @@ fn owned_syntax_facts_keep_scope_hashes_stable_across_position_changes() {
     );
     let a = "module/FunctionDeclaration:a#0";
     let b = "module/FunctionDeclaration:b#0";
-    assert_eq!(original["metadata"]["version"], 1);
+    assert_eq!(original["metadata"]["version"], 2);
     assert_eq!(
         original["metadata"]["scopes"][a]["hash"],
         moved["metadata"]["scopes"][a]["hash"]
@@ -350,6 +350,145 @@ fn owned_syntax_facts_keep_scope_hashes_stable_across_position_changes() {
     assert_ne!(
         jsx["metadata"]["scopes"]["module/FunctionDeclaration:view#0"]["hash"],
         changed_jsx["metadata"]["scopes"]["module/FunctionDeclaration:view#0"]["hash"]
+    );
+}
+
+#[test]
+fn scope_entries_identify_the_direct_body_and_exclude_ignored_or_removed_guards() {
+    let source = "export function outer(n:number){const callback=()=>true;return callback();}\nexport const arrow=(n:number)=>n+1;";
+    let generated = generate_options(source, json!({"facts":true}));
+    let metadata: mutation::syntax::Metadata =
+        serde_json::from_value(generated["metadata"].clone()).unwrap();
+    let candidates: Vec<mutation::Candidate> =
+        serde_json::from_value(generated["candidates"].clone()).unwrap();
+    mutation::selection::validate(&metadata, source, &candidates).unwrap();
+    for (owner, scope) in &metadata.scopes {
+        if !scope.function {
+            continue;
+        }
+        let entry = scope.entry_key.as_ref().unwrap();
+        let candidate = candidates
+            .iter()
+            .find(|candidate| &candidate.key == entry)
+            .unwrap();
+        let body = mutation::syntax::function_body(&metadata, scope).unwrap();
+        assert_eq!(candidate.location.byte_offset as usize, body.start);
+        assert_eq!(candidate.end as usize, body.end);
+        assert_eq!(metadata.owners[entry], *owner);
+    }
+    let outer = &metadata.scopes["module/FunctionDeclaration:outer#0"];
+    let entry = candidates
+        .iter()
+        .find(|candidate| Some(&candidate.key) == outer.entry_key.as_ref())
+        .unwrap();
+    assert!(entry.original.contains("return callback()"));
+    let removed = generate_options(
+        source,
+        json!({"facts":true,"excludeMutators":["BlockStatement","ArrowFunction"]}),
+    );
+    assert!(
+        removed["metadata"]["scopes"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|scope| scope.get("entryKey").is_none())
+    );
+    let ignored = generate_options(
+        "// errspec-disable-next-line\nexport function ignored(){return true;}",
+        json!({"facts":true}),
+    );
+    assert!(
+        ignored["metadata"]["scopes"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|scope| scope.get("entryKey").is_none())
+    );
+}
+
+#[test]
+fn scope_entry_validation_rejects_cross_owner_keys_and_broken_syntax_graphs() {
+    let source = "export const a=()=>true;export const b=()=>false;";
+    let generated = generate_options(source, json!({"facts":true}));
+    let original: mutation::syntax::Metadata =
+        serde_json::from_value(generated["metadata"].clone()).unwrap();
+    let candidates: Vec<mutation::Candidate> =
+        serde_json::from_value(generated["candidates"].clone()).unwrap();
+    let changed = source.replacen("const a", "const c", 1);
+    assert!(!mutation::syntax::source_matches(&original, &changed));
+    assert!(mutation::selection::validate(&original, &changed, &candidates).is_err());
+    let mut wrong = original.clone();
+    wrong
+        .scopes
+        .get_mut("module/VariableDeclaration:a#0")
+        .unwrap()
+        .entry_key = original.scopes["module/VariableDeclaration:b#0"]
+        .entry_key
+        .clone();
+    assert!(mutation::selection::validate(&wrong, source, &candidates).is_err());
+    let mut cycle = original.clone();
+    cycle.nodes[0].children.push(0);
+    assert!(mutation::selection::validate(&cycle, source, &candidates).is_err());
+    let mut detached = original.clone();
+    detached.nodes[0].children.clear();
+    assert!(mutation::selection::validate(&detached, source, &candidates).is_err());
+    let mut hash = original;
+    hash.scopes.get_mut("module").unwrap().hash = "unknown".into();
+    assert!(mutation::selection::validate(&hash, source, &candidates).is_err());
+}
+
+#[test]
+fn full_scope_probe_binds_static_entries_and_promotes_local_candidates_to_their_function() {
+    let source = "export function outer(n:number){const local=true;return n+1;}\nexport const arrow=()=>false;";
+    let generated = generate_options(source, json!({"facts":true}));
+    let metadata: mutation::syntax::Metadata =
+        serde_json::from_value(generated["metadata"].clone()).unwrap();
+    let candidates: Vec<mutation::Candidate> =
+        serde_json::from_value(generated["candidates"].clone()).unwrap();
+    let outer = metadata.scopes["module/FunctionDeclaration:outer#0"]
+        .entry_key
+        .as_ref()
+        .unwrap();
+    let arrow = metadata.scopes["module/VariableDeclaration:arrow#0"]
+        .entry_key
+        .as_ref()
+        .unwrap();
+    let probe:Execution=serde_json::from_value(json!({"selected":[],"tests":[{"id":"test-a","taskId":"current","file":"a.test.ts","name":"static","status":"passed","started":true,"duration":1,"errors":[],"hits":{}},{"id":"test-b","taskId":"other","file":"b.test.ts","name":"arrow","status":"passed","started":true,"duration":1,"errors":[],"hits":{arrow:1}}],"hits":{outer:1,arrow:1},"staticHits":{outer:["a.test.ts"]},"failedModules":[],"errors":[],"wallTimeout":false})).unwrap();
+    let sources = std::collections::BTreeMap::from([(
+        "src/rules.ts".into(),
+        mutation::scope_cache::Source {
+            text: source,
+            metadata: &metadata,
+            candidates: &candidates,
+        },
+    )]);
+    let context =
+        mutation::scope_cache::from_probe("f".repeat(64), &sources, &probe, true).unwrap();
+    let outer_owner = &context.candidates[outer];
+    let local = candidates
+        .iter()
+        .find(|candidate| candidate.original == "true")
+        .unwrap();
+    assert_eq!(&context.candidates[&local.key], outer_owner);
+    assert_eq!(
+        context.scopes[outer_owner]
+            .observation
+            .as_ref()
+            .unwrap()
+            .files,
+        std::collections::BTreeSet::from(["a.test.ts".into()])
+    );
+    assert_eq!(context.scopes.len(), 3, "module and two functions only");
+    let mut unknown = probe.clone();
+    unknown.tests[0].infected.insert("unknown".into());
+    assert!(mutation::scope_cache::from_probe("f".repeat(64), &sources, &unknown, true).is_err());
+    let mut unattributed = probe;
+    unattributed.static_hits.clear();
+    let context =
+        mutation::scope_cache::from_probe("f".repeat(64), &sources, &unattributed, true).unwrap();
+    assert!(
+        context.scopes[outer_owner].observation.is_none(),
+        "a hit without attribution is unknown, not unused"
     );
 }
 
