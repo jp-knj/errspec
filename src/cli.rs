@@ -132,6 +132,14 @@ struct MutationArgs {
     /// Independent mutation workers; defaults to one.
     #[arg(short = 'j', long, default_value_t = 1)]
     concurrency: usize,
+    /// Exclude logging-only syntax; opt-in to preserve existing mutation runs.
+    #[arg(long, conflicts_with = "no_arid")]
+    arid: bool,
+    #[arg(long)]
+    no_arid: bool,
+    /// Replace logging callee patterns; requires --arid to enable the heuristic.
+    #[arg(long)]
+    arid_callee: Vec<String>,
     /// Mutation settings; separate from the error-contract configuration.
     #[arg(long)]
     config_file: Option<PathBuf>,
@@ -349,6 +357,9 @@ impl Cli {
                     diff_unit,
                     shard,
                     concurrency,
+                    arid,
+                    no_arid,
+                    arid_callee,
                     config_file,
                     root,
                     include,
@@ -393,6 +404,8 @@ impl Cli {
                             diff_unit: diff_unit.map(Into::into),
                             shard,
                             concurrency,
+                            arid: arid && !no_arid,
+                            arid_callees: (!arid_callee.is_empty()).then_some(arid_callee),
                             root,
                             include,
                             exclude,

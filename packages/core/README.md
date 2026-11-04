@@ -263,3 +263,28 @@ ignored. Suppressed candidates retain their IDs, appear as `Ignored` with
 `ignored: "disabled[: reason]"`, run no trials and stay outside the score and
 gates. Removing a directive restores verification and invalidates exact-input
 cached evidence. Existing built-in safety exclusions keep their own reason.
+
+## Logging-only exclusions
+
+`--arid` / `arid: true` marks logging-only syntax `Ignored` with
+`ignored: "arid: logging-only code"`. It is off by default to preserve existing
+mutation runs. `--no-arid` overrides configured true. This is a naming heuristic
+for intentional log output, rather than a proof of equivalent behavior: calls,
+their arguments and logging-only conditions may have effects that matter to you.
+Keep it disabled when those effects belong in your test contract.
+
+The default callee patterns are `console.*`, `logger.*`, `log.*`, `*.debug`,
+`*.trace` and `debug`. `--arid-callee <pattern>` (repeatable) or
+`aridCallees: [...]` replaces that set; it does not enable the heuristic by itself.
+An empty array matches no calls; API `null` restores the built-in patterns.
+Patterns support exact dotted names, a trailing `.*` for a named receiver,
+or a leading `*.` for a property suffix. `this.logger` uses the `logger` path.
+Optional access, parentheses, non-null assertions and awaited calls are supported.
+Computed members and casts are kept for verification.
+
+Calls and blocks/ifs containing only logging or empty statements are excluded.
+Mixed blocks, return statements, declarations and nested callback bodies retain
+their independent behavior checks. Empty function bodies are not classified as
+logging-only. Explicit source comments and built-in safety exclusions keep their
+own reasons. Candidates retain their IDs; changing the enablement or patterns
+invalidates cached outcomes and observations.

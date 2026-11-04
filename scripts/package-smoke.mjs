@@ -200,6 +200,12 @@ if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equa
     writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\nexport const extra=true;\n");
     run(process.execPath,["api.mjs","--diff"]);
     extraChecks.push("installed-core-git-selection");
+    writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\nexport function observed(){console.info('telemetry');return true;}\n");
+    writeFileSync(join(dir,"mutation.test.ts"),'import {test,expect} from "vitest";import {add,observed} from "./src/mutation";test("behavior",()=>{expect(add(2,3)).toBe(5);expect(observed()).toBe(true)});');
+    const arid=JSON.parse(run(process.execPath,[launcher,"mutate","--arid","--node",process.execPath,"--vitest-package",resolve(process.env.ERRSPEC_VITEST_PACKAGE),"--fail-on-undetected","--format","json"]));
+    assert.equal(arid.runComplete,true);assert.equal(arid.summary.ignored,2);assert.equal(arid.summary.killed,4);
+    assert.ok(arid.mutants.filter(m=>m.status==='Ignored').every(m=>m.ignored==='arid: logging-only code'&&m.attempts.length===0));
+    extraChecks.push("installed-arid-exclusions");
     const installed=JSON.parse(run(process.execPath,["--input-type=module","-e","import {nativeBinary} from '@errspec/cli/native';console.log(JSON.stringify(nativeBinary()));"]));
     run(process.execPath,["--test",fileURLToPath(new URL("../tests/mutation-ownership.test.mjs",import.meta.url))],0,{ERRSPEC_BIN:installed});
     extraChecks.push("installed-native-ownership-and-orphan-recovery");

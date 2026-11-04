@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use tsrs_ast::{Kind, Node, SourceFile, is_type_node_kind};
 use tsrs_core::P;
+mod arid;
 mod comments;
 mod facts;
 
@@ -23,6 +24,10 @@ pub(crate) struct SourceRequest {
     pub weak_mutation: bool,
     #[serde(default)]
     pub facts: bool,
+    #[serde(default)]
+    pub arid: bool,
+    #[serde(default)]
+    pub arid_callees: Option<Vec<String>>,
 }
 #[derive(Serialize)]
 pub(crate) struct SourceResult {
@@ -52,6 +57,7 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
             file.text(),
             comments::acquire(file),
         ),
+        arid: arid::Arid::new(file, request.arid, request.arid_callees)?,
         weak_mutation: request.weak_mutation,
         facts: request.facts,
         owners: std::collections::BTreeMap::new(),
@@ -93,6 +99,7 @@ struct Rules<'a> {
     critical: BTreeSet<String>,
     in_critical: bool,
     disabled: errspec::mutation::exclusions::Disabled,
+    arid: arid::Arid,
     weak_mutation: bool,
     facts: bool,
     owners: std::collections::BTreeMap<String, String>,
@@ -166,10 +173,16 @@ impl Rules<'_> {
             original: self.raw(node).into(),
             replacement,
             placement,
-            ignored: ignored.or_else(|| {
-                self.disabled
-                    .reason(self.file.text(), family, start as usize)
-            }),
+            ignored: ignored
+                .or_else(|| {
+                    self.disabled
+                        .reason(self.file.text(), family, start as usize)
+                })
+                .or_else(|| {
+                    self.arid
+                        .ignores(node)
+                        .then(|| "arid: logging-only code".into())
+                }),
             regex,
             guard_offset,
             weak: None,

@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { runMutation } from "../packages/core/index.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const binary = process.env.ERRSPEC_BIN || join(repo, "target/debug/errspec");
 function project(
@@ -60,6 +61,29 @@ test("explicit comments exclude trials with visible reasons and removing one inv
   const warm=run(root,args);assert.equal(warm.cache.reused,1);assert.equal(warm.cache.executed,0);assert.equal(warm.summary.ignored,4);
   writeFileSync(join(root,'src/value.ts'),source.replace('// errspec-disable-next-line: intentional weak check\n',''));
   const restored=run(root,args,1);assert.equal(restored.cache.reused,0);assert.equal(restored.cache.invalidated,true);assert.equal(restored.summary.ignored,2);assert.equal(restored.summary.survived,1);assert.equal(restored.gate.passed,false);
+});
+test("arid CLI, configuration and API preserve default trials and explicitly exclude only logging syntax",async t=>{
+  const root=project(t,"export function yes(){console.info('telemetry');return true;}");
+  writeFileSync(join(root,'value.test.ts'),'import {test,expect} from "vitest";import {yes} from "./src/value";test("value",()=>expect(yes()).toBe(true));');
+  const ordinary=run(root,['--fail-on-undetected'],1);assert.ok(ordinary.summary.survived>0);assert.equal(ordinary.summary.ignored,0);
+  writeFileSync(join(root,'errspec.mutation.config.json'),JSON.stringify({arid:true}));
+  const excluded=run(root,['--reuse-session','-j','2','--fail-on-undetected']);assert.equal(excluded.summary.ignored,2);assert.equal(excluded.summary.survived,0);assert.equal(excluded.summary.score,1);
+  assert.ok(excluded.mutants.filter(m=>m.status==='Ignored').every(m=>m.ignored==='arid: logging-only code'&&m.attempts.length===0));
+  const restored=run(root,['--no-arid','--fail-on-undetected'],1);assert.deepEqual(restored.mutants.map(m=>[m.key,m.status]),ordinary.mutants.map(m=>[m.key,m.status]));
+  const api=await runMutation({node:process.execPath,arid:false,failOnUndetected:true},{binary,cwd:root});assert.equal(api.exitCode,1);assert.deepEqual(api.report.mutants.map(m=>[m.key,m.status]),restored.mutants.map(m=>[m.key,m.status]));
+  const none=await runMutation({node:process.execPath,aridCallees:[],failOnUndetected:true},{binary,cwd:root});assert.equal(none.exitCode,1);assert.equal(none.report.summary.ignored,0);
+  for(const pattern of ['', '*', 'console.**', '*.x.*', 'console..log']){
+    writeFileSync(join(root,'errspec.mutation.config.json'),JSON.stringify({arid:true,aridCallees:[pattern]}));
+    const invalid=run(root,[],2);assert.equal(invalid.testsExecuted,false);assert.equal(invalid.diagnostics[0].code,'EC_MUTATION_CONFIG');
+  }
+});
+test("changing arid patterns invalidates cache and restores unsuppressed candidates",t=>{
+  const root=project(t,"export function yes(){console.info('telemetry');return true;}");
+  writeFileSync(join(root,'package.json'),JSON.stringify({type:'module',dependencies:{vitest:'5.0.5'}}));
+  writeFileSync(join(root,'value.test.ts'),'import {test,expect} from "vitest";import {yes} from "./src/value";test("value",()=>expect(yes()).toBe(true));');
+  const args=['--cache','--arid','--reuse-session'];
+  const cold=run(root,args),warm=run(root,args);assert.equal(cold.summary.ignored,2);assert.ok(warm.cache.reused>0);assert.equal(warm.cache.executed,0);
+  const custom=run(root,[...args,'--arid-callee','metrics.*']);assert.equal(custom.cache.reused,0);assert.equal(custom.cache.invalidated,true);assert.equal(custom.summary.ignored,0);assert.ok(custom.summary.survived>0);
 });
 test("only IDs, deterministic sampling, and time budgets retain explicit pending states", (t) => {
   const root = project(t),

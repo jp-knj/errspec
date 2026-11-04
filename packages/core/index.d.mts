@@ -14,6 +14,8 @@ export interface MutationOptions {
   diffUnit?: "node" | "scope" | null;
   shard?: { index: number; total: number } | null;
   concurrency?: number;
+  arid?: boolean;
+  aridCallees?: string[] | null;
   root?: string;
   node?: string;
   include?: string[];
