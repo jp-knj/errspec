@@ -1,7 +1,7 @@
 // driver.mjs
-import { readFileSync as readFileSync2, writeFileSync, realpathSync as realpathSync2, existsSync as existsSync2, globSync, statSync } from "node:fs";
-import { basename, dirname as dirname2, resolve as resolve2, relative as relative2, join as join2, isAbsolute, matchesGlob } from "node:path";
-import { pathToFileURL as pathToFileURL2 } from "node:url";
+import { readFileSync as readFileSync3, writeFileSync, realpathSync as realpathSync3, existsSync as existsSync3, globSync, statSync } from "node:fs";
+import { basename, dirname as dirname3, resolve as resolve3, relative as relative2, join as join3, isAbsolute as isAbsolute2, matchesGlob } from "node:path";
+import { pathToFileURL as pathToFileURL3 } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -1697,7 +1697,8 @@ function instrument(source, candidates, file, runId) {
         if (!Number.isInteger(prefixLength) || prefixLength < 1)
           throw new Error("Invalid body guard position");
         const directive = original.slice(1, prefixLength);
-        const branch = c.replacement.slice(1, -1).trim() || "return;";
+        const branch = `${c.replacement.slice(1, -1).trim()}
+return;`;
         original = `{${directive}
 if(${check}){${branch}}${original.slice(prefixLength)}`;
       } else {
@@ -2062,6 +2063,173 @@ function compilerInputs(server, test, relocatedPath) {
   };
 }
 
+// plugins.mjs
+import { readFileSync as readFileSync2, existsSync as existsSync2, realpathSync as realpathSync2 } from "node:fs";
+import { dirname as dirname2, resolve as resolve2, join as join2, isAbsolute } from "node:path";
+import { pathToFileURL as pathToFileURL2, fileURLToPath } from "node:url";
+import { createRequire as createRequire2, registerHooks } from "node:module";
+var builtin = new Set(["ArithmeticOperator", "ArrayDeclaration", "ArrowFunction", "AssignmentOperator", "BlockStatement", "BooleanLiteral", "CallExpression", "ConditionalExpression", "EqualityOperator", "FnValue", "LogicalOperator", "MethodExpression", "ObjectLiteral", "OptionalChaining", "Regex", "StringLiteral", "UnaryOperator", "UpdateOperator"]);
+var fail = (message) => Object.assign(new Error(message), { code: "EC_MUTATION_CONFIG" });
+var validName = (name) => typeof name === "string" && /^[A-Za-z0-9_.-]+$/.test(name);
+async function loadPlugins(specs, root, remember, excluded = []) {
+  const mutators = [], ignorers = [], aridCallees = [], names = new Set, ignoreNames = new Set;
+  let cacheable = true;
+  const tracked = new Set;
+  function acquire(file, module = false, content) {
+    file = realpathSync2(file);
+    remember(file, content);
+    if (module)
+      tracked.add(file);
+    for (let dir = dirname2(file);; dir = dirname2(dir)) {
+      if (existsSync2(join2(dir, "package.json")))
+        remember(join2(dir, "package.json"));
+      if (dirname2(dir) === dir)
+        break;
+    }
+  }
+  function add(value, settings, origin, inheritedCache = false, inputRoot = root) {
+    if (Array.isArray(value)) {
+      for (const part of value)
+        add(part, settings, origin, inheritedCache, inputRoot);
+      return;
+    }
+    if (!value || typeof value !== "object" || !validName(value.name))
+      throw fail(`Plugin ${origin} must export a named mutator, ignorer or plugin`);
+    const deterministic = inheritedCache || value.cache === "deterministic";
+    cacheable &&= deterministic;
+    if (value.inputs !== undefined && (!Array.isArray(value.inputs) || value.inputs.some((p) => typeof p !== "string" || !p)))
+      throw fail(`Plugin ${value.name} inputs must be file paths`);
+    for (const path of value.inputs || [])
+      acquire(resolve2(inputRoot, path));
+    const context = { settings, root, readInput(path) {
+      const file = resolve2(inputRoot, path), content = readFileSync2(file);
+      acquire(file, false, content);
+      return content.toString("utf8");
+    } };
+    if (typeof value.visit === "function") {
+      if (builtin.has(value.name) || names.has(value.name))
+        throw fail(`Custom mutator ${value.name} duplicates a built-in or custom mutator`);
+      names.add(value.name);
+      mutators.push({ definition: value, context });
+      return;
+    }
+    if (typeof value.shouldIgnore === "function") {
+      if (ignoreNames.has(value.name))
+        throw fail(`Duplicate plugin ignorer ${value.name}`);
+      ignoreNames.add(value.name);
+      ignorers.push({ definition: value, context });
+      return;
+    }
+    if (!value.mutators && !value.ignorers && !value.aridCallees)
+      throw fail(`Plugin ${value.name} has no mutators, ignorers or aridCallees`);
+    for (const key of ["mutators", "ignorers", "aridCallees"])
+      if (value[key] !== undefined && !Array.isArray(value[key]))
+        throw fail(`Plugin ${value.name} ${key} must be an array`);
+    for (const part of [...value.mutators || [], ...value.ignorers || []])
+      add(part, settings, origin, deterministic, inputRoot);
+    aridCallees.push(...value.aridCallees || []);
+  }
+  const observe = () => registerHooks({
+    resolve(specifier, context, next) {
+      const result = next(specifier, context);
+      if (result.url.startsWith("file:"))
+        acquire(fileURLToPath(result.url), true);
+      return result;
+    },
+    load(url, context, next) {
+      if (url.startsWith("file:"))
+        acquire(fileURLToPath(url), true);
+      return next(url, context);
+    }
+  });
+  const hooks = observe();
+  try {
+    const require2 = createRequire2(join2(root, "__errspec_plugin__.mjs"));
+    for (const spec of specs || []) {
+      const module = typeof spec === "string" ? spec : spec.module;
+      const settings = typeof spec === "string" ? null : spec.settings ?? null;
+      const file = realpathSync2(module.startsWith(".") || isAbsolute(module) ? resolve2(root, module) : require2.resolve(module));
+      acquire(file, true);
+      const loaded = await import(pathToFileURL2(file).href);
+      add(loaded.default ?? loaded, settings, module, false, dirname2(file));
+    }
+  } catch (error) {
+    throw fail(`Cannot load mutation plugin: ${error.message}`);
+  } finally {
+    hooks.deregister();
+  }
+  for (const name of excluded)
+    if (!builtin.has(name) && !names.has(name))
+      throw fail(`Unknown mutator: ${name}`);
+  return {
+    names: [...names],
+    aridCallees,
+    cacheable,
+    files: tracked,
+    async edits(source, file, metadata) {
+      const hooks = observe();
+      try {
+        const bytes = Buffer.from(source);
+        const nodes = Object.freeze(metadata.nodes.map((node, id) => Object.freeze({
+          ...node,
+          id,
+          children: Object.freeze([...node.children]),
+          text: bytes.subarray(node.start, node.end).toString("utf8")
+        })));
+        const edits = [], ignores = [];
+        const context = (base, node) => ({
+          ...base,
+          file,
+          source,
+          parent: node.parent === null ? null : nodes[node.parent],
+          nodes,
+          text(range) {
+            return bytes.subarray(range.start, range.end).toString("utf8");
+          }
+        });
+        for (const node of nodes) {
+          for (const { definition, context: base } of mutators) {
+            if (excluded.includes(definition.name))
+              continue;
+            let result;
+            try {
+              result = await definition.visit(node, context(base, node));
+            } catch (error) {
+              throw fail(`Plugin mutator ${definition.name} failed in ${file} at ${node.start}: ${error.message}`);
+            }
+            if (result == null)
+              continue;
+            if (!Array.isArray(result))
+              throw fail(`Plugin mutator ${definition.name} must return an array of edits`);
+            for (const edit of result) {
+              const start = edit?.range?.start ?? node.start, end = edit?.range?.end ?? node.end;
+              if (typeof edit?.replacement !== "string" || !Number.isSafeInteger(start) || !Number.isSafeInteger(end))
+                throw fail(`Plugin mutator ${definition.name} returned an invalid edit`);
+              edits.push({ mutator: definition.name, anchorStart: node.start, anchorEnd: node.end, anchorKind: node.kind, start, end, replacement: edit.replacement });
+            }
+          }
+          for (const { definition, context: base } of ignorers) {
+            let reason;
+            try {
+              reason = await definition.shouldIgnore(node, context(base, node));
+            } catch (error) {
+              throw fail(`Plugin ignorer ${definition.name} failed in ${file} at ${node.start}: ${error.message}`);
+            }
+            if (reason == null || reason === false)
+              continue;
+            if (typeof reason !== "string" || !reason.trim())
+              throw fail(`Plugin ignorer ${definition.name} must return a nonempty reason`);
+            ignores.push({ start: node.start, end: node.end, reason: `${definition.name}: ${reason}` });
+          }
+        }
+        return { pluginEdits: edits, pluginIgnores: ignores };
+      } finally {
+        hooks.deregister();
+      }
+    }
+  };
+}
+
 // driver.mjs
 var protocolWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = (chunk, encoding, cb) => process.stderr.write(chunk, encoding, cb);
@@ -2088,38 +2256,41 @@ var warmContext;
 var reuseMode = "fresh_lifecycle_unknown";
 var configurationHash = null;
 var pendingGenerated = new Map;
+var mutationPlugins;
 var normalize = (s) => s.replaceAll("\\", "/");
 var rel = (file) => normalize(relative2(root, file));
 var hash = (data) => createHash("sha256").update(data).digest("hex");
 var relocatedPath = (path) => {
-  if (!options.cacheRelocation || !isAbsolute(path))
+  if (!options.cacheRelocation || !isAbsolute2(path))
     return path;
   const name = rel(path);
-  return name !== ".." && !name.startsWith("../") && !isAbsolute(name) ? { projectRootRelativePath: name } : path;
+  return name !== ".." && !name.startsWith("../") && !isAbsolute2(name) ? { projectRootRelativePath: name } : path;
 };
 function failure(code, message) {
   const e = new Error(message);
   e.code = code;
   return e;
 }
-function remember(file) {
-  if (!existsSync2(file) || !statSync(file).isFile())
+function remember(file, content) {
+  if (!existsSync3(file) || !statSync(file).isFile())
     return;
-  file = realpathSync2(file);
-  const next = hash(readFileSync2(file));
+  file = realpathSync3(file);
+  const next = hash(readFileSync3(file));
+  if (content !== undefined && hash(content) !== next)
+    throw failure("EC_MUTATION_INPUT", `Input changed while being acquired: ${file}`);
   if (fingerprints.has(file) && fingerprints.get(file) !== next)
     throw failure("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
   fingerprints.set(file, next);
 }
 function verifyInputs() {
   for (const [file, digest] of fingerprints) {
-    if (!existsSync2(file) || hash(readFileSync2(file)) !== digest)
+    if (!existsSync3(file) || hash(readFileSync3(file)) !== digest)
       throw failure("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
   }
 }
-function native(source, file, validateOnly = false, facts = false) {
+function native(source, file, validateOnly = false, pluginInputs = {}, facts = false) {
   const result = spawnSync(options.binary, ["__mutation-source"], {
-    input: JSON.stringify({ source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation, arid: options.arid, aridCallees: options.aridCallees, facts: !!(facts || options.since || options.cache && options.cacheScope), engineFingerprint: options.engineFingerprint }),
+    input: JSON.stringify({ source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation, arid: options.arid, aridCallees: options.aridCallees, facts: !!(facts || options.since || options.cache && options.cacheScope || options.plugins?.length), customMutators: mutationPlugins?.names, pluginAridCallees: mutationPlugins?.aridCallees, ...pluginInputs, engineFingerprint: options.engineFingerprint }),
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     timeout: 60000
@@ -2132,17 +2303,24 @@ function native(source, file, validateOnly = false, facts = false) {
     throw failure("EC_MUTATION_PROTOCOL", "Invalid native generator response");
   }
 }
+async function generateSource(source, file, base) {
+  if (!options.plugins?.length)
+    return base ?? native(source, file);
+  const acquired = base ?? native(source, file);
+  const edits = await mutationPlugins.edits(source, file, acquired.metadata);
+  return native(source, file, false, edits);
+}
 function packagePath(explicit) {
   if (explicit) {
-    if (!existsSync2(join2(explicit, "package.json")))
+    if (!existsSync3(join3(explicit, "package.json")))
       throw failure("EC_MUTATION_CONFIG", `Vitest package not found: ${explicit}`);
-    return realpathSync2(explicit);
+    return realpathSync3(explicit);
   }
-  for (let dir = root;; dir = dirname2(dir)) {
-    const candidate = join2(dir, "node_modules/vitest");
-    if (existsSync2(join2(candidate, "package.json")))
-      return realpathSync2(candidate);
-    if (dirname2(dir) === dir)
+  for (let dir = root;; dir = dirname3(dir)) {
+    const candidate = join3(dir, "node_modules/vitest");
+    if (existsSync3(join3(candidate, "package.json")))
+      return realpathSync3(candidate);
+    if (dirname3(dir) === dir)
       break;
   }
   throw failure("EC_MUTATION_CONFIG", "Cannot find Vitest; use --vitest-package");
@@ -2152,9 +2330,9 @@ function candidateFiles(excluded) {
   const files = new Set;
   for (const pattern of patterns)
     for (const entry of globSync(pattern, { cwd: root, exclude: ["**/node_modules/**", ...options.exclude] })) {
-      const absolute = realpathSync2(resolve2(root, entry));
+      const absolute = realpathSync3(resolve3(root, entry));
       const name = rel(absolute);
-      if (absolute === toolTemp || absolute.startsWith(toolTemp + "/") || name.startsWith("../") || isAbsolute(name) || name.split("/").includes("node_modules") || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(name) || /\.d\.(?:[cm]?ts)$/.test(name) || excluded.has(absolute) || !statSync(absolute).isFile())
+      if (absolute === toolTemp || absolute.startsWith(toolTemp + "/") || name.startsWith("../") || isAbsolute2(name) || name.split("/").includes("node_modules") || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(name) || /\.d\.(?:[cm]?ts)$/.test(name) || excluded.has(absolute) || !statSync(absolute).isFile())
         continue;
       files.add(absolute);
     }
@@ -2166,13 +2344,13 @@ function specIdentities(specs) {
 function plugin(phase) {
   return { name: "errspec-mutation", enforce: "pre", configResolved(config) {
     if (config.configFile)
-      configFiles.add(realpathSync2(config.configFile));
+      configFiles.add(realpathSync3(config.configFile));
     for (const file of config.configFileDependencies || [])
-      configFiles.add(realpathSync2(file));
+      configFiles.add(realpathSync3(file));
   }, transform(code, id) {
     let file = id.split("?")[0];
-    if (existsSync2(file))
-      file = realpathSync2(file);
+    if (existsSync3(file))
+      file = realpathSync3(file);
     const entry = inventory.get(file);
     if (!entry || phase === "plain")
       return;
@@ -2185,7 +2363,7 @@ function plugin(phase) {
 }
 var childDependencies = new Map;
 function childProcessClosure(entries) {
-  const pending = entries.map((file) => resolve2(root, file)), seen = new Set;
+  const pending = entries.map((file) => resolve3(root, file)), seen = new Set;
   while (pending.length) {
     const file = pending.pop();
     if (seen.has(file))
@@ -2195,13 +2373,13 @@ function childProcessClosure(entries) {
     let dependencies = childDependencies.get(file);
     if (!dependencies) {
       dependencies = [];
-      const source = inventory.get(file)?.source ?? readFileSync2(file, "utf8");
-      for (const specifier of native(source, rel(file), true, true).metadata?.dependencies || []) {
+      const source = inventory.get(file)?.source ?? readFileSync3(file, "utf8");
+      for (const specifier of native(source, rel(file), true, {}, true).metadata?.dependencies || []) {
         if (!specifier.startsWith("."))
           continue;
-        const target = resolve2(dirname2(file), specifier);
-        const candidates = [target, ...[".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].map((ext) => target + ext), ...["index.ts", "index.js", "index.mjs", "index.cjs"].map((name) => join2(target, name))];
-        const found = candidates.find((path) => existsSync2(path) && statSync(path).isFile());
+        const target = resolve3(dirname3(file), specifier);
+        const candidates = [target, ...[".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].map((ext) => target + ext), ...["index.ts", "index.js", "index.mjs", "index.cjs"].map((name) => join3(target, name))];
+        const found = candidates.find((path) => existsSync3(path) && statSync(path).isFile());
         if (found && /[.][cm]?[jt]sx?$/.test(found) && !rel(found).startsWith("../") && !rel(found).split("/").includes("node_modules"))
           dependencies.push(found);
       }
@@ -2217,8 +2395,8 @@ function childProcessEntries(fact) {
   for (const arg of tokens) {
     if (!arg || arg.startsWith("-") || !/[.][cm]?[jt]sx?$/.test(arg))
       continue;
-    const path = resolve2(fact.cwd, arg), relative = rel(path);
-    if (relative.startsWith("../") || relative.split("/").includes("node_modules") || !existsSync2(path))
+    const path = resolve3(fact.cwd, arg), relative = rel(path);
+    if (relative.startsWith("../") || relative.split("/").includes("node_modules") || !existsSync3(path))
       continue;
     if (!statSync(path).isFile())
       continue;
@@ -2387,6 +2565,8 @@ async function execute(phase, request) {
         delete sequence.sequencer;
         if (!sequence.shuffle)
           delete sequence.seed;
+        if (!mutationPlugins.cacheable)
+          throw new Error("Plugin has no deterministic input contract");
         configurationHash = hash(serialize({
           compiler: compilerInputs(project.vite, config, relocatedPath),
           provided,
@@ -2444,29 +2624,34 @@ async function execute(phase, request) {
     if (typeof ctx.clearSpecificationsCache === "function")
       ctx.clearSpecificationsCache();
     const specs = await ctx.globTestSpecifications();
-    const excluded = new Set([...configFiles, ...config.setupFiles, ...config.globalSetup || [], ...specs.map((s) => s.moduleId)].filter((f) => existsSync2(f)).map((f) => realpathSync2(f)));
+    const excluded = new Set([...mutationPlugins.files, ...configFiles, ...config.setupFiles, ...config.globalSetup || [], ...specs.map((s) => s.moduleId)].filter((f) => existsSync3(f)).map((f) => realpathSync3(f)));
     for (const file of globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", { cwd: root, exclude: ["**/node_modules/**"] }))
-      excluded.add(realpathSync2(resolve2(root, file)));
+      excluded.add(realpathSync3(resolve3(root, file)));
     for (const file of excluded)
       remember(file);
     if (phase === "plain") {
       const files = candidateFiles(excluded);
       for (const file of files) {
-        const source = readFileSync2(file, "utf8");
+        const source = readFileSync3(file, "utf8");
         inventory.set(file, { source, candidates: [] });
         remember(file);
       }
       testSpecs = specIdentities(specs);
       for (const file of [...globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", { cwd: root, exclude: ["**/node_modules/**"] })])
-        remember(resolve2(root, file));
+        remember(resolve3(root, file));
       for (const file of globSync("**/*.snap", { cwd: root, exclude: ["**/node_modules/**"] }))
-        remember(resolve2(root, file));
-      for (let dir = root;; dir = dirname2(dir)) {
+        remember(resolve3(root, file));
+      for (let dir = root;; dir = dirname3(dir)) {
         for (const name of ["package.json", "package-lock.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json"])
-          remember(join2(dir, name));
-        if (dirname2(dir) === dir)
+          remember(join3(dir, name));
+        if (dirname3(dir) === dir)
           break;
       }
+      if (options.plugins?.length)
+        for (const [file, entry] of inventory)
+          entry.generated = await generateSource(entry.source, rel(file));
+      for (const file of mutationPlugins.files)
+        inventory.delete(file);
     } else {
       const currentSpecs = specIdentities(specs);
       if (JSON.stringify(currentSpecs) !== JSON.stringify(testSpecs) || JSON.stringify(candidateFiles(excluded)) !== JSON.stringify([...inventory.keys()]))
@@ -2479,7 +2664,7 @@ async function execute(phase, request) {
         const base = baseline.tests.find((t) => t.id === id);
         if (!base)
           throw failure("EC_MUTATION_PROTOCOL", `Unknown test ID: ${id}`);
-        const file = resolve2(root, base.file);
+        const file = resolve3(root, base.file);
         (grouped.get(file) || grouped.set(file, []).get(file)).push(base.taskId);
       }
       planned = specs.filter((s) => grouped.has(s.moduleId));
@@ -2498,7 +2683,7 @@ async function execute(phase, request) {
       for (const environment of Object.values(project.vite.environments))
         for (const module of environment.moduleGraph?.idToModuleMap?.values() || []) {
           const file = module.file;
-          if (file && !file.includes("/node_modules/") && !file.startsWith(options.temp) && existsSync2(file))
+          if (file && !file.includes("/node_modules/") && !file.startsWith(options.temp) && existsSync3(file))
             remember(file);
         }
     verifyInputs();
@@ -2526,13 +2711,10 @@ function send(request, type, payload = {}) {
 function cacheFacts() {
   return { version: 1, inputs: [...fingerprints], runnerPackage: packageDir, runtime: { node: process.versions.node, platform: process.platform, arch: process.arch, executable: process.execPath, cwd: process.cwd(), execArgv: process.execArgv, configurationHash, envHash: hash(JSON.stringify(Object.entries(process.env).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([name, value]) => [name, options.cacheRelocation && ["PWD", "INIT_CWD"].includes(name) ? relocatedPath(value) : value]))) } };
 }
-async function generateSource(source, file, base) {
-  return base ?? native(source, file);
-}
 async function acquireStaticImports(project) {
   const container = project.vite.environments?.__vitest__?.pluginContainer ?? project.vite.environments?.ssr?.pluginContainer;
   for (const [file, entry] of inventory) {
-    const generated = await generateSource(entry.source, rel(file), native(entry.source, rel(file)));
+    const generated = entry.generated ?? await generateSource(entry.source, rel(file), native(entry.source, rel(file)));
     pendingGenerated.set(file, generated);
     for (const binding of generated.metadata?.imports || []) {
       binding.resolved = null;
@@ -2541,9 +2723,9 @@ async function acquireStaticImports(project) {
         let target = resolved?.id?.split("?")[0];
         if (target?.startsWith("/@fs/"))
           target = target.slice(4);
-        if (!target || !isAbsolute(target) || !existsSync2(target))
+        if (!target || !isAbsolute2(target) || !existsSync3(target))
           continue;
-        target = normalize(realpathSync2(target));
+        target = normalize(realpathSync3(target));
         remember(target);
         if (inventory.has(target))
           binding.resolved = rel(target);
@@ -2562,30 +2744,35 @@ async function handle(request) {
     pendingGenerated.clear();
     if (Number(process.versions.node.split(".")[0]) < 24)
       throw failure("EC_MUTATION_CONFIG", "mutate requires Node 24 or newer");
-    root = realpathSync2(options.root);
-    toolTemp = realpathSync2(options.toolTemp || options.temp);
+    root = realpathSync3(options.root);
+    toolTemp = realpathSync3(options.toolTemp || options.temp);
     packageDir = packagePath(options.vitestPackage);
-    const pkg = JSON.parse(readFileSync2(join2(packageDir, "package.json"), "utf8"));
-    remember(join2(packageDir, "package.json"));
+    mutationPlugins = await loadPlugins(options.plugins, root, remember, options.excludeMutator);
+    const pkg = JSON.parse(readFileSync3(join3(packageDir, "package.json"), "utf8"));
+    remember(join3(packageDir, "package.json"));
     if (!/^5\./.test(pkg.version))
       throw failure("EC_MUTATION_CONFIG", `mutate requires Vitest 5.x; found ${pkg.version}`);
-    api = await import(pathToFileURL2(join2(packageDir, "dist/node.js")).href);
-    const setup = readFileSync2(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join2(packageDir, "dist/index.js"))));
-    if (setup !== readFileSync2(options.setup, "utf8"))
+    api = await import(pathToFileURL3(join3(packageDir, "dist/node.js")).href);
+    const setup = readFileSync3(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join3(packageDir, "dist/index.js"))));
+    if (setup !== readFileSync3(options.setup, "utf8"))
       writeFileSync(options.setup, setup);
     if (request.restore) {
-      const saved = JSON.parse(readFileSync2(options.state, "utf8"));
+      const saved = JSON.parse(readFileSync3(options.state, "utf8"));
       baseline = saved.baseline;
       plain = saved.plain;
       testSpecs = saved.testSpecs;
       projectName = saved.projectName;
+      const restoredInputs = new Map(saved.fingerprints);
+      for (const [file, digest] of fingerprints)
+        if (restoredInputs.get(file) !== digest)
+          throw failure("EC_MUTATION_INPUT", `Input closure changed while restoring worker: ${file}`);
       inventory = new Map(saved.inventory);
-      fingerprints = new Map(saved.fingerprints);
+      fingerprints = restoredInputs;
       verifyInputs();
       for (const [file, entry] of inventory)
         entry.emitted = instrument(entry.source, entry.candidates, file, runId);
     }
-    send(request, "done", { node: process.versions.node, vitest: pkg.version, count: 0 });
+    send(request, "done", { node: process.versions.node, vitest: pkg.version, mutators: mutationPlugins.names, count: 0 });
     return;
   }
   if (!options)
@@ -2613,8 +2800,9 @@ async function handle(request) {
       throw failure("EC_MUTATION_BASELINE", "Unmodified baseline failed or executed no tests");
     let count = 0;
     for (const [file, entry] of inventory) {
-      const generated = pendingGenerated.get(file) ?? await generateSource(entry.source, rel(file));
+      const generated = pendingGenerated.get(file) ?? entry.generated ?? await generateSource(entry.source, rel(file));
       pendingGenerated.delete(file);
+      delete entry.generated;
       entry.candidates = generated.candidates;
       entry.critical = generated.critical || [];
       for (const c of entry.candidates)

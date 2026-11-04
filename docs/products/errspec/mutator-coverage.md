@@ -20,7 +20,7 @@
 | 組み込み18種のmutator | `mutate`で提供。規則と安全な配置の条件は[Design](features/mutation-testing/design.md)を参照 |
 | dry run、テスト単位の到達記録、到達したテストだけの実行、モジュール初期化時のmutant | `mutate`で提供。concurrentや初期化時はファイル全体へ選択を広げる |
 | Vitest/Vite内のメモリ上の変換とセッション再利用 | メモリ上の変換と`--reuse-session`によるinstrumented session再利用を提供。既定はfresh。globalSetupがある場合や必要な公開APIがない版ではfreshへ戻し、理由をengine.sessionReuseに示す |
-| 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 入力完全一致の結果・probe再利用に加え、明示的な`--cache-relocation`でproject位置に依存しないテストの別checkout再利用を提供。依存内容・外部path・その他の環境・provide値の照合は維持し、ordinary baselineは毎回実行。`--cache-scope`で、全probeを更新した上で位置だけの編集と到達test fileが独立な関数の結果を再利用。入口不足・opaqueな呼出し・commentを持つfileは保守的に再検査。custom plugin入力の取得とpartial probeは後続。契約snapshotと別形式 |
+| 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 入力完全一致の結果・probe再利用に加え、明示的な`--cache-relocation`でproject位置に依存しないテストの別checkout再利用を提供。依存内容・外部path・その他の環境・provide値の照合は維持し、ordinary baselineは毎回実行。`--cache-scope`で、全probeを更新した上で位置だけの編集と到達test fileが独立な関数の結果を再利用。入口不足・opaqueな呼出し・commentを持つfileは保守的に再検査。custom pluginのmodule・依存・settings・追加入力を取得し、変更時に再検査。partial probeは後続。契約snapshotと別形式 |
 | `--since`によるGit差分の限定、`node`/`scope`単位の選択、検出テストの削除による再検査、未収集の変更テストの警告 | `--since`と`--diff-unit node/scope`を提供。テスト変更・削除やinventory外の変更では全候補を再検査し、未収集の変更テストを警告。検出テストを保存する履歴との照合は後続 |
 | `--only`で指定したmutantだけの再検査 | `mutate --only`で提供。未知のIDはエラー |
 | `--full-dry-run`による到達記録の再取得 | 同名の指定と`fullDryRun`設定・APIを提供。結果cacheとは独立に、全テストでprobeを実行する |
@@ -31,7 +31,7 @@
 | aridなログ専用コードの除外、calleeパターンの追加、無効化 | 明示的な`--arid`／`arid: true`でログ専用call・block・ifを除外。`--arid-callee`／`aridCallees`でpattern置換、`--no-arid`で設定を解除。従来の実行結果を維持するため既定off。命名によるheuristicであり、引数などの副作用が重要な場合は無効のまま使う |
 | disableコメントとStrykerコメントによる除外 | `errspec-`／`mutator-`のdisable-next-line・disable-line・disable/enable、Stryker disable/restoreを提供。family指定・region解除・理由の表示に対応。文字列・正規表現・template／JSX本文の偽指示は除外しない |
 | `accept`、理由付きの同値mutant承認、古くなった承認の案内 | `accept --reason`と`errspec.accepted.json`で提供 |
-| custom mutator／ignorer plugin、モジュール・パッケージからの読取、mutator単位の除外、plugin変更時のキャッシュ無効化 | `--exclude-mutator`を提供。custom pluginとキャッシュは未実装 |
+| custom mutator／ignorer plugin、モジュール・パッケージからの読取、mutator単位の除外、plugin変更時のキャッシュ無効化 | module／packageの`plugins`と`--plugin`、`defineMutator`／`defineIgnorer`／`definePlugin`を提供。RustがID・範囲・placement・reparseと除外優先順位を管理。決定的なpluginはimport closure・追加入力・settingsをcacheへ反映し、取得できない外部入力は再検査。実行・再利用・変更の受け入れ検証とinstalled-core検証を追加 |
 | `-j`による並列実行、長い実行の分割 | `-j`／`concurrency`で独立した所有workerを起動し、probeを照合して同じ判定処理で並列実行する。既定1、予算は呼出し内で共有。`--shard INDEX/TOTAL`と設定・APIでGit／only後の候補を決定的に分割し、score・gate・予算は各shardの範囲 |
 | `--mutants-per-line`の決定的な標本選択、`--time-budget`、未実行の`Pending`表示 | 同名の指定と、理由付きの`Pending`で提供 |
 | hit limit、stall／total timeout、予算を延長した再実行、RuntimeErrorの再確認 | `mutate`で提供。再試行は一候補につき一度まで |
@@ -72,7 +72,7 @@
 | mutator 0.2.0の機能 | errspecの実装状況・関連機能 |
 | --- | --- |
 | `mutator.config.ts`／mts／mjs／js／json、`defineConfig`、JSON Schema、CLI優先順位と否定フラグ、root／include／exclude | `errspec.mutation.config.{ts,mts,mjs,js,json}`、`defineConfig`、JSON Schema、明示CLI/API優先、否定フラグを提供。受け入れ検証は`tests/mutation-options.test.mjs` |
-| `runMutation`、report formatter、plugin定義などのprogrammatic APIとcore／runner／typecheck／CLIのpackage分離 | `@errspec/core`の`runMutation`と`defineConfig`を提供。共通の版付き要求をRustへ渡しCLIと同じ判定を使う。`formatReport`も同じRust formatterを使用。plugin API・runner/typecheck package分離は未実装 |
+| `runMutation`、report formatter、plugin定義などのprogrammatic APIとcore／runner／typecheck／CLIのpackage分離 | `@errspec/core`の`runMutation`と`defineConfig`を提供。共通の版付き要求をRustへ渡しCLIと同じ判定を使う。`formatReport`も同じRust formatterを使用。plugin定義APIも提供。runner/typecheck package分離は後続 |
 | npm CLIと各adapterの配布、Node.js 24以降での利用 | `mutate`のdriverをネイティブバイナリへ同梱。Node 24以降を要求。errspecの配布物は準備中、npm/crates.io未公開 |
 | GitHub Action、差分のbase取得、失敗時も保存するsnapshot cache、別checkoutでの再利用 | ミューテーション用は未実装。errspecのCIはRust・testkit・Bun/Vitest受け入れ検証を実行 |
 | Agent Skillsの同梱、skills-npm、`init-skill`、導入・反復修正・Playwrightの手順 | 未実装。既存のREADMEと導入例を提供 |

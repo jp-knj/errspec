@@ -9,6 +9,7 @@ import { serialize } from "node:v8";
 import { instrument } from "./emitter.mjs";
 import { typecheckMutants } from "./typecheck.mjs";
 import { compilerInputs } from "./cache-inputs.mjs";
+import { loadPlugins } from "./plugins.mjs";
 
 const protocolWrite = process.stdout.write.bind(process.stdout);
 // Config evaluation happens in this process, before Vitest redirects test logs.
@@ -23,6 +24,7 @@ let infrastructureFailure;
 let warmContext, reuseMode="fresh_lifecycle_unknown";
 let configurationHash=null;
 const pendingGenerated = new Map();
+let mutationPlugins;
 const normalize = s => s.replaceAll("\\", "/");
 const rel = file => normalize(relative(root,file));
 const hash = data => createHash("sha256").update(data).digest("hex");
@@ -32,10 +34,12 @@ const relocatedPath = path => {
   return name!=='..'&&!name.startsWith('../')&&!isAbsolute(name) ? {projectRootRelativePath:name} : path;
 };
 function failure(code,message) { const e = new Error(message); e.code=code; return e; }
-function remember(file) {
+function remember(file,content) {
   if (!existsSync(file) || !statSync(file).isFile()) return;
   file=realpathSync(file);
   const next=hash(readFileSync(file));
+  if(content!==undefined&&hash(content)!==next)
+    throw failure("EC_MUTATION_INPUT",`Input changed while being acquired: ${file}`);
   if (fingerprints.has(file) && fingerprints.get(file)!==next)
     throw failure("EC_MUTATION_INPUT",`Input changed during mutation run: ${file}`);
   fingerprints.set(file,next);
@@ -46,13 +50,19 @@ function verifyInputs() {
       throw failure("EC_MUTATION_INPUT",`Input changed during mutation run: ${file}`);
   }
 }
-function native(source,file,validateOnly=false,facts=false) {
+function native(source,file,validateOnly=false,pluginInputs={},facts=false) {
   const result=spawnSync(options.binary,["__mutation-source"], {
-    input:JSON.stringify({source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation,arid:options.arid,aridCallees:options.aridCallees,facts:!!(facts || options.since || options.cache && options.cacheScope),engineFingerprint:options.engineFingerprint}),
+    input:JSON.stringify({source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation,arid:options.arid,aridCallees:options.aridCallees,facts:!!(facts || options.since || options.cache && options.cacheScope || options.plugins?.length),customMutators:mutationPlugins?.names,pluginAridCallees:mutationPlugins?.aridCallees,...pluginInputs,engineFingerprint:options.engineFingerprint}),
     encoding:"utf8",maxBuffer:64*1024*1024,timeout:60000,
   });
   if(result.status!==0) throw failure(result.stderr?.startsWith("EC_MUTATION_INPUT:")?"EC_MUTATION_INPUT":"EC_MUTATION_INSTRUMENTATION",result.stderr||"Native parser failed");
   try {return JSON.parse(result.stdout);} catch {throw failure("EC_MUTATION_PROTOCOL","Invalid native generator response");}
+}
+async function generateSource(source,file,base) {
+  if(!options.plugins?.length)return base??native(source,file);
+  const acquired=base??native(source,file);
+  const edits=await mutationPlugins.edits(source,file,acquired.metadata);
+  return native(source,file,false,edits);
 }
 function packagePath(explicit) {
   if (explicit) {
@@ -108,7 +118,7 @@ function childProcessClosure(entries) {
     if(!dependencies) {
       dependencies=[];
       const source=inventory.get(file)?.source??readFileSync(file,'utf8');
-      for(const specifier of native(source,rel(file),true,true).metadata?.dependencies||[]) {
+      for(const specifier of native(source,rel(file),true,{},true).metadata?.dependencies||[]) {
         if(!specifier.startsWith('.'))continue;
         const target=resolve(dirname(file),specifier);
         const candidates=[target,...['.ts','.tsx','.mts','.cts','.js','.jsx','.mjs','.cjs'].map(ext=>target+ext),...['index.ts','index.js','index.mjs','index.cjs'].map(name=>join(target,name))];
@@ -233,6 +243,7 @@ async function execute(phase,request) {
         if([...ctx.projects,...(rootProject?[rootProject]:[])].some(p=>p.config.globalSetup?.length))throw new Error("globalSetup may provide external inputs");
         const provided={...project.getProvidedContext()};delete provided.__errspecMutation;
         const sequence={...config.sequence};delete sequence.sequencer;if(!sequence.shuffle)delete sequence.seed;
+        if(!mutationPlugins.cacheable)throw new Error("Plugin has no deterministic input contract");
         configurationHash=hash(serialize({compiler:compilerInputs(project.vite,config,relocatedPath),provided,env:config.env,include:config.include,exclude:config.exclude,
           testNamePattern:config.testNamePattern,testTimeout:timeouts.test,hookTimeout:timeouts.hook,
           retry:config.retry,bail:config.bail,sequence,setupFiles:config.setupFiles.filter(f=>f!==options.setup).map(relocatedPath),
@@ -258,7 +269,7 @@ async function execute(phase,request) {
     // and discovery caches must not constrain the next mutation's selection.
     if(typeof ctx.clearSpecificationsCache==="function")ctx.clearSpecificationsCache();
     const specs=await ctx.globTestSpecifications();
-    const excluded=new Set([...configFiles,...config.setupFiles,...(config.globalSetup||[]),...specs.map(s=>s.moduleId)]
+    const excluded=new Set([...mutationPlugins.files,...configFiles,...config.setupFiles,...(config.globalSetup||[]),...specs.map(s=>s.moduleId)]
       .filter(f=>existsSync(f)).map(f=>realpathSync(f)));
     for(const file of globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",{cwd:root,exclude:["**/node_modules/**"]}))excluded.add(realpathSync(resolve(root,file)));
     for(const file of excluded)remember(file);
@@ -273,6 +284,12 @@ async function execute(phase,request) {
         for(const name of ["package.json","package-lock.json","bun.lock","bun.lockb","pnpm-lock.yaml","yarn.lock","tsconfig.json"])remember(join(dir,name));
         if(dirname(dir)===dir)break;
       }
+      // Plugin data must be observed before tests can modify it. Retain the
+      // generated inventory so callbacks run once per source, including cache hits.
+      if(options.plugins?.length)for(const [file,entry] of inventory)
+        entry.generated=await generateSource(entry.source,rel(file));
+      // Async visitors may reveal additional plugin modules inside include globs.
+      for(const file of mutationPlugins.files)inventory.delete(file);
     } else {
       const currentSpecs=specIdentities(specs);
       if(JSON.stringify(currentSpecs)!==JSON.stringify(testSpecs)
@@ -322,14 +339,10 @@ function send(request,type,payload={}) {
 function cacheFacts(){
   return {version:1,inputs:[...fingerprints],runnerPackage:packageDir,runtime:{node:process.versions.node,platform:process.platform,arch:process.arch,executable:process.execPath,cwd:process.cwd(),execArgv:process.execArgv,configurationHash,envHash:hash(JSON.stringify(Object.entries(process.env).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([name,value])=>[name,options.cacheRelocation&&['PWD','INIT_CWD'].includes(name)?relocatedPath(value):value])))}};
 }
-// Plugin acquisition extends this helper; callers share the same final facts.
-async function generateSource(source,file,base) {
-  return base ?? native(source,file);
-}
 async function acquireStaticImports(project) {
   const container=project.vite.environments?.__vitest__?.pluginContainer ?? project.vite.environments?.ssr?.pluginContainer;
   for(const [file,entry] of inventory) {
-    const generated=await generateSource(entry.source,rel(file),native(entry.source,rel(file)));
+    const generated=entry.generated ?? await generateSource(entry.source,rel(file),native(entry.source,rel(file)));
     pendingGenerated.set(file,generated);
     for(const binding of generated.metadata?.imports||[]) {
       binding.resolved=null;
@@ -354,6 +367,7 @@ async function handle(request) {
     pendingGenerated.clear();
     if(Number(process.versions.node.split(".")[0])<24)throw failure("EC_MUTATION_CONFIG","mutate requires Node 24 or newer");
     root=realpathSync(options.root);toolTemp=realpathSync(options.toolTemp||options.temp);packageDir=packagePath(options.vitestPackage);
+    mutationPlugins=await loadPlugins(options.plugins,root,remember,options.excludeMutator);
     const pkg=JSON.parse(readFileSync(join(packageDir,"package.json"),"utf8"));
     remember(join(packageDir,"package.json"));
     if(!/^5\./.test(pkg.version))throw failure("EC_MUTATION_CONFIG",`mutate requires Vitest 5.x; found ${pkg.version}`);
@@ -363,10 +377,13 @@ async function handle(request) {
     if(request.restore) {
       const saved=JSON.parse(readFileSync(options.state,"utf8"));
       baseline=saved.baseline;plain=saved.plain;testSpecs=saved.testSpecs;projectName=saved.projectName;
-      inventory=new Map(saved.inventory);fingerprints=new Map(saved.fingerprints);verifyInputs();
+      const restoredInputs=new Map(saved.fingerprints);
+      for(const [file,digest] of fingerprints)if(restoredInputs.get(file)!==digest)
+        throw failure("EC_MUTATION_INPUT",`Input closure changed while restoring worker: ${file}`);
+      inventory=new Map(saved.inventory);fingerprints=restoredInputs;verifyInputs();
       for(const [file,entry] of inventory)entry.emitted=instrument(entry.source,entry.candidates,file,runId);
     }
-    send(request,"done",{node:process.versions.node,vitest:pkg.version,count:0});return;
+    send(request,"done",{node:process.versions.node,vitest:pkg.version,mutators:mutationPlugins.names,count:0});return;
   }
   if(!options)throw failure("EC_MUTATION_PROTOCOL","Driver was not opened");
   if(request.op==="prime"){
@@ -385,8 +402,9 @@ async function handle(request) {
       throw failure("EC_MUTATION_BASELINE","Unmodified baseline failed or executed no tests");
     let count=0;
     for(const [file,entry] of inventory) {
-      const generated=pendingGenerated.get(file) ?? await generateSource(entry.source,rel(file));
+      const generated=pendingGenerated.get(file) ?? entry.generated ?? await generateSource(entry.source,rel(file));
       pendingGenerated.delete(file);
+      delete entry.generated;
       entry.candidates=generated.candidates;
       entry.critical=generated.critical||[];
       for(const c of entry.candidates)if(c.regex) {try{new RegExp(...c.regex);}catch{c.ignored="Regex replacement is invalid for the original flags";}}

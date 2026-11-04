@@ -157,6 +157,9 @@ struct MutationArgs {
     exclude: Vec<String>,
     #[arg(long)]
     exclude_mutator: Vec<String>,
+    /// Load a custom mutation plugin module or package (repeatable).
+    #[arg(long = "plugin")]
+    plugins: Vec<String>,
     #[arg(long)]
     vitest_config: Option<PathBuf>,
     #[arg(long)]
@@ -391,6 +394,7 @@ impl Cli {
                     include,
                     exclude,
                     exclude_mutator,
+                    plugins,
                     vitest_config,
                     vitest_project,
                     vitest_package,
@@ -444,6 +448,10 @@ impl Cli {
                             include,
                             exclude,
                             exclude_mutator,
+                            plugins: plugins
+                                .into_iter()
+                                .map(errspec::mutation::options::Plugin::Module)
+                                .collect(),
                             vitest_config,
                             vitest_project,
                             vitest_package,

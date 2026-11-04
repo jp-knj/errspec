@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { installedPluginSmoke } from "./installed-plugin-smoke.mjs";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { resolve, join } from "node:path";
@@ -218,6 +219,8 @@ if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equa
     writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\nexport const extra=true;\n");
     run(process.execPath,["api.mjs","--diff"]);
     extraChecks.push("installed-core-git-selection");
+    installedPluginSmoke(dir,run,resolve(process.env.ERRSPEC_VITEST_PACKAGE));
+    extraChecks.push("installed-core-custom-plugins","installed-core-plugin-input-invalidation");
     writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\nexport function observed(){console.info('telemetry');return true;}\n");
     writeFileSync(join(dir,"mutation.test.ts"),'import {test,expect} from "vitest";import {add,observed} from "./src/mutation";test("behavior",()=>{expect(add(2,3)).toBe(5);expect(observed()).toBe(true)});');
     const arid=JSON.parse(run(process.execPath,[launcher,"mutate","--arid","--node",process.execPath,"--vitest-package",resolve(process.env.ERRSPEC_VITEST_PACKAGE),"--fail-on-undetected","--format","json"]));

@@ -127,7 +127,10 @@ test("configuration loaders bound output and time, and cancellation preserves it
 });
 test("published API declarations support strict TypeScript consumers",t=>{
   const root=project(t),file=join(root,"consumer.mts");
-  writeFileSync(file,`import {defineConfig,runMutation,formatReport} from ${JSON.stringify(join(repo,"packages/core/index.mjs"))};
+  writeFileSync(file,`import {defineConfig,runMutation,formatReport,defineMutator,defineIgnorer,definePlugin} from ${JSON.stringify(join(repo,"packages/core/index.mjs"))};
+const custom=definePlugin({name:'custom',cache:'deterministic',mutators:[defineMutator({name:'Number',visit(node,ctx){const text:string=ctx.text(node);return node.kind==='NumericLiteral'?[{replacement:text}]:undefined;}})],ignorers:[defineIgnorer({name:'skip',shouldIgnore(node){return node.kind==='CallExpression'?'helper':undefined;}})]});
+const settings=defineConfig({plugins:[{module:'./plugin.mjs',settings:{value:3}}]});
+void [custom,settings];
 const config=defineConfig({typecheck:false,weakMutation:true,vitestConfig:null,policy:{timeBudget:0}});
 const result=await runMutation(config);
 const complete:boolean=result.report.runComplete;

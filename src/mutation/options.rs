@@ -11,6 +11,7 @@ pub struct Options {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub exclude_mutator: Vec<String>,
+    pub plugins: Vec<Plugin>,
     pub vitest_config: Option<PathBuf>,
     pub vitest_project: Option<String>,
     pub vitest_package: Option<PathBuf>,
@@ -44,6 +45,7 @@ impl Default for Options {
             include: vec![],
             exclude: vec![],
             exclude_mutator: vec![],
+            plugins: vec![],
             vitest_config: None,
             vitest_project: None,
             vitest_package: None,
@@ -127,10 +129,38 @@ impl Options {
             return Err("Configured paths and project names must not be empty".into());
         }
         for name in &self.exclude_mutator {
-            if !super::MUTATORS.contains(&name.as_str()) {
+            if !super::MUTATORS.contains(&name.as_str()) && self.plugins.is_empty() {
                 return Err(format!("Unknown mutator: {name}"));
             }
         }
+        for plugin in &self.plugins {
+            if plugin.module().trim().is_empty() {
+                return Err("Plugin module must not be empty".into());
+            }
+        }
         Ok(())
+    }
+}
+
+/// Callbacks stay in their module; only portable settings cross the native boundary.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum Plugin {
+    Module(String),
+    Config(PluginConfig),
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PluginConfig {
+    pub module: String,
+    #[serde(default)]
+    pub settings: serde_json::Value,
+}
+impl Plugin {
+    pub fn module(&self) -> &str {
+        match self {
+            Self::Module(module) => module,
+            Self::Config(config) => &config.module,
+        }
     }
 }

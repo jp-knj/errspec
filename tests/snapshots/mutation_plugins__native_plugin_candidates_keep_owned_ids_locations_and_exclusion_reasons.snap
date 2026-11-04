@@ -1,0 +1,34 @@
+---
+source: tests/mutation_plugins.rs
+expression: "result[\"candidates\"]"
+---
+[
+  {
+    "byteOffset": 78,
+    "end": 79,
+    "file": "src/plugin.ts",
+    "guardOffset": null,
+    "ignored": null,
+    "key": "0a73de7911f3c28f323035ff6450fda02763a67094a8aff9bafe1907c30af6a4",
+    "line": 2,
+    "mutator": "ArrowFunction",
+    "original": "2",
+    "placement": "expression",
+    "regex": null,
+    "replacement": "undefined"
+  },
+  {
+    "byteOffset": 78,
+    "end": 79,
+    "file": "src/plugin.ts",
+    "guardOffset": null,
+    "ignored": "disabled: protocol constant",
+    "key": "f764b66a6dc27a10bd9350fb9de571d705a50fbf2cebebf5177e470399f2935e",
+    "line": 2,
+    "mutator": "Double",
+    "original": "2",
+    "placement": "expression",
+    "regex": null,
+    "replacement": "4"
+  }
+]
