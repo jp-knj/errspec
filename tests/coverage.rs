@@ -244,10 +244,15 @@ fn markdown_lists_unasserted_tags_per_type() {
 #[test]
 fn markdown_is_rejected_outside_coverage() {
     let dir = fixture();
-    for command in ["scan", "mutate"] {
+    for args in [
+        vec!["scan"],
+        vec!["mutate"],
+        vec!["accept", "id", "--reason", "reviewed"],
+    ] {
         let output = Command::new(env!("CARGO_BIN_EXE_errspec"))
             .current_dir(dir.path())
-            .args([command, "--format", "markdown"])
+            .args(&args)
+            .args(["--format", "markdown"])
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(2));
@@ -258,7 +263,7 @@ fn markdown_is_rejected_outside_coverage() {
         );
         assert!(
             diagnostic.contains("supported only by coverage"),
-            "{command}: {diagnostic}"
+            "{args:?}: {diagnostic}"
         );
     }
 }

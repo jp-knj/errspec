@@ -1,0 +1,98 @@
+---
+source: tests/mutation_policy.rs
+expression: "serde_json::json!({\"summary\":summary,\"mutants\":mutants})"
+---
+{
+  "mutants": [
+    {
+      "accepted": "Equivalent for the documented domain",
+      "attempts": [],
+      "byteOffset": 0,
+      "coveredBy": [],
+      "end": 1,
+      "failedModules": [],
+      "file": "src/value.ts",
+      "guardOffset": null,
+      "ignored": null,
+      "key": "survived",
+      "killedBy": [],
+      "line": 1,
+      "mutator": "BooleanLiteral",
+      "original": "x",
+      "placement": "expression",
+      "regex": null,
+      "replacement": "y",
+      "status": "Ignored"
+    },
+    {
+      "accepted": "Equivalent for the documented domain",
+      "attempts": [],
+      "byteOffset": 0,
+      "coveredBy": [],
+      "end": 1,
+      "failedModules": [],
+      "file": "src/value.ts",
+      "guardOffset": null,
+      "ignored": null,
+      "key": "uncovered",
+      "killedBy": [],
+      "line": 1,
+      "mutator": "BooleanLiteral",
+      "original": "x",
+      "placement": "expression",
+      "regex": null,
+      "replacement": "y",
+      "status": "Ignored"
+    },
+    {
+      "attempts": [],
+      "byteOffset": 0,
+      "coveredBy": [],
+      "end": 1,
+      "failedModules": [],
+      "file": "src/value.ts",
+      "guardOffset": null,
+      "ignored": null,
+      "key": "killed",
+      "killedBy": [],
+      "line": 1,
+      "mutator": "BooleanLiteral",
+      "original": "x",
+      "placement": "expression",
+      "regex": null,
+      "replacement": "y",
+      "status": "Killed"
+    },
+    {
+      "attempts": [],
+      "byteOffset": 0,
+      "coveredBy": [],
+      "end": 1,
+      "failedModules": [],
+      "file": "src/value.ts",
+      "guardOffset": null,
+      "ignored": null,
+      "key": "pending",
+      "killedBy": [],
+      "line": 1,
+      "mutator": "BooleanLiteral",
+      "original": "x",
+      "placement": "expression",
+      "regex": null,
+      "replacement": "y",
+      "status": "Pending"
+    }
+  ],
+  "summary": {
+    "applied": [
+      "survived",
+      "uncovered"
+    ],
+    "detected": [
+      "killed"
+    ],
+    "stale": [
+      "stale"
+    ]
+  }
+}

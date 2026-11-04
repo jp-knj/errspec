@@ -13,6 +13,7 @@ Agent JSONは診断の受渡し手段であり、型・仕様・実行の対応�
 
 | モジュール | 責任 |
 |---|---|
+| analysis_backend | 利用先の版と明示指定から解析先を選び、公式APIの要求・応答とプロセスを管理する |
 | tsrs_adapter | tsconfig、診断、exportのsymbol解決、有限タグ集合の取得、ASTの位置・本文・走査 |
 | model / config | 外部形式のデータとenum、読取専用の検証済み設定 |
 | contract | 型タグとケース登録の比較。ファイル存在の確認結果を受け取る |
@@ -30,9 +31,9 @@ Agent JSONは診断の受渡し手段であり、型・仕様・実行の対応�
 | runner | プロセス、環境変数、ランナーレポートの読取、今回の観測ファイルと実行IDの所有 |
 | verification | 実行後のパス解決、テスト照合、観測の読取と照合の順序、部分結果の受渡し |
 | output | 検証・走査・初期生成のtext/JSON表示、標準出力・標準エラーと終了コード |
-| packages/testkit | JSランナー内で障害用関数の実行と値の比較を記録。`index.mjs`を入口とし、複製用に同じ実装の`index.ts`を同梱する。両者は同じtestkitのテストで挙動を、tsrsのstrict検査で型を確認する |
+| packages/testkit | JSランナー内で障害用関数の実行と値の比較を記録。`index.mjs`を入口とし、複製用に同じ実装の`index.ts`を同梱する。両者は同じtestkitのテストで挙動を、選択したコンパイラのstrict検査で型を確認する |
 
-型解析はRust＋tsrs、対象コードとテストの実行はBun/Vitestが担当する。
+型解析は同梱のtsrsまたは利用先のTS 6・7の公式API、対象コードとテストの実行はBun/Vitestが担当する。タグと静的照合の事実は各backendで取得し、登録・実行記録との比較は共通のRustで行う。
 Oxcエコシステムのtsrsを使用しているが、追加のoxc_parserは入れていない。
 同じ型システムを再実装せず、tsrs内部APIへの依存はadapterに閉じ込める。
 TypeScript 7で廃止された`moduleResolution: node10`は、adapterがtsconfigの解析後に未指定へ戻してからProgramを作る。tsrsは未指定のCommonJSを`bundler`で解決するため、TS5108だけで解析を止めずに済む。置き換えはレポートの`assumptions`に記録し、`ok`には影響させない。ほかの廃止オプションは解決結果が変わるため置き換えない。

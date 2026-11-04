@@ -3,7 +3,7 @@
 **エラー型と、失敗時に期待する振る舞いをつなぐ。**
 
 TypeScriptのエラー型・失敗シナリオ・テスト結果を対応付け、検証漏れを検出するRust製CLIです。
-型の解決には[oxc-project/tsrs](https://github.com/oxc-project/tsrs/tree/1bfd1e65be95131f9242a03687d37006214a96f6)を使用します。
+型の解決には[oxc-project/tsrs](https://github.com/oxc-project/tsrs/tree/1bfd1e65be95131f9242a03687d37006214a96f6)と、利用先に導入済みのTypeScript 6・7の公式APIを使用します。
 既存のResult型を使い続けられます。エディタ拡張は不要です。npm/crates.ioには未公開です。
 
 使い方は2段階です。
@@ -24,7 +24,7 @@ npm CLIとLinux/macOS向けバイナリは配布準備中です。[配布物の�
 ## 製品目標と実装状況
 
 製品目標は、[mutator 0.2.0](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/README.md)の全機能と、errspecのエラー型・失敗シナリオ検証を併せて提供することです。
-現在は`scan`、`init`、`check`、`verify`、`snapshot`、`coverage`と、Vitest用の`mutate`を提供しています。[機能対応表](docs/products/errspec/mutator-coverage.md)に対象の全機能と実装状況をまとめています。差分実行、永続キャッシュ、型検査、追加ランナーなどは後続の機能です。
+現在は`scan`、`init`、`check`、`verify`、`snapshot`、`coverage`と、Vitest用の`mutate`を提供しています。[機能対応表](docs/products/errspec/mutator-coverage.md)に対象の全機能と実装状況をまとめています。差分実行、永続キャッシュ、追加ランナーなどは開発中です。
 
 互換性は機能の包含を基準とし、既存errspecのCLI・終了コード・設定・JSON・testkit APIを維持します。ミューテーション機能は追加機能として個別のRequirements・Designで具体化します。
 
@@ -62,6 +62,23 @@ Vitest版も同じ仕組みです。
 ./target/debug/errspec verify --runner vitest \
   --config examples/scenarios-vitest/errspec.json --format json
 ```
+
+## 型解析のbackend
+
+`scan`、`init`、`check`、`verify`、`snapshot`、`coverage`は、プロジェクトと親の`node_modules/typescript`から版を確認します。TS 6・7があれば利用先の公式API、未導入または他の版なら同梱のtsrsを使います。TS 6の`node10`や`baseUrl`も元のtsconfigで解析します。
+
+```sh
+errspec check --analysis-engine auto
+errspec scan --analysis-engine tsrs
+errspec check --analysis-engine typescript \
+  --typescript-package ./node_modules/typescript --analysis-node /path/to/node
+```
+
+公式APIを使う場合はNode.js 22以降が必要です。パッケージとNodeの明示パスは、コマンドを実行したディレクトリから解決します。TS 6.0.3・7.0.2とNode.js 24で、タグ、伝播、静的照合、Vitestの実行を確認しています。TS 7は変更の可能性がある`unstable/sync` APIを使います。
+
+切替時にはJSONの`analysis`へengine・版・パッケージ・選択理由を記録し、textにも表示します。tsrsの既定経路のJSONは従来の形式を維持します。選択したAPIの欠落、型エラー、`noCheck`は解析未完了の終了コード2です。異なるengineによる再試行で成功へ変更しません。
+
+この指定は意味解析に適用します。`mutate`の変異後の型検査は`--typecheck`で指定し、意味解析用の指定とは区別します。詳しくは[要件・設計](docs/products/errspec/features/typescript-compatibility/requirements.md)を参照してください。
 
 ## 既存テストで確かめる
 
@@ -147,7 +164,25 @@ errspec mutate --fail-on-undetected
 
 元のコードで成功することと、変換後も同じテストが成功することを確認してから変異を実行します。元ファイルは変更せず、Viteのメモリ上で切り替えます。Vitestのsnapshot更新も無効です。対象はNode worker内でVite変換を経由するコードで、Browser Mode、native require、別の子プロセスは計測範囲に含みません。
 
-結果は`Killed`、`Survived`、`NoCoverage`、`Timeout`、`RuntimeError`、`Ignored`、`Pending`を区別します。JSONは独立した`errspec/mutation` schemaVersion 1です。既定では結果表示にとどめ、`--fail-on-undetected`を指定すると、生存か未到達があれば終了コード1になります。基準実行や実行器の異常、入力変更などで未完了なら終了コード2で、スコアはnullです。中断時は130または143です。[仕様と判定規則](docs/products/errspec/features/mutation-testing/requirements.md)も参照してください。
+結果は`Killed`、`Survived`、`NoCoverage`、`Timeout`、`RuntimeError`、`CompileError`、`Ignored`、`Pending`を区別します。JSONは独立した`errspec/mutation` schemaVersion 1です。既定では結果表示にとどめ、`--fail-on-undetected`を指定すると、生存か未到達があれば終了コード1になります。基準実行や実行器の異常、入力変更などで未完了なら終了コード2で、スコアはnullです。中断時は130または143です。[仕様と判定規則](docs/products/errspec/features/mutation-testing/requirements.md)も参照してください。
+
+### 型検査・weak mutation・選択と承認
+
+```sh
+errspec mutate --typecheck --typecheck-package ./node_modules/typescript
+errspec mutate --weak-mutation --mutants-per-line 2 --time-budget 60
+errspec mutate --only <mutant-key>
+errspec mutate --threshold-break 80 --fail-on-survived --critical 'src/auth/**'
+errspec accept <mutant-key> --reason 'Equivalent for the documented domain'
+```
+
+`--typecheck`はメモリ上の本文で変異後を検査し、新しい診断がある候補を`CompileError`にします。TS 5.9.3・6.0.3・7.0.2で確認しています。`--typecheck-project`でtsconfigを指定でき、`--no-typecheck`で無効化できます。型検査の版と件数をJSONに記録し、元のファイルは変更しません。optional chainingの除外にはstrictNullChecksとnoUncheckedIndexedAccessの成立を必要とします。
+
+`--weak-mutation`は比較・算術演算の値の差を取得します。差がない候補は`Survived`と`not infected`の理由を返し、実行を省略します。差を取得できない式、初期化時、concurrentの到達では、到達テストを省略しません。`--no-weak-mutation`で無効化できます。
+
+標本と時間予算で実行しなかった候補は、理由付きの`Pending`です。スコアの閾値は`--threshold-high`・`--threshold-low`・`--threshold-break`で指定します。criticalはglobまたは関数・クラスなどの直前の`// errspec-critical`・`// mutator-critical`で指定し、未検出・未実行を不合格にします。
+
+`accept`は理由とIDを`errspec.accepted.json`へ保存します。次の検証はこの承認を適用し、古いIDを案内します。`--accepted-file`で別のファイルも指定できます。[追加機能のRequirements](docs/products/errspec/features/mutation-workflows/requirements.md)で全機能提供の範囲を定めています。
 
 ## 設定とテスト
 
@@ -251,7 +286,7 @@ scenarioTest(test, import.meta.url, {
 ### 実行前の静的照合
 
 `check`と`verify`は、登録したテストファイルがtsconfigのプロジェクトに含まれていれば、テストを実行する前に設定と照合します。
-tsrsの型情報で、`scenarioTest`と`s.fault`／`s.check`を名前ではなく宣言から特定します。IDやタグは各値の型から読むため、`const`の定数や`as const`の配列をループで回す書き方でも照合できます。
+選択したコンパイラの型情報で、`scenarioTest`と`s.fault`／`s.check`を名前ではなく宣言から特定します。IDやタグは各値の型から取得するため、`const`の定数や`as const`の配列をループで回す書き方でも照合できます。
 
 報告するのは、実行すれば必ず失敗する食い違いだけです。
 - 未登録のシナリオ、登録と違うタグやテストファイル、`withoutFaults`と`"faults": []`の不一致（EC015）
@@ -346,10 +381,10 @@ CLIと補助APIは同じ版を使ってください。実行環境変数は`ERRS
 初回の比較では`changedScenarios`に表示されます。
 
 `source.export`は公開されたtype alias、interface、class（インスタンス型）を対象にします。
-import、再export、paths、具体化したgeneric、union/intersectionをtsrsで解決します。
+import、再export、paths、具体化したgeneric、union/intersectionを選択したコンパイラで解決します。
 `any`、`unknown`、広いstring、optionalな識別子は解析不能として報告します。`never`は0件です。
 型エラーや`noCheck: true`を無視して合格にはしません。
-型検査はTypeScript 7に合わせたtsrsで行います。TypeScript 7で廃止された`moduleResolution: node`（`node10`）は、TypeScript 7が未指定のCommonJSプロジェクトに使う`bundler`の解決として解析し、レポートの`assumptions`に記録します。この置き換えは合否に影響しません。
+tsrsを選択した場合はTypeScript 7に合わせて型検査します。TypeScript 7で廃止された`moduleResolution: node`（`node10`）は、TypeScript 7が未指定のCommonJSプロジェクトに使う`bundler`の解決として解析し、レポートの`assumptions`に記録します。この置き換えは合否に影響しません。
 
 TypeScript 5.xの`tsc`で通るtsconfigでも、その他の廃止設定や型検査の違いで失敗することがあります。`rootDir`は出力範囲の設定として扱い、範囲外のソースを参照することだけを理由とする`TS6059`では解析を停止しません。
 
@@ -398,7 +433,8 @@ Bunは起動前に`--version`で版を確認し、1.2.19未満なら実行しま
 | EC019 | `entry`のタグを返す`return`に、どのシナリオも到達しなかった（Bun） |
 | EC_EVIDENCE | 観測プロトコル・run ID・ファイルが不正 |
 | EC_CONFIG / EC_BASELINE / EC_RUNNER / EC_SNAPSHOT / EC_INTERNAL | 設定・比較対象・実行器・保存・内部処理のエラー |
-| TS… | tsrsによるコンパイラ診断 |
+| TS… | 選択したコンパイラの診断 |
+| EC_ANALYSIS_BACKEND | 公式APIの起動・機能・応答の検証に失敗 |
 
 終了コードは0=成功、1=登録・テスト・観測の不足、2=設定・解析・レポート処理などのエラーです。
 現行の`analysisComplete: false`は型解析失敗以外にワークフロー処理失敗も含みます。理由はdiagnosticsを参照してください。
@@ -427,9 +463,12 @@ node --test tests/testkit.test.mjs
 TESTKIT_ENTRY=../packages/testkit/index.ts node --test tests/testkit.test.mjs
 (cd examples/checkout && npm ci --ignore-scripts --no-audit --no-fund)
 (cd packages/mutation-driver && npm ci --ignore-scripts --no-audit --no-fund)
+(cd packages/analysis-driver && npm ci --ignore-scripts --no-audit --no-fund)
+node --test tests/analysis-driver.test.mjs
 node scripts/build-mutation-driver.mjs --check
 node --test tests/mutation-emitter.test.mjs
 node --test tests/mutation-process.test.mjs
+node --test --test-concurrency=1 tests/mutation-typecheck.test.mjs tests/mutation-weak.test.mjs tests/mutation-workflows.test.mjs
 node scripts/demo-mutation.mjs
 node scripts/demo.mjs
 node scripts/demo-bun.mjs

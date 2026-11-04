@@ -79,6 +79,8 @@ pub struct Summary {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CoverageReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<crate::model::AnalysisInfo>,
     pub kind: &'static str,
     pub schema_version: u32,
     pub tests_executed: bool,
@@ -108,6 +110,7 @@ impl Default for CoverageReport {
     fn default() -> Self {
         Self {
             kind: "errspec/coverage",
+            analysis: None,
             schema_version: 1,
             tests_executed: false,
             runner_ok: false,

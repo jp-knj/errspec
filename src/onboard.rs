@@ -1,4 +1,8 @@
-use crate::{request::InitRequest, scaffold, tsrs_adapter::TsrsAdapter};
+use crate::{
+    analysis_backend::{self, Plan},
+    request::InitRequest,
+    scaffold,
+};
 use errspec::model::Source;
 use serde::Serialize;
 use std::{
@@ -13,6 +17,8 @@ pub(crate) struct InitReport {
     kind: &'static str,
     schema_version: u32,
     pub files: [PathBuf; 2],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<errspec::model::AnalysisInfo>,
     tags: Vec<String>,
     tests_executed: bool,
     ready: bool,
@@ -49,7 +55,25 @@ fn output_path(path: &Path) -> Result<PathBuf, String> {
     Ok(parent.join(name))
 }
 
-pub(crate) fn run(request: InitRequest) -> Result<InitReport, String> {
+pub(crate) struct InitError {
+    pub message: String,
+    pub analysis: Option<errspec::model::AnalysisInfo>,
+}
+impl From<String> for InitError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            analysis: None,
+        }
+    }
+}
+impl From<&str> for InitError {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+
+pub(crate) fn run(request: InitRequest) -> Result<InitReport, InitError> {
     let project = request.project.canonicalize().map_err(|e| e.to_string())?;
     let root = project.parent().ok_or("Project needs a parent")?;
     let config_path = output_path(&request.config)?;
@@ -59,7 +83,7 @@ pub(crate) fn run(request: InitRequest) -> Result<InitReport, String> {
     }
     for path in [&config_path, &test_path] {
         if path.try_exists().map_err(|e| e.to_string())? || path.symlink_metadata().is_ok() {
-            return Err(format!("Refusing to overwrite {}", path.display()));
+            return Err(format!("Refusing to overwrite {}", path.display()).into());
         }
     }
     let contract = request.contract.unwrap_or_else(|| request.export.clone());
@@ -75,23 +99,38 @@ pub(crate) fn run(request: InitRequest) -> Result<InitReport, String> {
         export: request.export,
         discriminant: request.discriminant,
     };
-    let adapter = TsrsAdapter::open(root, &project.to_string_lossy()).map_err(|errors| {
-        errors
+    let session = analysis_backend::open(
+        &request.analysis,
+        root,
+        &project.to_string_lossy(),
+        Plan {
+            sources: vec![source.clone()],
+            ..Plan::default()
+        },
+    )
+    .map_err(|error| InitError {
+        analysis: error.analysis,
+        message: error
+            .diagnostics
             .iter()
             .map(|d| format!("{} {}", d.code, d.message))
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n"),
     })?;
-    let tags = adapter.tags(root, &source).map_err(|error| {
-        if error.starts_with("Missing discriminant") {
+    let tags = session.tags(0, root, &source).map_err(|error| InitError {
+        analysis: session.analysis.clone(),
+        message: if error.starts_with("Missing discriminant") {
             // init defaults to _tag while scan also tries kind, type and code.
             format!("{error}; select the type's property with --discriminant")
         } else {
             error
-        }
+        },
     })?;
     if tags.is_empty() {
-        return Err("Selected type has no error tags".into());
+        return Err(InitError {
+            message: "Selected type has no error tags".into(),
+            analysis: session.analysis,
+        });
     }
     let config_root = config_path.parent().unwrap();
     let files = scaffold::render(
@@ -104,15 +143,24 @@ pub(crate) fn run(request: InitRequest) -> Result<InitReport, String> {
         &contract,
         request.runner,
         &tags,
-    )?;
+    )
+    .map_err(|message| InitError {
+        message,
+        analysis: session.analysis.clone(),
+    })?;
     write_pair(
         &config_path,
         &files.config,
         &test_path,
         files.test.as_bytes(),
-    )?;
+    )
+    .map_err(|message| InitError {
+        message,
+        analysis: session.analysis.clone(),
+    })?;
     Ok(InitReport {
         kind: "errspec/init",
+        analysis: session.analysis,
         schema_version: 1,
         files: [config_path, test_path],
         tags,

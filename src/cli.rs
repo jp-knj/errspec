@@ -23,6 +23,15 @@ pub(crate) struct Cli {
     /// Fail when an existing v2 scenario changes from the baseline (check/verify).
     #[arg(long, global = true, requires = "baseline")]
     strict_baseline: bool,
+    /// Analysis backend: use the project's TypeScript 6/7 API when installed.
+    #[arg(long, global = true, value_enum)]
+    analysis_engine: Option<CliAnalysisEngine>,
+    /// Installed TypeScript package directory (relative to the invoking directory).
+    #[arg(long, global = true)]
+    typescript_package: Option<PathBuf>,
+    /// Node executable used only by the TypeScript analysis backend.
+    #[arg(long, global = true)]
+    analysis_node: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -39,8 +48,74 @@ enum CliRunner {
     Bun,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum CliAnalysisEngine {
+    Auto,
+    Tsrs,
+    Typescript,
+}
+
+#[derive(clap::Args)]
+struct MutationPolicyArgs {
+    #[arg(long)]
+    only: Vec<String>,
+    #[arg(long)]
+    mutants_per_line: Option<usize>,
+    #[arg(long)]
+    time_budget: Option<f64>,
+    #[arg(long)]
+    fail_on_survived: bool,
+    #[arg(long)]
+    threshold_high: Option<f64>,
+    #[arg(long)]
+    threshold_low: Option<f64>,
+    #[arg(long)]
+    threshold_break: Option<f64>,
+    #[arg(long)]
+    critical: Vec<String>,
+    #[arg(long)]
+    accepted_file: Option<String>,
+}
+
+impl From<MutationPolicyArgs> for errspec::mutation::policy::Policy {
+    fn from(args: MutationPolicyArgs) -> Self {
+        Self {
+            only: args.only,
+            mutants_per_line: args.mutants_per_line,
+            time_budget: args.time_budget,
+            fail_on_survived: args.fail_on_survived,
+            threshold_high: args.threshold_high,
+            threshold_low: args.threshold_low,
+            threshold_break: args.threshold_break,
+            critical: args.critical,
+            accepted_file: args.accepted_file,
+        }
+    }
+}
+
+impl From<CliAnalysisEngine> for crate::analysis_backend::Engine {
+    fn from(engine: CliAnalysisEngine) -> Self {
+        match engine {
+            CliAnalysisEngine::Auto => Self::Auto,
+            CliAnalysisEngine::Tsrs => Self::Tsrs,
+            CliAnalysisEngine::Typescript => Self::Typescript,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Action {
+    /// Record reasoned approval of equivalent or intentionally untested mutants.
+    Accept {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long, default_value = "errspec.accepted.json")]
+        accepted_file: PathBuf,
+        #[arg(required = true)]
+        keys: Vec<String>,
+        #[arg(long)]
+        reason: String,
+    },
     /// Generate mutations, run Vitest, and report detected and undetected changes.
     Mutate {
         #[arg(long, default_value = ".")]
@@ -61,6 +136,22 @@ enum Action {
         node: PathBuf,
         #[arg(long)]
         fail_on_undetected: bool,
+        /// Check each mutant with the project's TypeScript before running it.
+        #[arg(long, conflicts_with = "no_typecheck")]
+        typecheck: bool,
+        /// Disable mutant typechecking explicitly.
+        #[arg(long)]
+        no_typecheck: bool,
+        #[arg(long, conflicts_with = "no_weak_mutation")]
+        weak_mutation: bool,
+        #[arg(long)]
+        no_weak_mutation: bool,
+        #[arg(long, requires = "typecheck")]
+        typecheck_project: Option<PathBuf>,
+        #[arg(long, requires = "typecheck")]
+        typecheck_package: Option<PathBuf>,
+        #[command(flatten)]
+        policy: Box<MutationPolicyArgs>,
     },
     #[command(name = "__mutation-source", hide = true)]
     MutationSource,
@@ -152,7 +243,41 @@ impl Cli {
         {
             return Err("--format markdown is supported only by coverage".into());
         }
+        let explicit_analysis = self.analysis_engine.is_some()
+            || self.typescript_package.is_some()
+            || self.analysis_node.is_some();
+        let analysis = crate::analysis_backend::Options {
+            engine: self.analysis_engine.map(Into::into).unwrap_or_default(),
+            package: self.typescript_package,
+            node: self.analysis_node.unwrap_or_else(|| "node".into()),
+        };
+        if analysis.engine == crate::analysis_backend::Engine::Tsrs && analysis.package.is_some() {
+            return Err("--typescript-package conflicts with --analysis-engine tsrs".into());
+        }
         let command = match self.command {
+            Action::Accept {
+                root,
+                accepted_file,
+                keys,
+                reason,
+            } => {
+                if explicit_config
+                    || self.baseline.is_some()
+                    || self.strict_baseline
+                    || explicit_analysis
+                {
+                    return Err("accept does not accept contract or analysis options".into());
+                }
+                return Ok((
+                    Request::Accept {
+                        root,
+                        file: accepted_file,
+                        keys,
+                        reason,
+                    },
+                    self.format,
+                ));
+            }
             Action::MutationSource => return Ok((Request::MutationSource, self.format)),
             Action::Mutate {
                 root,
@@ -164,9 +289,22 @@ impl Cli {
                 vitest_package,
                 node,
                 fail_on_undetected,
+                typecheck,
+                no_typecheck: _,
+                weak_mutation,
+                no_weak_mutation: _,
+                typecheck_project,
+                typecheck_package,
+                policy,
             } => {
-                if explicit_config || self.baseline.is_some() || self.strict_baseline {
-                    return Err("mutate does not accept --config or baseline options".into());
+                if explicit_config
+                    || self.baseline.is_some()
+                    || self.strict_baseline
+                    || explicit_analysis
+                {
+                    return Err(
+                        "mutate does not accept --config, baseline, or analysis options".into(),
+                    );
                 }
                 return Ok((
                     Request::Mutation(MutationRequest {
@@ -179,6 +317,11 @@ impl Cli {
                         vitest_package,
                         node,
                         fail_on_undetected,
+                        typecheck,
+                        weak_mutation,
+                        typecheck_project,
+                        typecheck_package,
+                        policy: (*policy).into(),
                     }),
                     self.format,
                 ));
@@ -197,6 +340,7 @@ impl Cli {
                 }
                 return Ok((
                     Request::Init(InitRequest {
+                        analysis,
                         project,
                         source,
                         export,
@@ -219,6 +363,7 @@ impl Cli {
                 }
                 return Ok((
                     Request::Scan(ScanRequest {
+                        analysis,
                         project,
                         discriminants: discriminant,
                         fail_on_unknown,
@@ -240,6 +385,7 @@ impl Cli {
                 }
                 return Ok((
                     Request::Coverage(CoverageRequest {
+                        analysis,
                         project,
                         discriminants: discriminant,
                         vitest,
@@ -268,6 +414,7 @@ impl Cli {
         };
         Ok((
             Request::Contract(ContractRequest {
+                analysis,
                 command,
                 config: self.config,
                 baseline: self.baseline,

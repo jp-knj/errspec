@@ -50,7 +50,7 @@ catchで捕捉された元の失敗と、catch内で新しく発生した失敗�
 
 ## 外部サービスとの連携方式
 
-既存の固定したtsrsを用います。追加のJS解析器やTypeScript実行環境に依存せず、型解析とASTの解決規則をそろえます。
+固定したtsrs、または導入済みのTS 6・7の公式APIを選びます。選択条件は[TypeScript互換機能のRequirements](../typescript-compatibility/requirements.md)に定めます。各backendは所有可能な事実を返し、伝播の判定は共通のRustで行います。
 
 ## データの取り扱い設計
 

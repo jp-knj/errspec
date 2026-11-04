@@ -140,6 +140,15 @@ scenarioTest(test, import.meta.url, {contract:'Failure',id:'case-1',tag:'Offline
   );
   assert.equal(all.ok, false);
   const extraChecks=[];
+  for (const compiler of JSON.parse(process.env.ERRSPEC_TYPESCRIPT_PACKAGES || "[]")) {
+    writeFileSync(join(dir,"tsconfig.json"),JSON.stringify({compilerOptions:{strict:true,target:"ES2022",module:"ESNext",moduleResolution:"Bundler",skipLibCheck:true},files:["errors.ts"]}));
+    const options=["--analysis-engine","typescript","--typescript-package",resolve(compiler),"--analysis-node",process.execPath,"--format","json"];
+    const scanned=JSON.parse(run(process.execPath,[launcher,"scan",...options]));
+    assert.equal(scanned.scanComplete,true);assert.deepEqual(scanned.candidates[0].tags,["Offline"]);
+    const checked=JSON.parse(run(process.execPath,[launcher,"check",...options]));
+    assert.equal(checked.ok,true);assert.equal(checked.analysis.engine,"typescript");
+    extraChecks.push(`embedded-analysis-driver-${checked.analysis.version}`);
+  }
   if(process.env.ERRSPEC_VITEST_PACKAGE) {
     mkdirSync(join(dir,"src"));
     writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}");

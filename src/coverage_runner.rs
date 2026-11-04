@@ -95,7 +95,6 @@ fn read_records(directory: &Path) -> Result<Vec<AssertionRecord>, Finding> {
 
 pub(crate) fn run(request: &CoverageRequest) -> CoverageReport {
     let mut report = CoverageReport::default();
-    // Read the baseline before running tests so a wrong path fails fast.
     let previous = match &request.baseline {
         Some(path) => match read_json::<coverage::CoverageBaseline>(path, "EC_BASELINE") {
             Ok(previous) => Some(previous),
@@ -106,7 +105,8 @@ pub(crate) fn run(request: &CoverageRequest) -> CoverageReport {
         },
         None => None,
     };
-    let scanned = scan::run(&request.project, &request.discriminants);
+    let scanned = scan::run(&request.project, &request.discriminants, &request.analysis);
+    report.analysis = scanned.analysis;
     if !scanned.scan_complete {
         report.diagnostics = scanned.diagnostics;
         return report;

@@ -19,28 +19,47 @@ pub(crate) struct EntryAnalysis {
     pub findings: Vec<Finding>,
 }
 
-pub(crate) fn analyze(
+/// Facts acquired by either compiler; no compiler handles cross this boundary.
+#[derive(Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Facts {
+    pub function: String,
+    pub paths: Vec<FailurePath>,
+}
+
+pub(crate) fn collect(
     adapter: &TsrsAdapter,
     root: &Path,
-    contract: &ValidatedContract,
-    tags: &[String],
-    scan: &ScanReport,
-) -> Result<EntryAnalysis, String> {
-    let entry = contract.entry().expect("contract with entry");
+    entry: &EntryRef,
+    discriminant: &str,
+) -> Result<Facts, String> {
     let function = resolve(adapter, root, entry)?;
     let file = tsrs_ast::get_source_file_of_node(function).expect("entry source file");
     let mut checker = adapter
         .program
         .get_type_checker_for_file(&adapter.context, file);
-    let paths = return_paths(
-        &mut checker,
-        root,
-        function,
-        &contract.source().discriminant,
-        tags,
-    );
-    let findings = escaping_failures(root, function, entry, contract, scan);
-    Ok(EntryAnalysis { paths, findings })
+    let paths = return_paths(&mut checker, root, function, discriminant);
+    Ok(Facts {
+        function: scan::key(root, function),
+        paths,
+    })
+}
+
+pub(crate) fn judge(
+    mut facts: Facts,
+    contract: &ValidatedContract,
+    tags: &[String],
+    scan: &ScanReport,
+) -> EntryAnalysis {
+    for path in &mut facts.paths {
+        path.tags.retain(|tag| tags.contains(tag));
+    }
+    facts.paths.retain(|path| !path.tags.is_empty());
+    let findings = escaping_failures(&facts.function, contract, scan);
+    EntryAnalysis {
+        paths: facts.paths,
+        findings,
+    }
 }
 
 fn resolve(adapter: &TsrsAdapter, root: &Path, entry: &EntryRef) -> Result<P<Node>, String> {
@@ -89,7 +108,6 @@ fn return_paths(
     root: &Path,
     function: P<Node>,
     discriminant: &str,
-    tags: &[String],
 ) -> Vec<FailurePath> {
     let is_async = get_function_flags(Some(function)).contains(FunctionFlags::Async);
     let Some(body) = function.body() else {
@@ -116,7 +134,7 @@ fn return_paths(
         }
         let mut found = BTreeSet::new();
         collect_tags(checker, ty, discriminant, &mut found);
-        let found: Vec<_> = found.into_iter().filter(|tag| tags.contains(tag)).collect();
+        let found: Vec<_> = found.into_iter().collect();
         if found.is_empty() {
             continue;
         }
@@ -170,14 +188,12 @@ fn collect_tags(
 /// Throws and rejections that reach the entry with no catch on the way. A catch that may
 /// rethrow is not a definite escape, and unresolved calls have no origin, so neither is reported.
 fn escaping_failures(
-    root: &Path,
-    function: P<Node>,
-    entry: &EntryRef,
+    function: &str,
     contract: &ValidatedContract,
     scan: &ScanReport,
 ) -> Vec<Finding> {
-    let id = scan::key(root, function);
-    let Some(summary) = scan.functions.iter().find(|f| f.id == id) else {
+    let entry = contract.entry().expect("contract with entry");
+    let Some(summary) = scan.functions.iter().find(|f| f.id == function) else {
         return Vec::new();
     };
     let mut findings = Vec::new();

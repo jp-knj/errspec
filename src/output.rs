@@ -5,6 +5,13 @@ use std::{
     process::ExitCode,
 };
 
+fn analysis_line(info: &errspec::model::AnalysisInfo) -> String {
+    format!(
+        "analysis: {} {} ({}; {})",
+        info.engine, info.version, info.reason, info.package
+    )
+}
+
 fn write_contract(report: &Report, format: Format) -> ExitCode {
     let output = match format {
         Format::Json => serde_json::to_string_pretty(report)
@@ -17,6 +24,9 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
                 report.analysis_complete,
                 report.tests_executed
             )];
+            if let Some(info) = &report.analysis {
+                lines.push(analysis_line(info));
+            }
             for c in &report.contracts {
                 lines.push(format!("{}: {}", c.id, c.tags.join(", ")));
                 for case in &c.cases {
@@ -84,6 +94,19 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
 
 pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
     match outcome {
+        Outcome::MutationAction(result) => {
+            match format {
+                Format::Json => println!("{}", serde_json::to_string_pretty(&result.json).unwrap()),
+                Format::Text | Format::Markdown => {
+                    if result.code == 0 {
+                        println!("{}", result.text);
+                    } else {
+                        eprintln!("{}", result.text);
+                    }
+                }
+            }
+            ExitCode::from(result.code)
+        }
         Outcome::Mutation(report) => write_mutation(&report, format),
         Outcome::Contract(report) => write_contract(&report, format),
         Outcome::Scan {
@@ -109,6 +132,12 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                 report.tests_executed
             )];
             let s = &report.summary;
+            if let Some(info) = &report.typecheck {
+                lines.push(format!(
+                    "typecheck: TypeScript {}: {} checked, {} compile errors, {} equivalent",
+                    info.version, info.checked, info.compile_errors, info.equivalent
+                ));
+            }
             lines.push(format!("{} mutants: {} killed, {} survived, {} uncovered, {} timeout, {} runtime errors, {} ignored, {} pending",
                 s.total,s.killed,s.survived,s.no_coverage,s.timeout,s.runtime_error,s.ignored,s.pending));
             if let Some(score) = s.score {
@@ -126,6 +155,9 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                 ));
                 if let Some(reason) = &m.candidate.ignored {
                     lines.push(format!("  ignored: {reason}"));
+                }
+                if let Some(reason) = &m.reason {
+                    lines.push(format!("  {reason}"));
                 }
                 if !m.covered_by.is_empty() {
                     lines.push(format!("  covered by: {}", m.covered_by.join(", ")));
@@ -155,7 +187,7 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
     ExitCode::from(report.exit_code())
 }
 
-fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {
+fn write_init(result: Result<InitReport, crate::onboard::InitError>, format: Format) -> ExitCode {
     match result {
         Ok(report) => {
             match format {
@@ -165,6 +197,9 @@ fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {
                     serde_json::to_string_pretty(&serde_json::to_value(&report).unwrap()).unwrap()
                 ),
                 Format::Text | Format::Markdown => {
+                    if let Some(info) = &report.analysis {
+                        println!("{}", analysis_line(info));
+                    }
                     println!(
                         "Created configuration and tests: {}",
                         serde_json::to_string(&report.files).unwrap()
@@ -178,11 +213,19 @@ fn write_init(result: Result<InitReport, String>, format: Format) -> ExitCode {
         }
         Err(error) => {
             match format {
-                Format::Json => println!(
-                    "{}",
-                    serde_json::json!({"kind":"errspec/init","schemaVersion":1,"ready":false,"error":error})
-                ),
-                Format::Text | Format::Markdown => eprintln!("EC_INIT {error}"),
+                Format::Json => {
+                    let mut report = serde_json::json!({"kind":"errspec/init","schemaVersion":1,"ready":false,"error":error.message});
+                    if let Some(info) = &error.analysis {
+                        report["analysis"] = serde_json::to_value(info).unwrap();
+                    }
+                    println!("{report}");
+                }
+                Format::Text | Format::Markdown => {
+                    if let Some(info) = &error.analysis {
+                        eprintln!("{}", analysis_line(info));
+                    }
+                    eprintln!("EC_INIT {}", error.message);
+                }
             };
             ExitCode::from(2)
         }
@@ -204,6 +247,9 @@ fn write_scan(
     match format {
         Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
         Format::Text | Format::Markdown => {
+            if let Some(info) = &report.analysis {
+                println!("{}", analysis_line(info));
+            }
             println!(
                 "{} files, {} candidates, {} origins, {} calls, {} unknowns",
                 report.files.len(),
@@ -291,6 +337,9 @@ fn write_coverage(
         Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
         Format::Markdown => print!("{}", coverage_markdown(report)),
         Format::Text => {
+            if let Some(info) = &report.analysis {
+                println!("{}", analysis_line(info));
+            }
             let s = &report.summary;
             println!(
                 "coverage: {} error types, {} tags: {} asserted, {} mentioned only, {} missing",

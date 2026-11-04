@@ -11,6 +11,16 @@ pub struct Location {
     pub line: usize,
 }
 
+/// Provenance for a selected analysis backend. Native defaults retain their original wire format.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnalysisInfo {
+    pub engine: String,
+    pub version: String,
+    pub package: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
@@ -40,7 +50,7 @@ pub struct EntryRef {
 }
 
 /// A `return` of the entry function that yields one or more of the contract's tags.
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FailurePath {
     pub file: String,
@@ -96,7 +106,7 @@ pub struct TestRef {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
     pub code: String,
@@ -144,6 +154,8 @@ impl Finding {
 pub struct Report {
     pub schema_version: u32,
     pub engine: Engine,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<AnalysisInfo>,
     pub mode: String,
     pub ok: bool,
     pub analysis_complete: bool,
@@ -161,8 +173,8 @@ pub struct Report {
 
 #[derive(Debug, Serialize)]
 pub struct Engine {
-    pub name: &'static str,
-    pub revision: &'static str,
+    pub name: String,
+    pub revision: String,
 }
 
 impl Report {
@@ -170,9 +182,10 @@ impl Report {
         Self {
             schema_version: 2,
             engine: Engine {
-                name: "tsrs",
-                revision: TSRS_REVISION,
+                name: "tsrs".into(),
+                revision: TSRS_REVISION.into(),
             },
+            analysis: None,
             mode: mode.into(),
             ok: false,
             analysis_complete: false,

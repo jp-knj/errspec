@@ -4,7 +4,7 @@
 use crate::tsrs_adapter::{TsrsAdapter, location, text, walk};
 use errspec::{
     config::{CaseKind, ValidatedConfig},
-    model::{Finding, ObservationRequirements},
+    model::{Finding, Location, ObservationRequirements},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -21,10 +21,35 @@ struct Registered<'a> {
 }
 
 /// Values a property can take, read from its initializer so contextual widening does not hide literals.
-enum Value {
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "kind", content = "values", rename_all = "camelCase")]
+pub(crate) enum Value {
     Absent,
     Known(BTreeSet<String>),
     Unknown,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ScenarioCall {
+    pub location: Location,
+    pub contract: Value,
+    pub id: Value,
+    pub tags: Value,
+    pub without_faults: Value,
+    pub uses: Vec<(String, String)>,
+}
+
+pub(crate) fn files(root: &Path, config: &ValidatedConfig) -> Vec<PathBuf> {
+    config
+        .contracts()
+        .iter()
+        .flat_map(|c| c.cases())
+        .filter(|c| matches!(c.kind(), CaseKind::Scenario { .. }))
+        .filter_map(|c| root.join(&c.test().file).canonicalize().ok())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 pub(crate) fn inspect(
@@ -32,8 +57,60 @@ pub(crate) fn inspect(
     root: &Path,
     config: &ValidatedConfig,
 ) -> Vec<Finding> {
+    let mut calls = Vec::new();
+    for path in files(root, config) {
+        let Some(file) = adapter.program.get_source_file(&path.to_string_lossy()) else {
+            continue;
+        };
+        let mut checker = adapter
+            .program
+            .get_type_checker_for_file(&adapter.context, file);
+        let mut nodes = Vec::new();
+        walk(file.as_node(), &mut |node| {
+            if node.kind() == Kind::CallExpression
+                && is_sdk(&mut checker, node, "scenarioTest", None)
+            {
+                nodes.push(node);
+            }
+        });
+        for call in nodes {
+            let args = call.arguments();
+            let definition = args
+                .get(2)
+                .filter(|d| d.kind() == Kind::ObjectLiteralExpression);
+            let mut value = |name: &str| {
+                definition.map_or(Value::Unknown, |d| property(&mut checker, *d, name))
+            };
+            let contract = value("contract");
+            let id = value("id");
+            let tags = value("tag");
+            let without_faults = value("withoutFaults");
+            calls.push(ScenarioCall {
+                location: location(root, call),
+                contract,
+                id,
+                tags,
+                without_faults,
+                uses: args
+                    .get(3)
+                    .map(|body| observation_ids(&mut checker, *body))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(kind, id)| (kind.into(), id))
+                    .collect(),
+            });
+        }
+    }
+    inspect_facts(root, config, &calls)
+}
+
+/// Resolve file identities, then compare acquired facts without compiler handles.
+pub(crate) fn inspect_facts(
+    root: &Path,
+    config: &ValidatedConfig,
+    calls: &[ScenarioCall],
+) -> Vec<Finding> {
     let mut registered = BTreeMap::new();
-    let mut files = BTreeSet::new();
     for contract in config.contracts() {
         for case in contract.cases() {
             let CaseKind::Scenario { id, observe } = case.kind() else {
@@ -42,7 +119,6 @@ pub(crate) fn inspect(
             let Ok(file) = root.join(&case.test().file).canonicalize() else {
                 continue;
             };
-            files.insert(file.clone());
             registered.insert(
                 (contract.id(), id.as_str()),
                 Registered {
@@ -54,66 +130,36 @@ pub(crate) fn inspect(
         }
     }
     let mut findings = Vec::new();
-    for path in files {
-        // Test files outside the TypeScript project are matched only at runtime.
-        let Some(file) = adapter.program.get_source_file(&path.to_string_lossy()) else {
-            continue;
-        };
-        let mut checker = adapter
-            .program
-            .get_type_checker_for_file(&adapter.context, file);
-        let mut calls = Vec::new();
-        walk(file.as_node(), &mut |node| {
-            if node.kind() == Kind::CallExpression
-                && is_sdk(&mut checker, node, "scenarioTest", None)
-            {
-                calls.push(node);
-            }
-        });
-        for call in calls {
-            inspect_call(&mut checker, root, &path, call, &registered, &mut findings);
-        }
+    for call in calls {
+        let path = root.join(&call.location.file);
+        let path = path.canonicalize().unwrap_or(path);
+        inspect_call(&path, call, &registered, &mut findings);
     }
     findings
 }
 
 fn inspect_call(
-    checker: &mut Checker,
-    root: &Path,
     path: &Path,
-    call: P<Node>,
+    call: &ScenarioCall,
     registered: &BTreeMap<(&str, &str), Registered<'_>>,
     findings: &mut Vec<Finding>,
 ) {
     let at = |code: &str, message: String| {
-        let location = location(root, call);
+        let location = call.location.clone();
         let mut finding = Finding::new(code, message);
         finding.file = Some(location.file.into());
         finding.byte_offset = Some(location.byte_offset);
         finding.line = Some(location.line as u32);
         finding
     };
-    let arguments = call.arguments();
-    let Some(definition) = arguments
-        .get(2)
-        .filter(|d| d.kind() == Kind::ObjectLiteralExpression)
-    else {
+    let (Value::Known(contracts), Value::Known(ids)) = (&call.contract, &call.id) else {
         return;
     };
-    let (Value::Known(contracts), Value::Known(ids)) = (
-        property(checker, *definition, "contract"),
-        property(checker, *definition, "id"),
-    ) else {
-        return;
-    };
-    let tags = property(checker, *definition, "tag");
-    let without_faults = property(checker, *definition, "withoutFaults");
-    let uses = arguments
-        .get(3)
-        .map(|body| observation_ids(checker, *body))
-        .unwrap_or_default();
-    for contract in &contracts {
-        for id in &ids {
+    let tags = &call.tags;
+    let without_faults = &call.without_faults;
+    let uses = &call.uses;
+    for contract in contracts {
+        for id in ids {
             let case = registered.get(&(contract.as_str(), id.as_str()));
             let scenario = |finding: Finding| {
                 let mut finding = match case {
@@ -158,7 +204,7 @@ fn inspect_call(
                 });
             }
             for (kind, value, list) in uses.iter().map(|(kind, value)| {
-                let list = if *kind == "fault" {
+                let list = if kind == "fault" {
                     &case.observe.faults
                 } else {
                     &case.observe.assertions

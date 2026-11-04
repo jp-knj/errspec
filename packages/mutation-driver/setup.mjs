@@ -1,5 +1,6 @@
 // __VITEST_ENTRY__ is replaced with the selected installation's absolute ESM entry.
 import { inject, TestRunner } from "__VITEST_ENTRY__";
+import { attachWeakBinary } from "./weak-runtime.mjs";
 const context = inject("__errspecMutation");
 if (!context) throw new Error("Missing errspec mutation context");
 const file = TestRunner.getCurrentSuite().file;
@@ -22,3 +23,13 @@ globalThis[symbol] = key => {
   }
   return key === context.activeKey;
 };
+if (context.weakMutation) {
+  data.weakVersion = 1;
+  attachWeakBinary(globalThis[symbol], key => {
+    const task = TestRunner.getCurrentTest();
+    if(task&&!concurrent(file.tasks)) {
+      const meta = task.meta.__errspecMutation;
+      (meta.infected ||= {})[key] = true;
+    }
+  }, context.activeKey);
+}

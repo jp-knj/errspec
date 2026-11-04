@@ -1,9 +1,10 @@
 use crate::{
+    analysis_backend::{self, Backend, Plan},
     coverage_runner, failure_paths,
     input::{existing_tests, read_json},
     onboard,
     request::{ContractAction, ContractRequest, Request, Runner},
-    runner, scan, scenario_source, tsrs_adapter, verification,
+    runner, scan, scenario_source, verification,
 };
 use errspec::{config::ValidatedConfig, contract, model::*, report::ReportData, snapshot};
 use std::{
@@ -35,17 +36,42 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
     }
     let mut data = ReportData::default();
     let result = (|| {
-        let adapter = match tsrs_adapter::TsrsAdapter::open(root, config.project()) {
-            Ok(adapter) => adapter,
-            Err(errors) => {
-                data.diagnostics.extend(errors);
-                return Ok(());
-            }
+        let has_entries = config.contracts().iter().any(|c| c.entry().is_some());
+        let plan = Plan {
+            sources: config
+                .contracts()
+                .iter()
+                .map(|c| c.source().clone())
+                .collect(),
+            scenario_files: scenario_source::files(root, &config),
+            discriminants: has_entries.then(Vec::new),
+            entries: config
+                .contracts()
+                .iter()
+                .filter_map(|c| {
+                    Some(analysis_backend::EntryRequest {
+                        entry: c.entry()?.clone(),
+                        discriminant: c.source().discriminant.clone(),
+                    })
+                })
+                .collect(),
         };
+        let mut session =
+            match analysis_backend::open(&request.analysis, root, config.project(), plan) {
+                Ok(session) => session,
+                Err(error) => {
+                    data.analysis = error.analysis;
+                    data.diagnostics.extend(error.diagnostics);
+                    return Ok(());
+                }
+            };
+        data.analysis = session.analysis.clone();
         data.analysis_complete = true;
-        data.assumptions.clone_from(&adapter.assumptions);
-        for c in config.contracts() {
-            match adapter.tags(root, c.source()) {
+        if let Backend::Native(adapter) = &session.backend {
+            data.assumptions.clone_from(&adapter.assumptions);
+        }
+        for (index, c) in config.contracts().iter().enumerate() {
+            match session.tags(index, root, c.source()) {
                 Ok(tags) => {
                     let (result, findings) = contract::compare(c, tags, &existing_tests(root, c));
                     data.registrations.push(result);
@@ -63,32 +89,48 @@ fn run(request: &ContractRequest, mode: &str) -> Result<Report, Finding> {
         if !data.analysis_complete {
             return Ok(());
         }
-        data.diagnostics
-            .extend(scenario_source::inspect(&adapter, root, &config));
-        // Propagation is computed once, and only when some contract names an entry function.
-        let mut propagation = None;
-        for registration in &data.registrations {
-            let contract = registration.contract;
-            let Some(entry) = contract.entry() else {
-                continue;
+        data.diagnostics.extend(match &session.backend {
+            Backend::Native(adapter) => scenario_source::inspect(adapter, root, &config),
+            Backend::Official(response) => {
+                scenario_source::inspect_facts(root, &config, &response.scenarios)
+            }
+        });
+        if has_entries {
+            let propagation = match &mut session.backend {
+                Backend::Native(adapter) => scan::collect(adapter, root, &[]),
+                Backend::Official(response) => response
+                    .facts
+                    .take()
+                    .expect("validated scan facts")
+                    .into_report(),
             };
-            let facts = propagation.get_or_insert_with(|| scan::collect(&adapter, root, &[]));
-            match failure_paths::analyze(&adapter, root, contract, &registration.tags, facts) {
-                Ok(analysis) => {
-                    data.paths.insert(contract.id().to_owned(), analysis.paths);
-                    data.diagnostics.extend(analysis.findings);
-                }
-                Err(error) => {
-                    data.analysis_complete = false;
-                    let mut f = Finding::new("EC002", error);
-                    f.contract_id = Some(contract.id().into());
-                    f.file = Some(entry.file.as_str().into());
-                    data.diagnostics.push(f);
+            for (index, registration) in data
+                .registrations
+                .iter()
+                .filter(|r| r.contract.entry().is_some())
+                .enumerate()
+            {
+                let contract = registration.contract;
+                let entry = contract.entry().expect("entry contract");
+                match session.entry(index, root, entry, &contract.source().discriminant) {
+                    Ok(facts) => {
+                        let analysis =
+                            failure_paths::judge(facts, contract, &registration.tags, &propagation);
+                        data.paths.insert(contract.id().to_owned(), analysis.paths);
+                        data.diagnostics.extend(analysis.findings);
+                    }
+                    Err(error) => {
+                        data.analysis_complete = false;
+                        let mut finding = Finding::new("EC002", error);
+                        finding.contract_id = Some(contract.id().into());
+                        finding.file = Some(entry.file.as_str().into());
+                        data.diagnostics.push(finding);
+                    }
                 }
             }
-        }
-        if !data.analysis_complete {
-            return Ok(());
+            if !data.analysis_complete {
+                return Ok(());
+            }
         }
         if let Some(baseline) = &request.baseline {
             let previous: Snapshot = read_json(baseline, "EC_BASELINE")?;
@@ -229,13 +271,14 @@ fn record_reach(
 
 /// Results crossing the execution/output boundary contain no compiler handles.
 pub(crate) enum Outcome {
-    Mutation(errspec::mutation::Report),
+    MutationAction(crate::mutation_actions::ActionOutput),
+    Mutation(Box<errspec::mutation::Report>),
     Contract(Report),
     Scan {
         report: errspec::discovery::ScanReport,
         fail_on_unknown: bool,
     },
-    Init(Result<onboard::InitReport, String>),
+    Init(Result<onboard::InitReport, onboard::InitError>),
     Coverage {
         report: errspec::coverage::CoverageReport,
         fail_on_missing: bool,
@@ -244,7 +287,15 @@ pub(crate) enum Outcome {
 
 pub(crate) fn execute(request: Request) -> Outcome {
     match request {
-        Request::Mutation(request) => Outcome::Mutation(crate::mutate::run(request)),
+        Request::Accept {
+            root,
+            file,
+            keys,
+            reason,
+        } => Outcome::MutationAction(crate::mutation_actions::accept(
+            &root, &file, &keys, &reason,
+        )),
+        Request::Mutation(request) => Outcome::Mutation(Box::new(crate::mutate::run(request))),
         Request::MutationSource => unreachable!("hidden source entry handled by main"),
         Request::Contract(request) => {
             let mode = request.command.mode();
@@ -263,7 +314,7 @@ pub(crate) fn execute(request: Request) -> Outcome {
         Request::Scan(request) => {
             let fail_on_unknown = request.fail_on_unknown;
             let report = worker(None, move || {
-                scan::run(&request.project, &request.discriminants)
+                scan::run(&request.project, &request.discriminants, &request.analysis)
             })
             .unwrap_or_else(|_| {
                 let mut report = errspec::discovery::ScanReport::default();
@@ -294,9 +345,11 @@ pub(crate) fn execute(request: Request) -> Outcome {
         }
         Request::Init(request) => {
             let result = worker(None, move || onboard::run(request))
-                .map_err(|error| match error {
-                    WorkerError::Spawn(error) => error.to_string(),
-                    WorkerError::Panicked => "Init worker failed".into(),
+                .map_err(|error| {
+                    onboard::InitError::from(match error {
+                        WorkerError::Spawn(error) => error.to_string(),
+                        WorkerError::Panicked => "Init worker failed".into(),
+                    })
                 })
                 .and_then(|result| result);
             Outcome::Init(result)

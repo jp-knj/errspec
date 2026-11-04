@@ -1,11 +1,12 @@
 import { readFileSync, writeFileSync, realpathSync, existsSync, globSync, statSync } from "node:fs";
-import { dirname, resolve, relative, join, isAbsolute } from "node:path";
+import { dirname, resolve, relative, join, isAbsolute, matchesGlob } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { format } from "node:util";
 import { instrument } from "./emitter.mjs";
+import { typecheckMutants } from "./typecheck.mjs";
 
 const protocolWrite = process.stdout.write.bind(process.stdout);
 // Config evaluation happens in this process, before Vitest redirects test logs.
@@ -37,7 +38,7 @@ function verifyInputs() {
 }
 function native(source,file,validateOnly=false) {
   const result=spawnSync(options.binary,["__mutation-source"], {
-    input:JSON.stringify({source,file,validateOnly,excludeMutators:options.excludeMutator}),
+    input:JSON.stringify({source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation}),
     encoding:"utf8",maxBuffer:64*1024*1024,timeout:60000,
   });
   if(result.status!==0) throw failure("EC_MUTATION_INSTRUMENTATION",result.stderr||"Native parser failed");
@@ -97,13 +98,14 @@ function recordModule(module,execution,request) {
     const result=test.result();
     execution.tests.push({id,taskId:test.id,file:moduleFile,name:test.fullName,status:result.state,
       started:request.started.has(test.id),duration:test.diagnostic()?.duration||0,
-      errors:(result.errors||[]).map(e=>`${e.name||"Error"}: ${e.message||e}`),hits:meta?.hits||{},
+      errors:(result.errors||[]).map(e=>`${e.name||"Error"}: ${e.message||e}`),hits:meta?.hits||{},infected:Object.keys(meta?.infected||{}),
     });
   }
   const meta=module.meta().__errspecMutation;
   if(!meta&&execution.tests.some(t=>t.file===moduleFile&&t.started))
     throw failure("EC_MUTATION_PROTOCOL","Test worker did not install the mutation runtime");
   if(meta) {
+    if(options.weakMutation&&meta.weakVersion!==1)throw failure("EC_MUTATION_PROTOCOL","Worker does not support weak mutation");
     if(meta.runId!==runId||meta.requestId!==request.requestId) throw failure("EC_MUTATION_PROTOCOL","Stale module metadata");
     for(const [key,count] of Object.entries(meta.hits))execution.hits[key]=(execution.hits[key]||0)+count;
     for(const key of Object.keys(meta.staticHits)) (execution.staticHits[key]||=[]).push(moduleFile);
@@ -151,7 +153,7 @@ async function execute(phase,request) {
     config.coverage={...config.coverage,enabled:false};
     config.setupFiles=[options.setup,...config.setupFiles.filter(f=>f!==options.setup)];
     config.provide={...config.provide,__errspecMutation:{runId,requestId:request.requestId,
-      activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER}};
+      activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER,weakMutation:options.weakMutation}};
     project.provide("__errspecMutation",config.provide.__errspecMutation);
     if(request.multiplier===3) {config.testTimeout*=3;config.hookTimeout*=3;}
     await ctx.standalone();
@@ -239,7 +241,9 @@ async function handle(request) {
       throw failure("EC_MUTATION_BASELINE","Unmodified baseline failed or executed no tests");
     let count=0;
     for(const [file,entry] of inventory) {
-      entry.candidates=native(entry.source,rel(file)).candidates;
+      const generated=native(entry.source,rel(file));
+      entry.candidates=generated.candidates;
+      entry.critical=generated.critical||[];
       for(const c of entry.candidates)if(c.regex) {try{new RegExp(...c.regex);}catch{c.ignored="Regex replacement is invalid for the original flags";}}
       entry.emitted=instrument(entry.source,entry.candidates,file,runId);
       try { native(entry.emitted.code,rel(file),true); }
@@ -252,7 +256,8 @@ async function handle(request) {
         entry.emitted=instrument(entry.source,entry.candidates,file,runId);
         native(entry.emitted.code,rel(file),true);
       }
-      send(request,"file",{file:rel(file),candidates:entry.candidates});count++;
+      const critical=options.policy?.critical.some(pattern=>matchesGlob(rel(file),pattern))?entry.candidates.map(c=>c.key):entry.critical;
+      send(request,"file",{file:rel(file),candidates:entry.candidates,critical});count++;
     }
     baseline=await execute("probe",request);
     const identity=e=>e.tests.map(t=>[t.id,t.status,t.started]);
@@ -267,6 +272,17 @@ async function handle(request) {
       throw failure("EC_MUTATION_PROTOCOL","Unknown or ignored active mutant key");
     const execution=await execute("mutant",request);
     send(request,"attempt",{key:request.key,execution});send(request,"done",{count:1});return;
+  }
+  if(request.op==="typecheck") {
+    if(!baseline)throw failure("EC_MUTATION_PROTOCOL","Missing baseline");
+    verifyInputs();
+    try {
+      const keys=new Set(request.keys);
+      const selected=new Map([...inventory].map(([file,entry])=>[file,{...entry,candidates:entry.candidates.filter(c=>keys.has(c.key))}]));
+      const result=await typecheckMutants(options,selected,key=>send(request,"progress",{event:"typecheck",key}));
+      verifyInputs();
+      send(request,"typechecked",result);send(request,"done",{count:result.outcomes.length});return;
+    } catch(error) { throw failure("EC_MUTATION_TYPECHECK",error.stack||String(error)); }
   }
   if(request.op==="close") {verifyInputs();send(request,"done",{count:0});return;}
   throw failure("EC_MUTATION_PROTOCOL",`Unknown operation: ${request.op}`);
