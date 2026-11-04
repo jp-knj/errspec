@@ -420,16 +420,16 @@ impl Report {
             }
         }
         let denominator = s.killed + s.survived + s.no_coverage + s.timeout + s.runtime_error;
-        if self.run_complete && denominator > 0 {
+        if self.run_complete && denominator > 0 && s.pending == 0 {
             s.score = Some((s.killed + s.timeout + s.runtime_error) as f64 / denominator as f64);
         }
         if self.run_complete && self.fail_on_undetected {
-            let passed = s.survived + s.no_coverage == 0;
+            let passed = s.survived + s.no_coverage + s.pending == 0;
             self.gate.passed = Some(passed);
             if !passed {
                 self.error(
                     "EC_MUTATION_UNDETECTED",
-                    "Survived or uncovered mutants remain",
+                    "Survived, uncovered, or unexecuted mutants remain",
                 );
             }
         }

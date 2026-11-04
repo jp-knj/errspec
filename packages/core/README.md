@@ -93,3 +93,13 @@ A completed diff report describes only its selected mutants; consult
 `selection.selected`, `omitted` and `fullRunReason` before interpreting its score.
 Result caches, removed-killer cache invalidation and experimental callgraph
 selection are subsequent stages.
+
+## Partial runs and quality gates
+
+Sampling or a time budget may leave selected candidates `Pending`. Such a run
+can finish the requested plan with exit 0 when no quality gate is requested, but
+its overall `summary.score` remains `null`. `--threshold-break` cannot pass while
+that score is unknown, and `--fail-on-undetected` also rejects unexecuted selected
+candidates. `--fail-on-survived` continues to check survival specifically. Diff
+selection reports omitted candidates separately; its score applies to the selected
+request, as shown by `selection`.

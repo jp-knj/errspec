@@ -191,6 +191,13 @@ impl PolicyReport {
         if !complete {
             return;
         }
+        // A score for the executed subset cannot establish a threshold for all
+        // selected candidates when sampling or a budget left others unexecuted.
+        let score = if mutants.iter().any(|m| m.status == Status::Pending) {
+            None
+        } else {
+            score
+        };
         // As in the reference tool, no detected/undetected candidates gives 100%.
         if score.is_none()
             && mutants.iter().any(|m| m.status == Status::Pending)
