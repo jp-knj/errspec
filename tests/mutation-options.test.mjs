@@ -144,3 +144,13 @@ void [complete,key,offset,count];`);
   const diagnostics=ts.getPreEmitDiagnostics(program);
   assert.deepEqual(diagnostics.map(d=>ts.flattenDiagnosticMessageText(d.messageText,"\n")),[]);
 });
+test("finished config loaders terminate their owned descendants",t=>{
+  const root=project(t),marker=join(root,"descendant-lived");
+  writeFileSync(join(root,"errspec.mutation.config.mjs"),`
+import {spawn} from 'node:child_process';
+spawn(process.execPath,['-e',${JSON.stringify(`setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'alive'),400);setInterval(()=>{},1000);`)}],{stdio:'ignore'}).unref();
+export default {policy:{timeBudget:0}};
+`);
+  assert.equal(cli(root).runComplete,true);
+  assert.equal(existsSync(marker),false,"A loader descendant survived after its owned group was closed");
+});

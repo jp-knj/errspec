@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub mod options;
 pub mod policy;
+pub mod selection;
+pub mod syntax;
 
 pub const RULES_VERSION: &str = "1";
 pub const MUTATORS: [&str; 18] = [
@@ -311,6 +313,8 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub typecheck: Option<TypecheckInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<selection::SelectionReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<policy::PolicyReport>,
     #[serde(skip)]
     fail_on_undetected: bool,
@@ -356,6 +360,7 @@ impl Report {
             diagnostics: vec![],
             interrupted: None,
             typecheck: None,
+            selection: None,
             policy: None,
             fail_on_undetected: gate,
         }

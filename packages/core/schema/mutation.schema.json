@@ -166,6 +166,48 @@
     },
     "$schema": {
       "type": "string"
+    },
+    "since": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "diffUnit": {
+      "enum": [
+        "node",
+        "scope",
+        null
+      ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "diffUnit"
+        ],
+        "properties": {
+          "diffUnit": {
+            "enum": [
+              "node",
+              "scope"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "since"
+        ],
+        "properties": {
+          "since": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ]
 }

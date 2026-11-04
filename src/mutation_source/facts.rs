@@ -1,43 +1,6 @@
 //! Owned syntax facts shared by selection, reuse, plugins and mutation reports.
 use super::*;
-use serde::Serialize;
-use std::collections::BTreeMap;
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct Metadata {
-    pub version: u8,
-    pub scopes: BTreeMap<String, Scope>,
-    pub owners: BTreeMap<String, String>,
-    pub nodes: Vec<SyntaxNode>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct Scope {
-    pub hash: String,
-    pub effect_hash: String,
-    pub start: usize,
-    pub end: usize,
-    pub line: usize,
-    pub end_line: usize,
-    pub parent: Option<String>,
-    pub name: Option<String>,
-    pub references: BTreeSet<String>,
-    pub pure: bool,
-    pub unknown_calls: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct SyntaxNode {
-    pub kind: String,
-    pub start: usize,
-    pub end: usize,
-    pub parent: Option<usize>,
-    pub name: Option<String>,
-    pub children: Vec<usize>,
-}
+use errspec::mutation::syntax::{Metadata, Scope, SyntaxNode};
 
 fn pure(node: P<Node>) -> bool {
     match node.kind() {
@@ -222,6 +185,18 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
                     name: node.name().map(|n| rules.raw(n).into()),
                     references: refs,
                     pure: pure(*node),
+                    function: matches!(
+                        node.kind(),
+                        Kind::FunctionDeclaration
+                            | Kind::FunctionExpression
+                            | Kind::ArrowFunction
+                            | Kind::MethodDeclaration
+                    ) || matches!(
+                        node.kind(),
+                        Kind::VariableDeclaration | Kind::PropertyDeclaration
+                    ) && node.initializer().is_some_and(|n| {
+                        matches!(n.kind(), Kind::FunctionExpression | Kind::ArrowFunction)
+                    }),
                     unknown_calls: unknown,
                 },
             )

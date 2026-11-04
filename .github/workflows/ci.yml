@@ -43,7 +43,7 @@ jobs:
       - run: node --test tests/analysis-driver.test.mjs
       - run: node --test tests/mutation-emitter.test.mjs
       - run: node --test tests/mutation-process.test.mjs
-      - run: node --test --test-concurrency=1 tests/mutation-typecheck.test.mjs tests/mutation-weak.test.mjs tests/mutation-workflows.test.mjs tests/mutation-options.test.mjs
+      - run: node --test --test-concurrency=1 tests/mutation-typecheck.test.mjs tests/mutation-weak.test.mjs tests/mutation-workflows.test.mjs tests/mutation-options.test.mjs tests/mutation-selection.test.mjs
       - run: node scripts/demo-mutation.mjs
       - run: node --test tests/failure-atomicity.test.mjs
       - run: node --test tests/failure-atomicity.test.mjs

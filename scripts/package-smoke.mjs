@@ -161,7 +161,7 @@ assert.equal(result.report.diagnostics[0].code,'EC_MUTATION_CONFIG');
   }
   if(process.env.ERRSPEC_VITEST_PACKAGE) {
     mkdirSync(join(dir,"src"));
-    writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}");
+    writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\n");
     writeFileSync(join(dir,"mutation.test.ts"),'import {test,expect} from "vitest";import {add} from "./src/mutation";test("adds",()=>expect(add(2,3)).toBe(5));');
     writeFileSync(join(dir,"vitest.config.mjs"),'export default {test:{include:["mutation.test.ts"]}};');
     const mutation=JSON.parse(run(process.execPath,[launcher,"mutate","--node",process.execPath,"--vitest-package",resolve(process.env.ERRSPEC_VITEST_PACKAGE),"--fail-on-undetected","--format","json"]));
@@ -169,13 +169,22 @@ assert.equal(result.report.diagnostics[0].code,'EC_MUTATION_CONFIG');
     writeFileSync(join(dir,"api.mjs"), `
 import assert from 'node:assert/strict';
 import {defineConfig,runMutation} from '@errspec/core';
-const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},failOnUndetected:true}));
+const diff=process.argv.includes('--diff');
+const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},...(diff?{since:'HEAD',policy:{timeBudget:0}}:{failOnUndetected:true})}));
 assert.equal(result.exitCode,0);
 assert.equal(result.report.runComplete,true);
-assert.equal(result.report.summary.killed,2);
+if(diff){assert.equal(result.report.selection.selected,1);assert.ok(result.report.selection.omitted>0);assert.ok(result.report.mutants.every(m=>m.line===2));}
+else assert.equal(result.report.summary.killed,2);
 `);
     run(process.execPath,["api.mjs"]);
     extraChecks.push("embedded-mutation-driver","installed-core-mutation");
+    writeFileSync(join(dir,".gitignore"),"node_modules/\ncache/\n");
+    run("git",["init","--quiet"]);
+    run("git",["add","."]);
+    run("git",["-c","user.name=Fixture","-c","user.email=fixture@example.invalid","-c","commit.gpgSign=false","commit","--quiet","-m","package baseline"]);
+    writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\nexport const extra=true;\n");
+    run(process.execPath,["api.mjs","--diff"]);
+    extraChecks.push("installed-core-git-selection");
   }
   console.log(
     JSON.stringify({

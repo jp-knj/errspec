@@ -10,6 +10,8 @@ export interface MutationPolicy {
   acceptedFile?: string | null;
 }
 export interface MutationOptions {
+  since?: string | null;
+  diffUnit?: "node" | "scope" | null;
   root?: string;
   node?: string;
   include?: string[];
@@ -90,6 +92,12 @@ export interface MutationReport {
   };
   diagnostics: { code: string; message: string }[];
   mutants: Mutant[];
+  selection?: {
+    since: string; base: string; unit: "node" | "scope";
+    total: number; selected: number; omitted: number;
+    changedFiles: string[]; fullRunReason: string | null;
+    warnings: {code: string; file: string; message: string}[];
+  };
   gate: { enabled: boolean; passed: boolean | null };
   typecheck?: {
     version: string; package: string; project: string;

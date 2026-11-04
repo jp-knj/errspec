@@ -70,3 +70,26 @@ output limits. Configuration scripts run as local project code.
 `selectTests`, `formatReport`, plugin APIs, result caches and additional runner
 packages are subsequent implementation stages; this package currently exposes
 `defineConfig` and `runMutation`.
+
+## Git selection
+
+Use `errspec mutate --since <revision> --diff-unit node` to select mutants whose
+AST expression/statement spans overlap changed lines. `--diff-unit scope` selects
+the enclosing named function/method or function-valued binding; module-level code
+uses the module scope. The default unit is `node`. API/configuration equivalents
+are `since` and `diffUnit`. `--only` intersects with this selection.
+
+The base includes staged, unstaged and untracked project files. Paths are rooted
+at the package, including inside a monorepo. Changes to tests, removed tests, or
+files outside the mutation inventory conservatively select all candidates because
+dependency/configuration effects cannot be ruled out. Changed or removed test
+files absent from the baseline are warnings in `selection.warnings`; warnings
+are separate from quality failures. Invalid Git bases stop before running tests.
+A change to Git inputs during execution invalidates the result.
+
+Both unmodified and instrumented baselines still run all selected-project tests.
+This stage reduces mutant trials, rather than claiming baseline or result reuse.
+A completed diff report describes only its selected mutants; consult
+`selection.selected`, `omitted` and `fullRunReason` before interpreting its score.
+Result caches, removed-killer cache invalidation and experimental callgraph
+selection are subsequent stages.

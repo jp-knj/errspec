@@ -143,6 +143,21 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
             if let Some(score) = s.score {
                 lines.push(format!("score: {:.2}%", score * 100.0));
             }
+            if let Some(selection) = &report.selection {
+                lines.push(format!(
+                    "diff {:?} since {}: {} selected, {} omitted",
+                    selection.unit, selection.since, selection.selected, selection.omitted
+                ));
+                if let Some(reason) = &selection.full_run_reason {
+                    lines.push(format!("  full selection: {reason}"));
+                }
+                for warning in &selection.warnings {
+                    lines.push(format!(
+                        "warning {} {}: {}",
+                        warning.code, warning.file, warning.message
+                    ));
+                }
+            }
             for m in &report.mutants {
                 lines.push(format!(
                     "{}:{} {} {:?}: {} -> {}",
