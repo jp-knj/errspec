@@ -13,6 +13,7 @@ export interface MutationOptions {
   since?: string | null;
   diffUnit?: "node" | "scope" | null;
   shard?: { index: number; total: number } | null;
+  concurrency?: number;
   root?: string;
   node?: string;
   include?: string[];
@@ -87,6 +88,7 @@ export interface MutationReport {
     node: string | null; vitest: string | null;
     typecheck: string; coverageScope: string;
     sessionReuse?: "available" | "fresh_global_setup" | "fresh_lifecycle_unknown";
+    parallel?: { requested: number; workers: number };
   };
   runComplete: boolean;
   ok: boolean;

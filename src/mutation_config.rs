@@ -144,6 +144,7 @@ pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) 
         ("since", "since"),
         ("diff_unit", "diffUnit"),
         ("shard", "shard"),
+        ("concurrency", "concurrency"),
         ("node", "node"),
         ("include", "include"),
         ("exclude", "exclude"),

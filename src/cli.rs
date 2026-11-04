@@ -119,6 +119,77 @@ impl From<CliAnalysisEngine> for crate::analysis_backend::Engine {
     }
 }
 
+#[derive(clap::Args)]
+struct MutationArgs {
+    /// Git revision used to select changed mutation nodes or scopes.
+    #[arg(long)]
+    since: Option<String>,
+    #[arg(long, value_enum)]
+    diff_unit: Option<MutationDiffUnit>,
+    /// Execute one deterministic partition, e.g. --shard 1/4.
+    #[arg(long)]
+    shard: Option<errspec::mutation::sharding::Shard>,
+    /// Independent mutation workers; defaults to one.
+    #[arg(short = 'j', long, default_value_t = 1)]
+    concurrency: usize,
+    /// Mutation settings; separate from the error-contract configuration.
+    #[arg(long)]
+    config_file: Option<PathBuf>,
+    #[arg(long, default_value = ".")]
+    root: PathBuf,
+    #[arg(long)]
+    include: Vec<String>,
+    #[arg(long)]
+    exclude: Vec<String>,
+    #[arg(long)]
+    exclude_mutator: Vec<String>,
+    #[arg(long)]
+    vitest_config: Option<PathBuf>,
+    #[arg(long)]
+    vitest_project: Option<String>,
+    #[arg(long)]
+    vitest_package: Option<PathBuf>,
+    #[arg(long, default_value = "node")]
+    node: PathBuf,
+    #[arg(long)]
+    fail_on_undetected: bool,
+    #[arg(long, conflicts_with = "fail_on_undetected")]
+    no_fail_on_undetected: bool,
+    /// Check each mutant with the project's TypeScript before running it.
+    #[arg(long, conflicts_with = "no_typecheck")]
+    typecheck: bool,
+    /// Disable mutant typechecking explicitly.
+    #[arg(long)]
+    no_typecheck: bool,
+    #[arg(long, conflicts_with = "no_weak_mutation")]
+    weak_mutation: bool,
+    /// Reuse an instrumented Vitest session with isolated workers.
+    #[arg(long, conflicts_with = "no_reuse_session")]
+    reuse_session: bool,
+    /// Reuse stable assertion outcomes with exactly matching inputs.
+    #[arg(long, conflicts_with = "no_cache")]
+    cache: bool,
+    #[arg(long)]
+    no_cache: bool,
+    #[arg(long)]
+    cache_dir: Option<PathBuf>,
+    /// Refresh observations from all tests even when coverage is cached.
+    #[arg(long, conflicts_with = "no_full_dry_run")]
+    full_dry_run: bool,
+    #[arg(long)]
+    no_full_dry_run: bool,
+    #[arg(long)]
+    no_reuse_session: bool,
+    #[arg(long)]
+    no_weak_mutation: bool,
+    #[arg(long)]
+    typecheck_project: Option<PathBuf>,
+    #[arg(long)]
+    typecheck_package: Option<PathBuf>,
+    #[command(flatten)]
+    policy: Box<MutationPolicyArgs>,
+}
+
 #[derive(Subcommand)]
 enum Action {
     /// Record reasoned approval of equivalent or intentionally untested mutants.
@@ -133,72 +204,7 @@ enum Action {
         reason: String,
     },
     /// Generate mutations, run Vitest, and report detected and undetected changes.
-    Mutate {
-        /// Git revision used to select changed mutation nodes or scopes.
-        #[arg(long)]
-        since: Option<String>,
-        #[arg(long, value_enum)]
-        diff_unit: Option<MutationDiffUnit>,
-        /// Execute one deterministic partition, e.g. --shard 1/4.
-        #[arg(long)]
-        shard: Option<errspec::mutation::sharding::Shard>,
-        /// Mutation settings; separate from the error-contract configuration.
-        #[arg(long)]
-        config_file: Option<PathBuf>,
-        #[arg(long, default_value = ".")]
-        root: PathBuf,
-        #[arg(long)]
-        include: Vec<String>,
-        #[arg(long)]
-        exclude: Vec<String>,
-        #[arg(long)]
-        exclude_mutator: Vec<String>,
-        #[arg(long)]
-        vitest_config: Option<PathBuf>,
-        #[arg(long)]
-        vitest_project: Option<String>,
-        #[arg(long)]
-        vitest_package: Option<PathBuf>,
-        #[arg(long, default_value = "node")]
-        node: PathBuf,
-        #[arg(long)]
-        fail_on_undetected: bool,
-        #[arg(long, conflicts_with = "fail_on_undetected")]
-        no_fail_on_undetected: bool,
-        /// Check each mutant with the project's TypeScript before running it.
-        #[arg(long, conflicts_with = "no_typecheck")]
-        typecheck: bool,
-        /// Disable mutant typechecking explicitly.
-        #[arg(long)]
-        no_typecheck: bool,
-        #[arg(long, conflicts_with = "no_weak_mutation")]
-        weak_mutation: bool,
-        /// Reuse an instrumented Vitest session with isolated workers.
-        #[arg(long, conflicts_with = "no_reuse_session")]
-        reuse_session: bool,
-        /// Reuse stable assertion outcomes with exactly matching inputs.
-        #[arg(long, conflicts_with = "no_cache")]
-        cache: bool,
-        #[arg(long)]
-        no_cache: bool,
-        #[arg(long)]
-        cache_dir: Option<PathBuf>,
-        /// Refresh observations from all tests even when coverage is cached.
-        #[arg(long, conflicts_with = "no_full_dry_run")]
-        full_dry_run: bool,
-        #[arg(long)]
-        no_full_dry_run: bool,
-        #[arg(long)]
-        no_reuse_session: bool,
-        #[arg(long)]
-        no_weak_mutation: bool,
-        #[arg(long)]
-        typecheck_project: Option<PathBuf>,
-        #[arg(long)]
-        typecheck_package: Option<PathBuf>,
-        #[command(flatten)]
-        policy: Box<MutationPolicyArgs>,
-    },
+    Mutate(Box<MutationArgs>),
     #[command(name = "__mutation-source", hide = true)]
     MutationSource,
     #[command(name = "__mutation-api", hide = true)]
@@ -337,36 +343,38 @@ impl Cli {
             Action::MutationSupervisor { configuration } => {
                 return Ok((Request::MutationSupervisor(configuration), self.format));
             }
-            Action::Mutate {
-                since,
-                diff_unit,
-                shard,
-                config_file,
-                root,
-                include,
-                exclude,
-                exclude_mutator,
-                vitest_config,
-                vitest_project,
-                vitest_package,
-                node,
-                fail_on_undetected,
-                no_fail_on_undetected: _,
-                typecheck,
-                no_typecheck: _,
-                weak_mutation,
-                reuse_session,
-                cache,
-                no_cache: _,
-                cache_dir,
-                full_dry_run,
-                no_full_dry_run: _,
-                no_reuse_session: _,
-                no_weak_mutation: _,
-                typecheck_project,
-                typecheck_package,
-                policy,
-            } => {
+            Action::Mutate(args) => {
+                let MutationArgs {
+                    since,
+                    diff_unit,
+                    shard,
+                    concurrency,
+                    config_file,
+                    root,
+                    include,
+                    exclude,
+                    exclude_mutator,
+                    vitest_config,
+                    vitest_project,
+                    vitest_package,
+                    node,
+                    fail_on_undetected,
+                    no_fail_on_undetected: _,
+                    typecheck,
+                    no_typecheck: _,
+                    weak_mutation,
+                    reuse_session,
+                    cache,
+                    no_cache: _,
+                    cache_dir,
+                    full_dry_run,
+                    no_full_dry_run: _,
+                    no_reuse_session: _,
+                    no_weak_mutation: _,
+                    typecheck_project,
+                    typecheck_package,
+                    policy,
+                } = *args;
                 if explicit_config
                     || self.baseline.is_some()
                     || self.strict_baseline
@@ -384,6 +392,7 @@ impl Cli {
                             since,
                             diff_unit: diff_unit.map(Into::into),
                             shard,
+                            concurrency,
                             root,
                             include,
                             exclude,

@@ -1988,6 +1988,7 @@ var root;
 var runId;
 var api;
 var packageDir;
+var toolTemp;
 var inventory = new Map;
 var fingerprints = new Map;
 var plain;
@@ -2060,7 +2061,7 @@ function candidateFiles(excluded) {
     for (const entry of globSync(pattern, { cwd: root, exclude: ["**/node_modules/**", ...options.exclude] })) {
       const absolute = realpathSync2(resolve2(root, entry));
       const name = rel(absolute);
-      if (name.startsWith("../") || isAbsolute(name) || name.split("/").includes("node_modules") || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(name) || /\.d\.(?:[cm]?ts)$/.test(name) || excluded.has(absolute) || !statSync(absolute).isFile())
+      if (absolute === toolTemp || absolute.startsWith(toolTemp + "/") || name.startsWith("../") || isAbsolute(name) || name.split("/").includes("node_modules") || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(name) || /\.d\.(?:[cm]?ts)$/.test(name) || excluded.has(absolute) || !statSync(absolute).isFile())
         continue;
       files.add(absolute);
     }
@@ -2390,6 +2391,7 @@ async function handle(request) {
     if (Number(process.versions.node.split(".")[0]) < 24)
       throw failure("EC_MUTATION_CONFIG", "mutate requires Node 24 or newer");
     root = realpathSync2(options.root);
+    toolTemp = realpathSync2(options.toolTemp || options.temp);
     packageDir = packagePath(options.vitestPackage);
     const pkg = JSON.parse(readFileSync2(join2(packageDir, "package.json"), "utf8"));
     remember(join2(packageDir, "package.json"));
@@ -2397,7 +2399,8 @@ async function handle(request) {
       throw failure("EC_MUTATION_CONFIG", `mutate requires Vitest 5.x; found ${pkg.version}`);
     api = await import(pathToFileURL2(join2(packageDir, "dist/node.js")).href);
     const setup = readFileSync2(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join2(packageDir, "dist/index.js"))));
-    writeFileSync(options.setup, setup);
+    if (setup !== readFileSync2(options.setup, "utf8"))
+      writeFileSync(options.setup, setup);
     if (request.restore) {
       const saved = JSON.parse(readFileSync2(options.state, "utf8"));
       baseline = saved.baseline;
@@ -2407,12 +2410,23 @@ async function handle(request) {
       inventory = new Map(saved.inventory);
       fingerprints = new Map(saved.fingerprints);
       verifyInputs();
+      for (const [file, entry] of inventory)
+        entry.emitted = instrument(entry.source, entry.candidates, file, runId);
     }
     send(request, "done", { node: process.versions.node, vitest: pkg.version, count: 0 });
     return;
   }
   if (!options)
     throw failure("EC_MUTATION_PROTOCOL", "Driver was not opened");
+  if (request.op === "prime") {
+    if (!baseline)
+      throw failure("EC_MUTATION_PROTOCOL", "Missing restored worker baseline");
+    const measured = await execute("probe", request);
+    baseline = measured;
+    send(request, "primed", { execution: measured, ...options.cache ? { cacheFacts: cacheFacts() } : {} });
+    send(request, "done", { count: 0 });
+    return;
+  }
   if (request.op === "cache-facts") {
     if (!options.cache)
       throw failure("EC_MUTATION_PROTOCOL", "Result caching was not requested");
@@ -2498,7 +2512,7 @@ async function handle(request) {
   }
   if (request.op === "close") {
     verifyInputs();
-    if (options.cache && baseline)
+    if ((options.cache || options.concurrency > 1) && baseline)
       await execute("inspect", request);
     if (warmContext) {
       const saved = warmContext;

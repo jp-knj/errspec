@@ -26,6 +26,7 @@ pub struct Options {
     pub since: Option<String>,
     pub diff_unit: Option<super::selection::Unit>,
     pub shard: Option<super::sharding::Shard>,
+    pub concurrency: usize,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -51,12 +52,16 @@ impl Default for Options {
             since: None,
             diff_unit: None,
             shard: None,
+            concurrency: 1,
         }
     }
 }
 impl Options {
     pub fn validate(&self) -> Result<(), String> {
         self.policy.validate()?;
+        if !(1..=64).contains(&self.concurrency) {
+            return Err("concurrency must be between 1 and 64".into());
+        }
         if let Some(shard) = &self.shard {
             shard.validate()?;
         }

@@ -1,4 +1,5 @@
 //! Mutation process ownership, protocol validation, and acquisition.
+mod worker_pool;
 use crate::mutation_source;
 use errspec::mutation::options::Options as MutationRequest;
 use errspec::mutation::{self, Candidate, Execution, Mutant, Report, Status};
@@ -122,6 +123,7 @@ struct Driver {
     started: Arc<AtomicBool>,
     ownership: crate::mutation_ownership::Launch,
     endpoint_available: Option<bool>,
+    cancelled: Arc<AtomicBool>,
 }
 struct Response {
     messages: Vec<Value>,
@@ -147,6 +149,7 @@ impl Driver {
         run_id: &str,
         signal: Arc<AtomicI32>,
         started: Arc<AtomicBool>,
+        cancelled: Arc<AtomicBool>,
     ) -> Result<Self, Failure> {
         let ownership = crate::mutation_ownership::Launch::new(node, script, run_id)?;
         let mut child = Command::new(std::env::current_exe()?)
@@ -179,6 +182,7 @@ impl Driver {
             started,
             ownership,
             endpoint_available: None,
+            cancelled,
         })
     }
     fn stop(&mut self) {
@@ -208,6 +212,13 @@ impl Driver {
         let mut progress = start;
         let mut messages = vec![];
         loop {
+            if self.cancelled.load(Ordering::SeqCst) {
+                self.stop();
+                return Err(Failure::new(
+                    "EC_MUTATION_RUNNER",
+                    "Execution cancelled after another worker failed",
+                ));
+            }
             if self.signal.load(Ordering::SeqCst) != 0 {
                 self.stop();
                 return Err(Failure::new(
@@ -284,7 +295,8 @@ impl Driver {
                     });
                 }
                 Some(
-                    "baseline" | "prepared" | "file" | "attempt" | "typechecked" | "discovered",
+                    "baseline" | "prepared" | "file" | "attempt" | "typechecked" | "discovered"
+                    | "primed",
                 ) => messages.push(message),
                 _ => return Err(Failure::protocol("Unknown driver message")),
             }
@@ -457,14 +469,17 @@ fn run_inner(
     options["binary"] = json!(std::env::current_exe()?);
     options["engineFingerprint"] = json!(mutation::cache::ENGINE_FINGERPRINT);
     options["temp"] = json!(temp.path());
+    options["toolTemp"] = json!(temp.path());
     options["setup"] = json!(setup);
     options["state"] = json!(temp.path().join("state.json"));
+    let cancelled = Arc::new(AtomicBool::new(false));
     let mut driver = Driver::start(
         &request.node,
         &script,
         &run_id,
         signal.clone(),
         started.clone(),
+        cancelled.clone(),
     )?;
     let startup = Duration::from_secs(120);
     let open = driver.request(json!({"op":"open","options":options}), startup, startup)?;
@@ -801,6 +816,7 @@ fn run_inner(
         report.engine.typecheck = "complete";
         report.typecheck = Some(info);
     }
+    let mut jobs = vec![];
     for mutant in &mut report.mutants {
         if mutant.status != Status::Pending {
             continue;
@@ -849,7 +865,7 @@ fn run_inner(
         .policy
         .mutants_per_line
         .map(|maximum| mutation::policy::sample_per_line(&report.mutants, maximum));
-    for mutant in &mut report.mutants {
+    for (index, mutant) in report.mutants.iter_mut().enumerate() {
         if mutant.status != Status::Pending {
             continue;
         }
@@ -872,7 +888,10 @@ fn run_inner(
             report.cache.as_mut().unwrap().reused += 1;
             continue;
         }
-        let key = &mutant.candidate.key;
+        if request.concurrency > 1 {
+            jobs.push((index, mutant.clone()));
+            continue;
+        }
         if request
             .policy
             .time_budget
@@ -882,122 +901,44 @@ fn run_inner(
             report.policy.as_mut().unwrap().budget += 1;
             continue;
         }
-        let static_files = baseline.static_hits.get(key);
         if let Some(info) = &mut report.cache {
             info.executed += 1;
         }
-        let mut durations: Vec<_> = baseline
-            .tests
-            .iter()
-            .filter(|t| selected.contains(&t.id))
-            .map(|t| t.duration)
-            .collect();
-        if let Some(files) = static_files {
-            durations = files
-                .iter()
-                .map(|file| baseline.module_durations.get(file).copied().unwrap_or(0.0))
-                .collect();
-        }
-        let total_ms = durations.iter().sum::<f64>() * 1.5 + 5000.0;
-        let stall_ms = durations.iter().copied().fold(0.0, f64::max) * 3.0 + 10000.0;
-        let hit_limit = baseline
-            .hits
-            .get(key)
-            .copied()
-            .unwrap_or(0)
-            .saturating_mul(100)
-            .max(10000);
-        for number in 1..=2 {
-            if driver.stopped {
-                driver = Driver::start(
-                    &request.node,
-                    &script,
-                    &run_id,
-                    signal.clone(),
-                    started.clone(),
-                )?;
-                let result = driver.request(
-                    json!({"op":"open","options":options,"restore":true}),
-                    startup,
-                    startup,
-                )?;
-                if result.timeout {
-                    return Err(Failure::new(
-                        "EC_MUTATION_RUNNER",
-                        "Driver restart timed out",
-                    ));
-                }
-                result.check_error()?;
-                expected(&result.messages, &["done"], 0)?;
-            }
-            let multiplier = if number == 2 && mutant.attempts[0].status == Status::Timeout {
-                3
-            } else {
-                1
-            };
-            let response=driver.request(json!({"op":"run","key":key,"selected":selected,"hitLimit":hit_limit,"multiplier":multiplier}),
-                Duration::from_secs_f64(total_ms*multiplier as f64/1000.0),Duration::from_secs_f64(stall_ms*multiplier as f64/1000.0))?;
-            report.tests_executed |= response.messages.iter().any(|m| m["type"] == "progress");
-            response.check_error()?;
-            let result = if response.timeout {
-                Execution {
-                    selected: selected.clone(),
-                    wall_timeout: true,
-                    ..Execution::default()
-                }
-            } else {
-                expected(&response.messages, &["progress", "attempt", "done"], 1)?;
-                let value = only(&response.messages, "attempt")?;
-                if value["key"] != json!(key) {
-                    return Err(Failure::protocol("Wrong mutant key in response"));
-                }
-                execution(value)?
-            };
-            mutation::validate_execution(&result, &selected).map_err(Failure::protocol)?;
-            if result
-                .hits
-                .keys()
-                .chain(result.static_hits.keys())
-                .chain(result.tests.iter().flat_map(|t| t.hits.keys()))
-                .chain(result.tests.iter().flat_map(|t| t.infected.iter()))
-                .any(|k| !keys.contains(k))
-            {
-                return Err(Failure::protocol("Attempt contains an unknown mutant key"));
-            }
-            let attempt = mutation::judge(&result, &selected, number);
-            let final_result = matches!(attempt.status, Status::Killed | Status::Survived)
-                || attempt.reason.contains("hit limit");
-            mutant.attempts.push(attempt);
-            if final_result || number == 2 {
-                break;
-            }
-        }
-        mutant.status = mutation::confirmed(&mutant.attempts);
-        mutant.killed_by = baseline
-            .tests
-            .iter()
-            .filter(|t| {
-                mutant
-                    .attempts
-                    .last()
-                    .is_some_and(|a| a.killed_by.contains(&t.id))
-            })
-            .map(|t| t.id.clone())
-            .collect();
-        mutant.failed_modules = mutant
-            .attempts
-            .last()
-            .map(|a| a.failed_modules.clone())
-            .unwrap_or_default();
-        if mutant.status == Status::Pending {
-            return Err(Failure::new(
-                "EC_MUTATION_RUNNER",
-                "Mutation attempts produced different failure categories",
-            ));
-        }
+        execute_trial(
+            mutant,
+            &mut driver,
+            &TrialContext {
+                node: &request.node,
+                script: &script,
+                run_id: &run_id,
+                options: &options,
+                baseline: &baseline,
+                keys: &keys,
+                parallel: false,
+            },
+        )?;
+    }
+    let mut additional_facts = vec![];
+    if request.concurrency > 1 {
+        (driver, additional_facts) = worker_pool::run(
+            driver,
+            jobs,
+            report,
+            &request,
+            &TrialContext {
+                node: &request.node,
+                script: &script,
+                run_id: &run_id,
+                options: &options,
+                baseline: &baseline,
+                keys: &keys,
+                parallel: true,
+            },
+            beginning,
+        )?;
     }
     if driver.stopped {
-        driver = Driver::start(&request.node, &script, &run_id, signal, started)?;
+        driver = Driver::start(&request.node, &script, &run_id, signal, started, cancelled)?;
         let result = driver.request(
             json!({"op":"open","options":options,"restore":true}),
             startup,
@@ -1034,16 +975,27 @@ fn run_inner(
         }
     }
     if let Some(store) = &mut cache_store {
-        let facts: crate::mutation_cache::Facts =
+        let mut facts: crate::mutation_cache::Facts =
             serde_json::from_value(only(&close.messages, "done")?["cacheFacts"].clone())
                 .map_err(|e| Failure::protocol(e.to_string()))?;
-        let current = crate::mutation_cache::acquire(
-            &request,
-            &facts,
-            temp.path(),
-            Some(&store.stamp.baseline_paths),
-            &driver.signal,
-        );
+        let mut merge_error = None;
+        for worker_facts in additional_facts {
+            if let Err(error) = facts.merge(worker_facts) {
+                merge_error = Some(error);
+                break;
+            }
+        }
+        let current = if let Some(error) = merge_error {
+            Err(error)
+        } else {
+            crate::mutation_cache::acquire(
+                &request,
+                &facts,
+                temp.path(),
+                Some(&store.stamp.baseline_paths),
+                &driver.signal,
+            )
+        };
         let problem = match current {
             Ok(stamp) if stamp.hash == store.stamp.hash => None,
             Ok(_) => Some("Cache inputs changed during execution".to_owned()),
@@ -1079,6 +1031,165 @@ fn run_inner(
     if !accepted.is_empty() {
         report.policy.as_mut().unwrap().acceptance =
             mutation::policy::accept_results(&mut report.mutants, &accepted, &keys);
+    }
+    Ok(())
+}
+
+struct TrialContext<'a> {
+    node: &'a Path,
+    script: &'a Path,
+    run_id: &'a str,
+    options: &'a Value,
+    baseline: &'a Execution,
+    keys: &'a BTreeSet<String>,
+    parallel: bool,
+}
+fn reopen(driver: &mut Driver, context: &TrialContext<'_>) -> Result<(), Failure> {
+    if driver.stopped {
+        *driver = Driver::start(
+            context.node,
+            context.script,
+            context.run_id,
+            driver.signal.clone(),
+            driver.started.clone(),
+            driver.cancelled.clone(),
+        )?;
+    }
+    if driver.sequence == 0 {
+        let response = driver.request(
+            json!({"op":"open","options":context.options,"restore":true}),
+            Duration::from_secs(120),
+            Duration::from_secs(120),
+        )?;
+        if response.timeout {
+            return Err(Failure::new(
+                "EC_MUTATION_RUNNER",
+                "Driver restart timed out",
+            ));
+        }
+        response.check_error()?;
+        expected(&response.messages, &["done"], 0)?;
+    }
+    Ok(())
+}
+fn execute_trial(
+    mutant: &mut Mutant,
+    driver: &mut Driver,
+    context: &TrialContext<'_>,
+) -> Result<(), Failure> {
+    let baseline = context.baseline;
+    let keys = context.keys;
+    let key = &mutant.candidate.key;
+    let selected = mutant
+        .infected_by
+        .as_ref()
+        .unwrap_or(&mutant.covered_by)
+        .clone();
+    let static_files = baseline.static_hits.get(key);
+    let mut durations: Vec<_> = baseline
+        .tests
+        .iter()
+        .filter(|t| selected.contains(&t.id))
+        .map(|t| t.duration)
+        .collect();
+    if let Some(files) = static_files {
+        durations = files
+            .iter()
+            .map(|file| baseline.module_durations.get(file).copied().unwrap_or(0.0))
+            .collect();
+    }
+    let total_ms = durations.iter().sum::<f64>() * 1.5 + 5000.0;
+    let stall_ms = durations.iter().copied().fold(0.0, f64::max) * 3.0 + 10000.0;
+    let hit_limit = baseline
+        .hits
+        .get(key)
+        .copied()
+        .unwrap_or(0)
+        .saturating_mul(100)
+        .max(10000);
+    for number in 1..=2 {
+        if driver.stopped {
+            reopen(driver, context)?;
+            if context.parallel {
+                let primed = driver.request(json!({"op":"prime"}), Duration::MAX, Duration::MAX)?;
+                if primed.timeout {
+                    return Err(Failure::new(
+                        "EC_MUTATION_BASELINE",
+                        "Restarted worker probe timed out",
+                    ));
+                }
+                primed.check_error()?;
+                expected(&primed.messages, &["progress", "primed", "done"], 0)?;
+                mutation::parallel::compatible_probe(
+                    context.baseline,
+                    &execution(only(&primed.messages, "primed")?)?,
+                )
+                .map_err(|message| Failure::new("EC_MUTATION_INPUT", message))?;
+            }
+        }
+        let multiplier = if number == 2 && mutant.attempts[0].status == Status::Timeout {
+            3
+        } else {
+            1
+        };
+        let response=driver.request(json!({"op":"run","key":key,"selected":selected,"hitLimit":hit_limit,"multiplier":multiplier}),
+            Duration::from_secs_f64(total_ms*multiplier as f64/1000.0),Duration::from_secs_f64(stall_ms*multiplier as f64/1000.0))?;
+        response.check_error()?;
+        let result = if response.timeout {
+            Execution {
+                selected: selected.clone(),
+                wall_timeout: true,
+                ..Execution::default()
+            }
+        } else {
+            expected(&response.messages, &["progress", "attempt", "done"], 1)?;
+            let value = only(&response.messages, "attempt")?;
+            if value["key"] != json!(key) {
+                return Err(Failure::protocol("Wrong mutant key in response"));
+            }
+            execution(value)?
+        };
+        mutation::validate_execution(&result, &selected).map_err(Failure::protocol)?;
+        if result
+            .hits
+            .keys()
+            .chain(result.static_hits.keys())
+            .chain(result.tests.iter().flat_map(|t| t.hits.keys()))
+            .chain(result.tests.iter().flat_map(|t| t.infected.iter()))
+            .any(|k| !keys.contains(k))
+        {
+            return Err(Failure::protocol("Attempt contains an unknown mutant key"));
+        }
+        let attempt = mutation::judge(&result, &selected, number);
+        let final_result = matches!(attempt.status, Status::Killed | Status::Survived)
+            || attempt.reason.contains("hit limit");
+        mutant.attempts.push(attempt);
+        if final_result || number == 2 {
+            break;
+        }
+    }
+    mutant.status = mutation::confirmed(&mutant.attempts);
+    mutant.killed_by = baseline
+        .tests
+        .iter()
+        .filter(|t| {
+            mutant
+                .attempts
+                .last()
+                .is_some_and(|a| a.killed_by.contains(&t.id))
+        })
+        .map(|t| t.id.clone())
+        .collect();
+    mutant.failed_modules = mutant
+        .attempts
+        .last()
+        .map(|a| a.failed_modules.clone())
+        .unwrap_or_default();
+    if mutant.status == Status::Pending {
+        return Err(Failure::new(
+            "EC_MUTATION_RUNNER",
+            "Mutation attempts produced different failure categories",
+        ));
     }
     Ok(())
 }
