@@ -43,7 +43,12 @@ fn fingerprint(hash: &mut Sha256, bytes: &[u8]) {
     hash.update(bytes);
 }
 
-pub(crate) fn acquire(root: &Path, since: &str, signal: &AtomicI32) -> Result<Changes, String> {
+pub(crate) fn acquire(
+    root: &Path,
+    since: &str,
+    signal: &AtomicI32,
+    cache_directory: Option<&Path>,
+) -> Result<Changes, String> {
     let revision = format!("{since}^{{commit}}");
     let base = git(
         root,
@@ -76,6 +81,9 @@ pub(crate) fn acquire(root: &Path, since: &str, signal: &AtomicI32) -> Result<Ch
     )?;
     let mut files = BTreeMap::new();
     for name in paths(&names)? {
+        if managed_cache_file(root, name, cache_directory) {
+            continue;
+        }
         let patch = git(
             root,
             &[
@@ -111,6 +119,9 @@ pub(crate) fn acquire(root: &Path, since: &str, signal: &AtomicI32) -> Result<Ch
         signal,
     )?;
     for name in paths(&untracked)? {
+        if managed_cache_file(root, name, cache_directory) {
+            continue;
+        }
         fingerprint(&mut hash, name.as_bytes());
         let path = root.join(name);
         let info = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
@@ -169,5 +180,15 @@ pub(crate) fn acquire(root: &Path, since: &str, signal: &AtomicI32) -> Result<Ch
         base,
         fingerprint: format!("{:x}", hash.finalize()),
         files,
+    })
+}
+
+fn managed_cache_file(root: &Path, name: &str, directory: Option<&Path>) -> bool {
+    let path = root.join(name);
+    directory.is_some_and(|directory| {
+        path.parent() == Some(directory)
+            && path
+                .file_name()
+                .is_some_and(crate::mutation_cache::managed_file)
     })
 }

@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { format } from "node:util";
+import { serialize } from "node:v8";
 
 // node_modules/@jridgewell/sourcemap-codec/dist/sourcemap-codec.mjs
 var comma = 44;
@@ -1998,6 +1999,7 @@ var current;
 var infrastructureFailure;
 var warmContext;
 var reuseMode = "fresh_lifecycle_unknown";
+var configurationHash = null;
 var normalize = (s) => s.replaceAll("\\", "/");
 var rel = (file) => normalize(relative2(root, file));
 var hash = (data) => createHash("sha256").update(data).digest("hex");
@@ -2231,6 +2233,44 @@ async function execute(phase, request) {
       reusable = reuseMode === "available";
     }
     timeouts ??= { test: config.testTimeout, hook: config.hookTimeout };
+    if (options.cache) {
+      try {
+        if ([...ctx.projects, ...rootProject ? [rootProject] : []].some((p) => p.config.globalSetup?.length))
+          throw new Error("globalSetup may provide external inputs");
+        const provided = { ...project.getProvidedContext() };
+        delete provided.__errspecMutation;
+        const sequence = { ...config.sequence };
+        delete sequence.sequencer;
+        if (!sequence.shuffle)
+          delete sequence.seed;
+        configurationHash = hash(serialize({
+          provided,
+          env: config.env,
+          include: config.include,
+          exclude: config.exclude,
+          testNamePattern: config.testNamePattern,
+          testTimeout: timeouts.test,
+          hookTimeout: timeouts.hook,
+          retry: config.retry,
+          bail: config.bail,
+          sequence,
+          setupFiles: config.setupFiles.filter((f) => f !== options.setup),
+          globalSetup: config.globalSetup,
+          environment: config.environment,
+          environmentOptions: config.environmentOptions,
+          restoreMocks: config.restoreMocks,
+          clearMocks: config.clearMocks,
+          mockReset: config.mockReset,
+          unstubEnvs: config.unstubEnvs,
+          unstubGlobals: config.unstubGlobals,
+          expect: config.expect,
+          fakeTimers: config.fakeTimers,
+          chaiConfig: config.chaiConfig
+        }));
+      } catch {
+        configurationHash = null;
+      }
+    }
     config.watch = false;
     config.update = false;
     config.snapshotOptions = { ...config.snapshotOptions, updateSnapshot: "none" };
@@ -2301,7 +2341,8 @@ async function execute(phase, request) {
       for (const spec of planned)
         spec.testIds = grouped.get(spec.moduleId);
     }
-    await ctx.runTestSpecifications(planned, true);
+    if (phase !== "inspect")
+      await ctx.runTestSpecifications(planned, true);
     if (state.failure)
       throw state.failure;
     if (infrastructureFailure)
@@ -2334,6 +2375,9 @@ async function execute(phase, request) {
 function send(request, type, payload = {}) {
   protocolWrite(JSON.stringify({ version: PROTOCOL, runId, requestId: request.requestId, type, ...payload }) + `
 `);
+}
+function cacheFacts() {
+  return { version: 1, inputs: [...fingerprints], runnerPackage: packageDir, runtime: { node: process.versions.node, platform: process.platform, arch: process.arch, executable: process.execPath, cwd: process.cwd(), execArgv: process.execArgv, configurationHash, envHash: hash(JSON.stringify(Object.entries(process.env).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))) } };
 }
 async function handle(request) {
   if (request.version !== PROTOCOL || typeof request.runId !== "string" || !Number.isSafeInteger(request.requestId))
@@ -2369,6 +2413,13 @@ async function handle(request) {
   }
   if (!options)
     throw failure("EC_MUTATION_PROTOCOL", "Driver was not opened");
+  if (request.op === "cache-facts") {
+    if (!options.cache)
+      throw failure("EC_MUTATION_PROTOCOL", "Result caching was not requested");
+    verifyInputs();
+    send(request, "done", { count: 0, cacheFacts: cacheFacts() });
+    return;
+  }
   if (request.op === "prepare") {
     plain = await execute("plain", request);
     send(request, "baseline", { execution: plain });
@@ -2410,7 +2461,7 @@ async function handle(request) {
     if (JSON.stringify(identity(plain)) !== JSON.stringify(identity(baseline)) || baseline.errors.length || baseline.failedModules.length)
       throw failure("EC_MUTATION_INSTRUMENTATION", "Probe baseline changed test registration or results");
     writeFileSync(options.state, JSON.stringify({ baseline, plain, testSpecs, projectName, inventory: [...inventory], fingerprints: [...fingerprints] }));
-    send(request, "prepared", { execution: baseline, ...options.reuseSession ? { sessionReuse: reuseMode } : {} });
+    send(request, "prepared", { execution: baseline, ...options.reuseSession ? { sessionReuse: reuseMode } : {}, ...options.cache ? { cacheFacts: cacheFacts() } : {} });
     send(request, "done", { count });
     return;
   }
@@ -2442,6 +2493,8 @@ async function handle(request) {
   }
   if (request.op === "close") {
     verifyInputs();
+    if (options.cache && baseline)
+      await execute("inspect", request);
     if (warmContext) {
       const saved = warmContext;
       warmContext = undefined;
@@ -2450,7 +2503,7 @@ async function handle(request) {
         throw saved.state.failure;
     }
     verifyInputs();
-    send(request, "done", { count: 0 });
+    send(request, "done", { count: 0, ...options.cache ? { cacheFacts: cacheFacts() } : {} });
     return;
   }
   throw failure("EC_MUTATION_PROTOCOL", `Unknown operation: ${request.op}`);

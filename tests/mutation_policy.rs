@@ -30,6 +30,7 @@ fn mutant(key: &str, family: &str, status: Status) -> Mutant {
         attempts: vec![],
         reason: None,
         accepted: None,
+        reused: false,
         critical: false,
         infected_by: None,
     }

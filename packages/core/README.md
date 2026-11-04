@@ -67,7 +67,7 @@ the CLI/API `node` option (or `node` on PATH), before a file can supply its own
 execution option. Loader logs go to stderr, with a 10-second deadline and 1 MiB
 output limits. Configuration scripts run as local project code.
 
-`selectTests`, `formatReport`, plugin APIs, result caches and additional runner
+`selectTests`, `formatReport`, plugin APIs, coverage caches and additional runner
 packages are subsequent implementation stages; this package currently exposes
 `defineConfig` and `runMutation`.
 
@@ -91,8 +91,9 @@ Both unmodified and instrumented baselines still run all selected-project tests.
 This stage reduces mutant trials, rather than claiming baseline or result reuse.
 A completed diff report describes only its selected mutants; consult
 `selection.selected`, `omitted` and `fullRunReason` before interpreting its score.
-Result caches, removed-killer cache invalidation and experimental callgraph
-selection are subsequent stages.
+Exact-input result reuse is available separately with `--cache`; removing tests
+invalidates those results. Scope-aware reuse and experimental callgraph selection
+are subsequent stages.
 
 ## Partial runs and quality gates
 
@@ -121,3 +122,40 @@ fresh contexts; reuse is validated with Vitest 5.0.0 and 5.0.5.
 `engine.sessionReuse` reports `available`, `fresh_global_setup` or
 `fresh_lifecycle_unknown` when requested. Cleanup errors and stale execution
 events invalidate the run. Interrupts/deadlines still terminate the owned group.
+
+## Exact-input result cache
+
+`--cache` / `cache: true` reuses stable first-attempt `Killed` and `Survived`
+outcomes. It is off by default. Use `--no-cache` to override configuration and
+`--cache-dir <directory>` / `cacheDir` to select a dedicated results directory
+(default: `.errspec/mutation-cache`, relative to the project root). Add that
+directory to `.gitignore`. Cache storage is separate from error-contract snapshots
+and cannot overlap the project root or unrelated existing files.
+
+Both current baselines still execute. Reuse requires the same compiled engine,
+Node/runtime and environment, execution options, resolved configuration and
+provided values, project files, runtime inputs and installed dependency contents,
+plus matching candidate, covering and
+selected test IDs. Dependency edges are bound even when packages are shared.
+Gates are recomputed from the current request. `mutant.reused` and `report.cache`
+distinguish cached outcomes from current trials; the baseline remains current.
+
+Unknown versions, malformed records and corrupt files cannot establish a
+detection. They trigger fresh verification. Timeouts, runtime errors, retried
+outcomes, typechecking and reachability are revalidated. Results are saved
+atomically after final input validation, before human acceptance is applied.
+Even an all-hit run refreshes source/test discovery at the end. Input changes
+invalidate reused evidence; uncertain cache inputs disable reuse instead.
+
+This stage assumes deterministic tests whose inputs are represented by the
+project, installed dependencies and acquired runtime files/environment. Keep
+cache disabled for uncontrolled external inputs. Node preload hooks or NODE_PATH
+that hide dependency acquisition also retain fresh verification. `globalSetup`
+and configurations whose resolved values cannot be serialized disable the cache
+until their external inputs and lifecycle can be acquired. Persistence errors
+remain visible as incomplete execution.
+
+The first cache is deliberately strict within a checkout: position-only edits
+keep mutant IDs but invalidate results. Coverage reuse, cross-checkout reuse,
+scope-aware invalidation and experimental callgraph selection are subsequent
+stages, not provided by this initial cache.

@@ -7,6 +7,7 @@ mod input;
 mod mutate;
 mod mutation_actions;
 mod mutation_api;
+mod mutation_cache;
 mod mutation_config;
 mod mutation_git;
 mod mutation_source;

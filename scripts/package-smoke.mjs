@@ -170,16 +170,20 @@ assert.equal(result.report.diagnostics[0].code,'EC_MUTATION_CONFIG');
 import assert from 'node:assert/strict';
 import {defineConfig,runMutation} from '@errspec/core';
 const diff=process.argv.includes('--diff');
-const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},reuseSession:true,...(diff?{since:'HEAD',policy:{timeBudget:0}}:{failOnUndetected:true})}));
+const cache=process.argv.includes('--cache'),warm=process.argv.includes('--cached');
+const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},reuseSession:true,cache,...(diff?{since:'HEAD',policy:{timeBudget:0}}:{failOnUndetected:true})}));
 assert.equal(result.exitCode,0);
 assert.equal(result.report.runComplete,true);
 assert.equal(result.report.engine.sessionReuse,'available');
 if(diff){assert.equal(result.report.selection.selected,1);assert.ok(result.report.selection.omitted>0);assert.ok(result.report.mutants.every(m=>m.line===2));}
 else assert.equal(result.report.summary.killed,2);
+if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equal(result.report.cache.reused,warm?2:0);assert.equal(result.report.cache.executed,warm?0:2);assert.equal(result.report.cache.saved,2);}
 `);
     run(process.execPath,["api.mjs"]);
-    extraChecks.push("embedded-mutation-driver","installed-core-mutation");
-    writeFileSync(join(dir,".gitignore"),"node_modules/\ncache/\n");
+    run(process.execPath,["api.mjs","--cache"]);
+    run(process.execPath,["api.mjs","--cache","--cached"]);
+    extraChecks.push("embedded-mutation-driver","installed-core-mutation","installed-core-result-cache");
+    writeFileSync(join(dir,".gitignore"),"node_modules/\ncache/\n.errspec/mutation-cache/\n");
     run("git",["init","--quiet"]);
     run("git",["add","."]);
     run("git",["-c","user.name=Fixture","-c","user.email=fixture@example.invalid","-c","commit.gpgSign=false","commit","--quiet","-m","package baseline"]);

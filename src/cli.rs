@@ -173,6 +173,13 @@ enum Action {
         /// Reuse an instrumented Vitest session with isolated workers.
         #[arg(long, conflicts_with = "no_reuse_session")]
         reuse_session: bool,
+        /// Reuse stable assertion outcomes with exactly matching inputs.
+        #[arg(long, conflicts_with = "no_cache")]
+        cache: bool,
+        #[arg(long)]
+        no_cache: bool,
+        #[arg(long)]
+        cache_dir: Option<PathBuf>,
         #[arg(long)]
         no_reuse_session: bool,
         #[arg(long)]
@@ -335,6 +342,9 @@ impl Cli {
                 no_typecheck: _,
                 weak_mutation,
                 reuse_session,
+                cache,
+                no_cache: _,
+                cache_dir,
                 no_reuse_session: _,
                 no_weak_mutation: _,
                 typecheck_project,
@@ -369,6 +379,8 @@ impl Cli {
                             typecheck,
                             weak_mutation,
                             reuse_session,
+                            cache,
+                            cache_dir,
                             typecheck_project,
                             typecheck_package,
                             policy: (*policy).into(),

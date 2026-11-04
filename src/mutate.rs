@@ -320,10 +320,43 @@ fn run_inner(
     request.root = absolute(request.root)?
         .canonicalize()
         .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e.to_string()))?;
+    if request.cache {
+        let directory = crate::mutation_cache::directory(&request);
+        report.cache = Some(mutation::cache::Info {
+            directory: directory.display().to_string(),
+            ..Default::default()
+        });
+        fs::create_dir_all(&directory)
+            .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
+        let directory = directory
+            .canonicalize()
+            .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
+        if request.root.starts_with(&directory) {
+            return Err(Failure::new(
+                "EC_MUTATION_CONFIG",
+                "cacheDir must not contain the project root",
+            ));
+        }
+        crate::mutation_cache::check_directory(&directory)
+            .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e))?;
+        report.cache.as_mut().unwrap().directory = directory
+            .strip_prefix(&request.root)
+            .unwrap_or(&directory)
+            .display()
+            .to_string();
+        request.cache_dir = Some(directory);
+    }
     let changes = request
         .since
         .as_ref()
-        .map(|since| crate::mutation_git::acquire(&request.root, since, &signal))
+        .map(|since| {
+            crate::mutation_git::acquire(
+                &request.root,
+                since,
+                &signal,
+                request.cache_dir.as_deref().filter(|_| request.cache),
+            )
+        })
         .transpose()
         .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e))?;
     if request.policy.accepted_file.is_none()
@@ -468,6 +501,7 @@ fn run_inner(
             report.mutants.push(Mutant {
                 critical: critical.contains(&candidate.key),
                 accepted: None,
+                reused: false,
                 infected_by: None,
                 candidate,
                 status,
@@ -684,11 +718,40 @@ fn run_inner(
         .policy
         .mutants_per_line
         .map(|maximum| mutation::policy::sample_per_line(&report.mutants, maximum));
+    let mut cache_store = if request.cache {
+        let snapshot = driver.request(json!({"op":"cache-facts"}), startup, startup)?;
+        if snapshot.timeout {
+            return Err(Failure::new(
+                "EC_MUTATION_CACHE",
+                "Cache input acquisition timed out",
+            ));
+        }
+        snapshot.check_error()?;
+        expected(&snapshot.messages, &["done"], 0)?;
+        let facts: crate::mutation_cache::Facts =
+            serde_json::from_value(only(&snapshot.messages, "done")?["cacheFacts"].clone())
+                .map_err(|e| Failure::protocol(e.to_string()))?;
+        match crate::mutation_cache::acquire(&request, &facts, temp.path(), None, &driver.signal) {
+            Ok(stamp) => Some(crate::mutation_cache::load(
+                crate::mutation_cache::directory(&request),
+                stamp,
+                report.cache.as_mut().unwrap(),
+            )),
+            Err(crate::mutation_cache::Error::Unavailable(reason)) => {
+                report.cache.as_mut().unwrap().disabled_reason = Some(reason);
+                None
+            }
+            Err(crate::mutation_cache::Error::Changed(reason)) => {
+                return Err(Failure::new("EC_MUTATION_INPUT", reason));
+            }
+        }
+    } else {
+        None
+    };
     for mutant in &mut report.mutants {
         if mutant.status != Status::Pending {
             continue;
         }
-        let key = &mutant.candidate.key;
         let selected = mutant
             .infected_by
             .as_ref()
@@ -696,12 +759,19 @@ fn run_inner(
             .clone();
         if sampled
             .as_ref()
-            .is_some_and(|selected| !selected.contains(key))
+            .is_some_and(|selected| !selected.contains(&mutant.candidate.key))
         {
             mutant.reason = Some("Not selected by per-line sampling".into());
             report.policy.as_mut().unwrap().sampled += 1;
             continue;
         }
+        if let Some(store) = &cache_store
+            && store.data.reuse(&store.stamp.hash, mutant, &selected)
+        {
+            report.cache.as_mut().unwrap().reused += 1;
+            continue;
+        }
+        let key = &mutant.candidate.key;
         if request
             .policy
             .time_budget
@@ -712,6 +782,9 @@ fn run_inner(
             continue;
         }
         let static_files = baseline.static_hits.get(key);
+        if let Some(info) = &mut report.cache {
+            info.executed += 1;
+        }
         let mut durations: Vec<_> = baseline
             .tests
             .iter()
@@ -849,6 +922,7 @@ fn run_inner(
             &request.root,
             request.since.as_ref().unwrap(),
             &driver.signal,
+            request.cache_dir.as_deref().filter(|_| request.cache),
         )
         .map_err(|e| Failure::new("EC_MUTATION_INPUT", e))?;
         if current != original {
@@ -856,6 +930,44 @@ fn run_inner(
                 "EC_MUTATION_INPUT",
                 "Git selection inputs changed during execution",
             ));
+        }
+    }
+    if let Some(store) = &mut cache_store {
+        let facts: crate::mutation_cache::Facts =
+            serde_json::from_value(only(&close.messages, "done")?["cacheFacts"].clone())
+                .map_err(|e| Failure::protocol(e.to_string()))?;
+        let current = crate::mutation_cache::acquire(
+            &request,
+            &facts,
+            temp.path(),
+            Some(&store.stamp.baseline_paths),
+            &driver.signal,
+        );
+        let problem = match current {
+            Ok(stamp) if stamp.hash == store.stamp.hash => None,
+            Ok(_) => Some("Cache inputs changed during execution".to_owned()),
+            Err(crate::mutation_cache::Error::Changed(reason)) => {
+                return Err(Failure::new("EC_MUTATION_INPUT", reason));
+            }
+            Err(crate::mutation_cache::Error::Unavailable(reason)) => Some(reason),
+        };
+        if let Some(reason) = problem {
+            if report.cache.as_ref().unwrap().reused > 0 {
+                report.cache.as_mut().unwrap().invalidated = true;
+                return Err(Failure::new("EC_MUTATION_INPUT", reason));
+            }
+            report.cache.as_mut().unwrap().disabled_reason = Some(reason);
+        } else {
+            store.data.retain(&keys);
+            for mutant in &report.mutants {
+                store.data.record(
+                    mutant,
+                    mutant.infected_by.as_ref().unwrap_or(&mutant.covered_by),
+                );
+            }
+            crate::mutation_cache::save(store)
+                .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
+            report.cache.as_mut().unwrap().saved = store.data.len();
         }
     }
     report.run_complete = true;
