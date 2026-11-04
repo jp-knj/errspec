@@ -57,6 +57,17 @@ fn main() -> ExitCode {
             if let Some(("mutate", command)) = matches.subcommand() {
                 let mut report =
                     errspec::mutation::Report::new(command.get_flag("fail_on_undetected"));
+                report.presentation = errspec::mutation::reporting::Presentation {
+                    root: command
+                        .get_one::<std::path::PathBuf>("root")
+                        .cloned()
+                        .unwrap_or_else(|| ".".into()),
+                    reporters: command
+                        .get_many::<errspec::mutation::reporting::Reporter>("reporter")
+                        .map(|values| values.copied().collect())
+                        .unwrap_or_default(),
+                    directory: command.get_one::<std::path::PathBuf>("report_dir").cloned(),
+                };
                 report.error("EC_MUTATION_CONFIG", error);
                 report.finish();
                 let format = command

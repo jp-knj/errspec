@@ -56,11 +56,14 @@ pub struct Input {
     pub tests_executed: bool,
     pub mutants: Vec<Mutant>,
     pub baseline: Vec<TestResult>,
+    #[serde(default)]
+    pub child_processes: Vec<super::ChildProcess>,
     pub summary: Value,
     pub gate: Value,
     pub diagnostics: Vec<Value>,
     pub policy: Option<Value>,
     pub selection: Option<Value>,
+    pub kill_matrix: Option<Value>,
 }
 #[derive(Default)]
 pub struct Sources {
@@ -167,8 +170,24 @@ fn warnings(input: &Input, sources: &Sources) -> Vec<Value> {
                 .cloned(),
         );
     }
+    out.extend(input.child_processes.iter().map(|child| json!({"kind":"childProcess","file":child.file,"test":child.test,"executable":child.executable,"entries":child.entries,"message":child_process_message(child)})));
     out.extend(input.diagnostics.iter().cloned());
     out
+}
+pub fn child_process_message(child: &super::ChildProcess) -> String {
+    format!(
+        "{} launches {} ({}), which may load {} outside the mutation worker. Mutations are not applied or observed there; review the test before interpreting gaps.",
+        child.file,
+        child.executable,
+        child.method,
+        child.entries.join(", ")
+    )
+}
+fn child_process_candidate(input: &Input, mutant: &Mutant) -> bool {
+    input
+        .child_processes
+        .iter()
+        .any(|child| child.entries.contains(&mutant.candidate.location.file))
 }
 fn threshold(input: &Input, key: &str, default: u64) -> u64 {
     // The upstream MTE schema requires integer thresholds. Preserve fractional policy below.
@@ -193,7 +212,7 @@ pub fn mutation_testing_json(
             "id":mutant.candidate.key,"mutatorName":mutant.candidate.mutator,
             "replacement":mutant.candidate.replacement,"location":location(mutant,sources)?,
             "status":mutant.status,"coveredBy":mutant.covered_by,"killedBy":mutant.killed_by,
-            "statusReason":reason(mutant),"gap":gap(mutant),"reused":mutant.reused,
+            "statusReason":if child_process_candidate(input,mutant) {format!("{}; possibly reached in a child process",reason(mutant))}else{reason(mutant)},"gap":gap(mutant),"reused":mutant.reused,
         }));
     }
     let mut tests: BTreeMap<String, Value> = BTreeMap::new();
@@ -205,13 +224,20 @@ pub fn mutation_testing_json(
             .unwrap()
             .push(json!({"id":test.id,"name":test.name}));
     }
-    Ok(
+    Ok(include_matrix(
         json!({"schemaVersion":"2","framework":{"name":"errspec","version":env!("CARGO_PKG_VERSION")},"projectRoot":root,
             "thresholds":{"high":threshold(input,"thresholdHigh",80),"low":threshold(input,"thresholdLow",60)},
             "files":files,"testFiles":tests,"warnings":warnings(input,sources),
             "errspec":{"runComplete":input.run_complete,"ok":input.ok,"summary":input.summary,"gate":input.gate,"policy":input.policy,"selection":input.selection}
         }),
-    )
+        input,
+    ))
+}
+fn include_matrix(mut report: Value, input: &Input) -> Value {
+    if let Some(matrix) = &input.kill_matrix {
+        report["killMatrix"] = matrix.clone();
+    }
+    report
 }
 fn removal(mutant: &Mutant) -> Option<&'static str> {
     let c = &mutant.candidate;
@@ -269,13 +295,14 @@ pub fn agent(input: &Input, sources: &Sources) -> Result<Value, String> {
         gaps.push(json!({"key":mutant.candidate.key,"gap":gap,"file":mutant.candidate.location.file,
             "line":location["start"]["line"],"column":location["start"]["column"],"location":location,
             "mutator":mutant.candidate.mutator,"original":mutant.candidate.original,"replacement":mutant.candidate.replacement,
-            "scope":scope,"coveredBy":tests,"coveredByCount":mutant.covered_by.len(),"fix":fix(gap),
-            "critical":mutant.critical,"simplify":if mutant.status==Status::Survived {removal(mutant)}else{None},"reason":reason(mutant)}));
+            "scope":scope,"coveredBy":tests,"coveredByCount":mutant.covered_by.len(),"fix":if child_process_candidate(input,mutant) {"An observed child process may load this file without mutation instrumentation. Move the assertion into the runner worker or add an instrumented test before interpreting the gap."}else{fix(gap)},"childProcess":child_process_candidate(input,mutant),
+            "critical":mutant.critical,"simplify":if mutant.status==Status::Survived && !child_process_candidate(input,mutant) {removal(mutant)}else{None},"reason":reason(mutant)}));
     }
-    Ok(
+    Ok(include_matrix(
         json!({"kind":"errspec/mutation-agent","schemaVersion":1,"runComplete":input.run_complete,
         "summary":input.summary,"gate":input.gate,"gaps":gaps,"warnings":warnings(input,sources),"selection":input.selection}),
-    )
+        input,
+    ))
 }
 fn simplify(input: &Input, sources: &Sources) -> Result<String, String> {
     let mut lines = vec![
@@ -284,7 +311,10 @@ fn simplify(input: &Input, sources: &Sources) -> Result<String, String> {
     ];
     let mut count = 0;
     for mutant in &input.mutants {
-        if mutant.status != Status::Survived || mutant.covered_by.is_empty() {
+        if mutant.status != Status::Survived
+            || mutant.covered_by.is_empty()
+            || child_process_candidate(input, mutant)
+        {
             continue;
         }
         let Some(kind) = removal(mutant) else {
@@ -341,7 +371,11 @@ pub fn annotations(input: &Input, sources: &Sources) -> Result<String, String> {
             mutant.candidate.mutator,
             mutant.candidate.original,
             mutant.candidate.replacement,
-            fix(gap),
+            if child_process_candidate(input, mutant) {
+                "Possibly reached in a child process outside mutation instrumentation; inspect the spawning test."
+            } else {
+                fix(gap)
+            },
             mutant.candidate.key
         );
         lines.push(format!(
@@ -370,15 +404,37 @@ pub fn annotations(input: &Input, sources: &Sources) -> Result<String, String> {
     }
     Ok(lines.join("\n"))
 }
+pub fn validate_file(file: &str) -> Result<(), String> {
+    if file.is_empty()
+        || file.len() > 4096
+        || file.contains(['\\', '\0'])
+        || file
+            .split('/')
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+        || !std::path::Path::new(file)
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err("Report source paths must be bounded normalized root-relative paths".into());
+    }
+    Ok(())
+}
+pub fn validate(input: &Input) -> Result<(), String> {
+    if input.kind != "errspec/mutation" || input.schema_version != 1 {
+        return Err("Unsupported mutation report".into());
+    }
+    for mutant in &input.mutants {
+        validate_file(&mutant.candidate.location.file)?;
+    }
+    Ok(())
+}
 pub fn format(
     input: &Input,
     reporter: Reporter,
     sources: &Sources,
     root: &str,
 ) -> Result<String, String> {
-    if input.kind != "errspec/mutation" || input.schema_version != 1 {
-        return Err("Unsupported mutation report".into());
-    }
+    validate(input)?;
     match reporter {
         Reporter::Json => {
             serde_json::to_string_pretty(&mutation_testing_json(input, sources, root)?)
@@ -411,6 +467,13 @@ pub fn format(
                     mutant.candidate.replacement.replace('\n', " "),
                     reason(mutant)
                 ));
+            }
+            if let Some(matrix) = &input.kill_matrix {
+                lines.push(
+                    "kill matrix (observed test relationships; review before changing tests):"
+                        .into(),
+                );
+                lines.push(serde_json::to_string_pretty(matrix).map_err(|e| e.to_string())?);
             }
             for warning in warnings(input, sources) {
                 lines.push(format!(

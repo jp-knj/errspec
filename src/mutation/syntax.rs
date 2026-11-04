@@ -10,6 +10,9 @@ pub struct Metadata {
     pub scopes: BTreeMap<String, Scope>,
     pub owners: BTreeMap<String, String>,
     pub nodes: Vec<SyntaxNode>,
+    /// Literal runtime module specifiers, including side-effect/re-export/literal calls.
+    #[serde(default)]
+    pub dependencies: Vec<String>,
 }
 
 pub fn source_matches(metadata: &Metadata, source: &str) -> bool {

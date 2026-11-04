@@ -25,6 +25,7 @@ fn main() {
             "packages/mutation-driver/dist/driver.mjs",
             "packages/mutation-driver/setup.mjs",
             "packages/mutation-driver/weak-runtime.mjs",
+            "packages/mutation-driver/child-process.mjs",
         ]
         .map(|name| root.join(name)),
     );

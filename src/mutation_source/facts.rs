@@ -275,5 +275,6 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect(),
         nodes,
+        dependencies: dependencies::collect(rules.file),
     }
 }

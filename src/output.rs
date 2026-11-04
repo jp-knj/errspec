@@ -237,6 +237,12 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                     ));
                 }
             }
+            for child in &report.child_processes {
+                lines.push(format!(
+                    "warning: {}",
+                    errspec::mutation::reporting::child_process_message(child)
+                ));
+            }
             for d in &report.diagnostics {
                 lines.push(format!("{}: {}", d.code, d.message));
             }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync,truncateSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -51,12 +51,22 @@ test('real native results render MTE schema, function explanations, simplify can
   assert.deepEqual(JSON.parse(payload),mte);
   // Verify the actual standalone viewer executes and filtering uses the embedded report.
   class Element {constructor(){this.children=[];this.value='';this.listeners={};}append(c){this.children.push(c);}replaceChildren(){this.children=[];}addEventListener(k,fn){this.listeners[k]=fn;}}
-  const nodes=Object.fromEntries(['report-data','summary','warnings','status','query','count','files'].map(k=>[k,new Element()]));
+  const nodes=Object.fromEntries(['report-data','summary','warnings','status','query','count','files','matrix'].map(k=>[k,new Element()]));
   nodes['report-data'].textContent=payload;
   vm.runInNewContext(html.match(/<script>\n([\s\S]*?)<\/script>/)[1],{document:{getElementById:id=>nodes[id],createElement:()=>new Element()}});
   assert.match(nodes.count.textContent,/mutants shown/);assert.ok(nodes.files.children.length>0);
   nodes.query.value='does not exist';nodes.query.listeners.input();assert.equal(nodes.count.textContent,'0 mutants shown');
   assert.equal(JSON.stringify(result.report),native,'formatting must not alter judgments');
+  const matrix={acquisition:'all_covering_tests',rows:[{key:result.report.mutants[0].key,complete:false,selected:[],executed:[],killedBy:[],incompleteReason:'fixture'}],noKills:[],subsumed:[],duplicates:[]};
+  const withMatrix={...result.report,killMatrix:matrix};
+  assert.deepEqual(JSON.parse(await formatReport(withMatrix,{reporter:'json'},transport(root))).killMatrix,matrix);
+  assert.deepEqual(JSON.parse(await formatReport(withMatrix,{reporter:'agent'},transport(root))).killMatrix,matrix);
+  assert.match(await formatReport(withMatrix,{reporter:'text'},transport(root)),/observed test relationships/);
+  const matrixHtml=await formatReport(withMatrix,{reporter:'html'},transport(root));
+  nodes['report-data'].textContent=matrixHtml.match(/<script type="application\/json" id="report-data">([\s\S]*?)<\/script>/)[1];
+  vm.runInNewContext(matrixHtml.match(/<script>\n([\s\S]*?)<\/script>/)[1],{document:{getElementById:id=>nodes[id],createElement:()=>new Element()}});
+  assert.equal(nodes.matrix.children[0].children[0].textContent,'Kill matrix and test relationships');
+  assert.match(nodes.matrix.children[0].children[1].textContent,/advisory/);
 });
 test('CLI saves selected files and keeps agent stdout one JSON document even in GitHub Actions',t=>{
   const root=project(t);
@@ -71,6 +81,8 @@ test('CLI saves selected files and keeps agent stdout one JSON document even in 
   cli(root);assert.match(readFileSync(join(root,'configured/index.html'),'utf8'),/errspec/);
   const replaced=cli(root,['--reporter','agent']);assert.equal(JSON.parse(replaced.stdout).kind,'errspec/mutation-agent');
   cli(root,['--reporter','text,agent'],2);
+  const invalid=cli(root,['--reporter','agent','--config','contract.json'],2);
+  assert.equal(JSON.parse(invalid.stdout).warnings[0].code,'EC_MUTATION_CONFIG');
 });
 test('formatter rejects stale spans and can use saved source snapshots with Unicode positions and inert scripts',async t=>{
   const root=project(t),source='export const title="🐈"; export const enabled = true;\n';
@@ -119,4 +131,27 @@ test('actual Git diff produces automatic annotations while native JSON remains a
   assert.match(text.stdout,/::warning file=src\/value.ts,line=1,col=/);
   const native=cli(root,['--since','HEAD','--format','json'],0,{GITHUB_ACTIONS:'true'});
   assert.equal(JSON.parse(native.stdout).kind,'errspec/mutation');assert.doesNotMatch(native.stdout,/::warning/);
+});
+test('saved report paths cannot read outside the project, including absolute paths and symlinks',async t=>{
+  // No mutation run is needed: this is the formatter acquisition boundary.
+  const root=project(t),outside=realpathSync(mkdtempSync(join(tmpdir(),'errspec-report-outside-')));
+  t.after(()=>rmSync(outside,{recursive:true,force:true}));
+  writeFileSync(join(outside,'private.ts'),'PRIVATE_FILE_CONTENT');
+  symlinkSync(join(outside,'private.ts'),join(root,'src/link.ts'));
+  const report={kind:'errspec/mutation',schemaVersion:1,runComplete:false,ok:false,testsExecuted:false,baseline:[],summary:{},gate:{},diagnostics:[],mutants:[{key:'fixture',file:'src/value.ts',line:1,byteOffset:0,end:0,mutator:'ConditionalExpression',original:'',replacement:'true',placement:'emptyCondition',ignored:null,regex:null,guardOffset:null,status:'Pending',coveredBy:[],killedBy:[],failedModules:[],attempts:[]}]};
+  for(const file of ['../private.ts',join(outside,'private.ts'),'/etc/passwd','./src/value.ts','src//value.ts','src/../value.ts','x'.repeat(4097)]) {
+    const candidate={...report,mutants:[{...report.mutants[0],file}]};
+    await assert.rejects(formatReport(candidate,{reporter:'json'},{binary,cwd:root}),/root-relative/);
+    await assert.rejects(formatReport(candidate,{reporter:'agent',sources:{[file]:'PRIVATE_FILE_CONTENT'}},{binary,cwd:root}),/root-relative/);
+  }
+  const linked={...report,mutants:[{...report.mutants[0],file:'src/link.ts'}]};
+  await assert.rejects(formatReport(linked,{reporter:'json'},{binary,cwd:root}),/outside the project root/);
+  const fifo=join(root,'src/pipe.ts');
+  const pipe=spawnSync('mkfifo',[fifo],{encoding:'utf8'});assert.equal(pipe.status,0,pipe.stderr);
+  await assert.rejects(formatReport({...report,mutants:[{...report.mutants[0],file:'src/pipe.ts'}]},{reporter:'json'},{binary,cwd:root}),/regular file/);
+  writeFileSync(join(root,'src/large.ts'),'');truncateSync(join(root,'src/large.ts'),64*1024*1024+1);
+  await assert.rejects(formatReport({...report,mutants:[{...report.mutants[0],file:'src/large.ts'}]},{reporter:'json'},{binary,cwd:root}),/exceed 64 MiB/);
+  // Explicit in-memory source snapshots require no filesystem reads, including deleted projects.
+  const rendered=await formatReport(linked,{reporter:'json',root:join(root,'missing'),sources:{'src/link.ts':'original snapshot'}},{binary,cwd:root});
+  assert.equal(JSON.parse(rendered).files['src/link.ts'].source,'original snapshot');
 });

@@ -58,7 +58,7 @@
 | Jest 30のnative ESM adapter（実験的） | 未実装 |
 | Playwright TestとVite dev serverのbrowser adapter、fixture、複数project（実験的） | 未実装 |
 | text、mutation-testing-elements形式のJSON・HTML、保存ディレクトリの指定 | 従来の`--format json`を維持。`--reporter text/json/html`、`--report-dir`、MTE schema v2、外部リソース不要のHTMLを提供。実Vitest結果のupstream schema検証・HTML viewer実行を受入テストで確認 |
-| `not detected`／`not infected`／`not reached`の分類、子プロセス内で実行された可能性の警告 | 未実装 |
+| `not detected`／`not infected`／`not reached`の分類、子プロセス内で実行された可能性の警告 | レポートで3区分を表示。実際のNode子プロセス起動をテストへ関連付け、相対script依存のAST閉包に警告。raw argv/envは公開しない。動的な依存名・package/alias・shell展開は推測しない |
 | `--reporter agent`の不足・関数本文・到達テスト・修正案、stdoutとstderrの分離 | `--reporter agent` / `formatReport`で未検出区分、ASTの関数本文、到達テスト、修正案を単一JSONへ出力。GitHub環境でもannotationを混在させない |
 | `--reporter simplify`で削除してもテストが失敗しないコードを一覧化 | 到達済みの生存削除変異を、位置・関数・変異ID・削除内容とともに提示。未到達・Ignoredは含めない |
 | `select-tests`で変更に関係するテストを順位付けし、files／JSONで出力 | 未実装 |

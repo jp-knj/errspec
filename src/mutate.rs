@@ -472,6 +472,10 @@ fn run_inner(
         .unwrap()
         .to_string_lossy()
         .replace('-', "");
+    fs::write(
+        temp.path().join("child-process.mjs"),
+        include_str!("../packages/mutation-driver/child-process.mjs"),
+    )?;
     let mut options = serde_json::to_value(&request).unwrap();
     options["binary"] = json!(std::env::current_exe()?);
     options["engineFingerprint"] = json!(mutation::cache::ENGINE_FINGERPRINT);
@@ -716,6 +720,14 @@ fn run_inner(
         return Err(Failure::protocol("Baseline contains an unknown mutant key"));
     }
     report.baseline = baseline.tests.clone();
+    report.child_processes = plain
+        .child_processes
+        .iter()
+        .chain(&baseline.child_processes)
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     if let Some(store) = &mut cache_store
         && let Some(envelope) = &store.stamp.scope_envelope
     {

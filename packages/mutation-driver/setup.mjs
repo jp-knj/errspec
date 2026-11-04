@@ -1,12 +1,18 @@
 // __VITEST_ENTRY__ is replaced with the selected installation's absolute ESM entry.
-import { inject, TestRunner } from "__VITEST_ENTRY__";
+import { inject, TestRunner, afterAll } from "__VITEST_ENTRY__";
 import { attachWeakBinary } from "./weak-runtime.mjs";
+import { observeChildProcesses } from "./child-process.mjs";
 const context = inject("__errspecMutation");
 if (!context) throw new Error("Missing errspec mutation context");
 const file = TestRunner.getCurrentSuite().file;
 const data = file.meta.__errspecMutation = {
   runId: context.runId, requestId: context.requestId, hits: {}, staticHits: {},
 };
+const stopObserving=observeChildProcesses(fact=>{
+  const task=TestRunner.getCurrentTest();
+  (data.childProcesses ||= []).push({...fact,taskId:task&&!concurrent(file.tasks)?task.id:null});
+});
+afterAll(stopObserving);
 function concurrent(tasks) {
   return tasks?.some(t => t.concurrent || t.tasks && concurrent(t.tasks));
 }

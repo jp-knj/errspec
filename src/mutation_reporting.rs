@@ -9,6 +9,7 @@ use std::{
     collections::BTreeMap,
     fs,
     io::{self, Read, Write},
+    os::unix::fs::OpenOptionsExt,
     path::Path,
     process::ExitCode,
 };
@@ -20,6 +21,8 @@ fn acquire(
     reporter: Reporter,
 ) -> Result<Sources, String> {
     let mut sources = Sources::default();
+    let mut acquired_bytes = 0usize;
+    const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
     if reporter == Reporter::Text
         || reporter == Reporter::Annotations
             && input.selection.is_none()
@@ -35,8 +38,40 @@ fn acquire(
         let text = if let Some(source) = snapshots.get(file) {
             source.clone()
         } else {
-            fs::read_to_string(root.join(file)).map_err(|e|format!("Cannot read report source {file}: {e}. Supply sources with the original snapshots."))?
+            let canonical_root = root
+                .canonicalize()
+                .map_err(|e| format!("Cannot read report project root: {e}"))?;
+            let target = canonical_root.join(file).canonicalize().map_err(|e| format!("Cannot read report source {file}: {e}. Supply sources with the original snapshots."))?;
+            if !target.starts_with(&canonical_root) {
+                return Err(format!(
+                    "Report source {file} resolves outside the project root"
+                ));
+            }
+            let handle = fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+                .open(&target)
+                .map_err(|e| e.to_string())?;
+            let metadata = handle.metadata().map_err(|e| e.to_string())?;
+            if !metadata.is_file() {
+                return Err("Report source must be a regular file".into());
+            }
+            if metadata.len() > (MAX_SOURCE_BYTES - acquired_bytes) as u64 {
+                return Err("Report sources exceed 64 MiB".into());
+            }
+            let mut text = String::new();
+            handle
+                .take((MAX_SOURCE_BYTES - acquired_bytes) as u64 + 1)
+                .read_to_string(&mut text)
+                .map_err(|e| e.to_string())?;
+            text
         };
+        acquired_bytes = acquired_bytes
+            .checked_add(text.len())
+            .ok_or("Report sources exceed 64 MiB")?;
+        if acquired_bytes > MAX_SOURCE_BYTES {
+            return Err("Report sources exceed 64 MiB".into());
+        }
         let scopes = if matches!(reporter, Reporter::Agent | Reporter::Simplify) {
             crate::mutation_source::generate(crate::mutation_source::SourceRequest {
                 file: file.clone(),
@@ -64,6 +99,10 @@ fn render(
     root: &Path,
     snapshots: &BTreeMap<String, String>,
 ) -> Result<String, String> {
+    reporting::validate(input)?;
+    for file in snapshots.keys() {
+        reporting::validate_file(file)?;
+    }
     let sources = acquire(input, root, snapshots, reporter)?;
     reporting::format(input, reporter, &sources, &root.to_string_lossy())
 }

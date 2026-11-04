@@ -34,6 +34,7 @@ jobs:
       - run: cargo build --release --locked
       - run: node --test tests/package.test.mjs
       - run: node scripts/pack.mjs ${{ matrix.target }} target/release/errspec
+      - run: node scripts/report-package-smoke.mjs artifacts/npm/manifest-${{ matrix.target }}.json
       - run: node scripts/package-smoke.mjs artifacts/npm/manifest-${{ matrix.target }}.json
         env:
           ERRSPEC_TYPESCRIPT_PACKAGES: '["${{ github.workspace }}/packages/analysis-driver/node_modules/typescript6","${{ github.workspace }}/packages/analysis-driver/node_modules/typescript7"]'

@@ -100,6 +100,7 @@ export interface MutationReport {
   ok: boolean;
   testsExecuted: boolean;
   baseline: MutationTest[];
+  childProcesses?: {test: string | null; file: string; executable: string; entries: string[]; method: "spawn" | "spawnSync" | "execSync" | "execFileSync"}[];
   summary: {
     total: number; killed: number; survived: number; noCoverage: number;
     timeout: number; runtimeError: number; compileError?: number;

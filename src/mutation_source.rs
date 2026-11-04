@@ -9,6 +9,7 @@ use tsrs_ast::{Kind, Node, SourceFile, is_type_node_kind};
 use tsrs_core::P;
 mod arid;
 mod comments;
+mod dependencies;
 mod facts;
 
 #[derive(Deserialize)]

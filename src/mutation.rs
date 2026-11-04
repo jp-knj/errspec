@@ -113,6 +113,19 @@ pub struct Execution {
     pub wall_timeout: bool,
     #[serde(default)]
     pub module_durations: BTreeMap<String, f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_processes: Vec<ChildProcess>,
+}
+
+/// Observed worker-side spawning, retaining only useful source attribution (never raw argv/env).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChildProcess {
+    pub test: Option<String>,
+    pub file: String,
+    pub executable: String,
+    pub entries: Vec<String>,
+    pub method: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -129,6 +142,32 @@ pub struct Attempt {
 pub fn validate_execution(result: &Execution, selected: &[String]) -> Result<(), String> {
     if result.selected != selected {
         return Err("Driver selected IDs differ from request".into());
+    }
+    for child in &result.child_processes {
+        if child.executable.is_empty()
+            || child.file.is_empty()
+            || !matches!(
+                child.method.as_str(),
+                "spawn" | "spawnSync" | "execSync" | "execFileSync"
+            )
+            || !result.tests.iter().any(|test| test.file == child.file)
+            || child.test.as_ref().is_some_and(|id| {
+                !result
+                    .tests
+                    .iter()
+                    .any(|test| &test.id == id && test.file == child.file && test.started)
+            })
+            || child.entries.is_empty()
+            || child.entries.iter().any(|entry| {
+                entry.is_empty()
+                    || std::path::Path::new(entry).is_absolute()
+                    || entry
+                        .split('/')
+                        .any(|part| matches!(part, ".." | "node_modules"))
+            })
+        {
+            return Err("Invalid child process attribution".into());
+        }
     }
     let mut ids = std::collections::BTreeSet::new();
     if result
@@ -349,6 +388,8 @@ pub struct Report {
     pub ok: bool,
     pub tests_executed: bool,
     pub baseline: Vec<TestResult>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub child_processes: Vec<ChildProcess>,
     pub summary: Summary,
     pub mutants: Vec<Mutant>,
     pub gate: Gate,
@@ -406,6 +447,7 @@ impl Report {
             ok: false,
             tests_executed: false,
             baseline: vec![],
+            child_processes: vec![],
             summary: Summary::default(),
             mutants: vec![],
             gate: Gate {

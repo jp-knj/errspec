@@ -374,7 +374,7 @@ reporters use `errspec mutate --reporter agent,json,html --report-dir reports`:
 - `simplify` lists covered removal mutants that survive. These are review
   candidates; a passing test suite does not establish that deletion is safe.
 - `annotations` writes GitHub warning commands for selected diff gaps and critical
-  gaps. In GitHub Actions, other explicit reporters also emit annotations except
+  gaps. In GitHub Actions, default text and other explicit reporters also emit annotations except
   `agent`, whose stdout remains a single JSON document.
 
 Choose at most one stdout reporter; combine it with `json` and/or `html`.
@@ -403,6 +403,31 @@ keyed by relative report path, if the files have changed or been removed.
 The formatter verifies each original mutation span and line against that snapshot;
 it rejects mismatches instead of attaching stale evidence to changed code. This
 span check does not establish that unrelated source still matches an earlier run.
+Report file names must be normalized root-relative paths (at most 4096 bytes).
+Filesystem targets must resolve inside the canonical project root and be regular
+files; acquired source content is bounded to 64 MiB per formatting request. Explicit
+`sources` snapshots follow the same filename policy and need no filesystem reads.
 Source acquisition for agent/simplify uses AST function boundaries rather than
 line-based guesses. The upstream MTE schema is exported as
 `@errspec/core/report-schema`, with its Apache-2.0 license in the schema directory.
+
+
+Observed child processes are reported only when a worker actually launches a command
+that names a project script. Public attribution contains the test/module, executable
+name, launch method and possible local source files; raw arguments, environment and
+stdio are excluded. Async `spawn`/`fork`/`exec` use the spawn tracing diagnostics channels available in
+the validated Node 24.22 runtime; early Node 24 minors without those publishers
+are not covered by this async observation.
+Node has no corresponding synchronous channel, so the three synchronous exports are
+wrapped while the test module runs and restored afterward. This does not instrument
+code inside the child or change native quality gates.
+
+Literal runtime imports (including side effects), re-exports, `require` and `import`
+expressions extend script entries through relative project script dependencies.
+Type-only imports and text inside literals do not add edges. Computed imports,
+package/alias resolution, shell expansion and scripts outside the project are not
+inferred. A reported file may be loaded by the command; attribution does not prove
+that a particular function ran. Agent/MTE/HTML distinguish this possibility, and
+simplify excludes those files. A command without a discovered project script does
+not create a generic warning. No warning establishes that every subprocess was
+observable or that child execution was safely mutation-tested.
