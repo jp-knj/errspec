@@ -1,21 +1,10 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
-import { accessSync, constants } from "node:fs";
-import { platformPackage } from "../platforms.mjs";
+import { nativeBinary } from "../native.mjs";
 
-const require = createRequire(import.meta.url);
 let binary;
 try {
-  const pkg = platformPackage(
-    process.platform,
-    process.arch,
-    process.platform === "linux"
-      ? process.report.getReport().header.glibcVersionRuntime
-      : undefined,
-  );
-  binary = require.resolve(`${pkg}/bin/errspec`);
-  accessSync(binary, constants.X_OK);
+  binary = nativeBinary();
 } catch (error) {
   console.error(
     `errspec: ${error.message}\nInstall @errspec/cli with optional dependencies enabled. No Rust build is performed during installation.`,

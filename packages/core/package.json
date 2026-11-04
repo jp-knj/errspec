@@ -1,0 +1,35 @@
+{
+  "name": "@errspec/core",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Typed mutation configuration and programmatic errspec execution",
+  "exports": {
+    ".": {
+      "types": "./index.d.mts",
+      "default": "./index.mjs"
+    },
+    "./schema": "./schema/mutation.schema.json"
+  },
+  "files": [
+    "index.mjs",
+    "index.d.mts",
+    "schema",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@errspec/cli": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jp-knj/errspec.git",
+    "directory": "packages/core"
+  }
+}

@@ -295,8 +295,12 @@ pub(crate) fn execute(request: Request) -> Outcome {
         } => Outcome::MutationAction(crate::mutation_actions::accept(
             &root, &file, &keys, &reason,
         )),
-        Request::Mutation(request) => Outcome::Mutation(Box::new(crate::mutate::run(request))),
-        Request::MutationSource => unreachable!("hidden source entry handled by main"),
+        Request::Mutation(request) => {
+            Outcome::Mutation(Box::new(crate::mutation_config::run(*request)))
+        }
+        Request::MutationSource | Request::MutationApi => {
+            unreachable!("hidden source entry handled by main")
+        }
         Request::Contract(request) => {
             let mode = request.command.mode();
             let report = worker(Some("errspec"), move || {

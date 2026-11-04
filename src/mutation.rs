@@ -1,6 +1,7 @@
 //! Mutation results and judgments. No compiler handles, processes, or file I/O.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub mod options;
 pub mod policy;
 
 pub const RULES_VERSION: &str = "1";

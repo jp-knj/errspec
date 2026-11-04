@@ -65,6 +65,8 @@ struct MutationPolicyArgs {
     time_budget: Option<f64>,
     #[arg(long)]
     fail_on_survived: bool,
+    #[arg(long, conflicts_with = "fail_on_survived")]
+    no_fail_on_survived: bool,
     #[arg(long)]
     threshold_high: Option<f64>,
     #[arg(long)]
@@ -83,7 +85,7 @@ impl From<MutationPolicyArgs> for errspec::mutation::policy::Policy {
             only: args.only,
             mutants_per_line: args.mutants_per_line,
             time_budget: args.time_budget,
-            fail_on_survived: args.fail_on_survived,
+            fail_on_survived: args.fail_on_survived && !args.no_fail_on_survived,
             threshold_high: args.threshold_high,
             threshold_low: args.threshold_low,
             threshold_break: args.threshold_break,
@@ -118,6 +120,9 @@ enum Action {
     },
     /// Generate mutations, run Vitest, and report detected and undetected changes.
     Mutate {
+        /// Mutation settings; separate from the error-contract configuration.
+        #[arg(long)]
+        config_file: Option<PathBuf>,
         #[arg(long, default_value = ".")]
         root: PathBuf,
         #[arg(long)]
@@ -136,6 +141,8 @@ enum Action {
         node: PathBuf,
         #[arg(long)]
         fail_on_undetected: bool,
+        #[arg(long, conflicts_with = "fail_on_undetected")]
+        no_fail_on_undetected: bool,
         /// Check each mutant with the project's TypeScript before running it.
         #[arg(long, conflicts_with = "no_typecheck")]
         typecheck: bool,
@@ -146,15 +153,17 @@ enum Action {
         weak_mutation: bool,
         #[arg(long)]
         no_weak_mutation: bool,
-        #[arg(long, requires = "typecheck")]
+        #[arg(long)]
         typecheck_project: Option<PathBuf>,
-        #[arg(long, requires = "typecheck")]
+        #[arg(long)]
         typecheck_package: Option<PathBuf>,
         #[command(flatten)]
         policy: Box<MutationPolicyArgs>,
     },
     #[command(name = "__mutation-source", hide = true)]
     MutationSource,
+    #[command(name = "__mutation-api", hide = true)]
+    MutationApi,
     /// Generate configuration and intentionally failing tests for one exported type.
     Init {
         #[arg(long, default_value = "tsconfig.json")]
@@ -237,7 +246,11 @@ impl From<CliRunner> for Runner {
 
 impl Cli {
     /// Translate CLI syntax once. Execution code never receives clap argument types.
-    pub(crate) fn into_request(self, explicit_config: bool) -> Result<(Request, Format), String> {
+    pub(crate) fn into_request(
+        self,
+        explicit_config: bool,
+        overrides: std::collections::BTreeSet<String>,
+    ) -> Result<(Request, Format), String> {
         if matches!(self.format, Format::Markdown)
             && !matches!(self.command, Action::Coverage { .. })
         {
@@ -279,7 +292,9 @@ impl Cli {
                 ));
             }
             Action::MutationSource => return Ok((Request::MutationSource, self.format)),
+            Action::MutationApi => return Ok((Request::MutationApi, self.format)),
             Action::Mutate {
+                config_file,
                 root,
                 include,
                 exclude,
@@ -289,6 +304,7 @@ impl Cli {
                 vitest_package,
                 node,
                 fail_on_undetected,
+                no_fail_on_undetected: _,
                 typecheck,
                 no_typecheck: _,
                 weak_mutation,
@@ -307,22 +323,26 @@ impl Cli {
                     );
                 }
                 return Ok((
-                    Request::Mutation(MutationRequest {
-                        root,
-                        include,
-                        exclude,
-                        exclude_mutator,
-                        vitest_config,
-                        vitest_project,
-                        vitest_package,
-                        node,
-                        fail_on_undetected,
-                        typecheck,
-                        weak_mutation,
-                        typecheck_project,
-                        typecheck_package,
-                        policy: (*policy).into(),
-                    }),
+                    Request::Mutation(Box::new(MutationRequest {
+                        config_file,
+                        overrides,
+                        options: errspec::mutation::options::Options {
+                            root,
+                            include,
+                            exclude,
+                            exclude_mutator,
+                            vitest_config,
+                            vitest_project,
+                            vitest_package,
+                            node,
+                            fail_on_undetected,
+                            typecheck,
+                            weak_mutation,
+                            typecheck_project,
+                            typecheck_package,
+                            policy: (*policy).into(),
+                        },
+                    })),
                     self.format,
                 ));
             }
