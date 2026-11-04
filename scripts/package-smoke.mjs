@@ -170,9 +170,10 @@ assert.equal(result.report.diagnostics[0].code,'EC_MUTATION_CONFIG');
 import assert from 'node:assert/strict';
 import {defineConfig,runMutation} from '@errspec/core';
 const diff=process.argv.includes('--diff');
-const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},...(diff?{since:'HEAD',policy:{timeBudget:0}}:{failOnUndetected:true})}));
+const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},reuseSession:true,...(diff?{since:'HEAD',policy:{timeBudget:0}}:{failOnUndetected:true})}));
 assert.equal(result.exitCode,0);
 assert.equal(result.report.runComplete,true);
+assert.equal(result.report.engine.sessionReuse,'available');
 if(diff){assert.equal(result.report.selection.selected,1);assert.ok(result.report.selection.omitted>0);assert.ok(result.report.mutants.every(m=>m.line===2));}
 else assert.equal(result.report.summary.killed,2);
 `);

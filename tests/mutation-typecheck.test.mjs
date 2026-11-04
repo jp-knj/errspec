@@ -192,7 +192,7 @@ for (const compiler of compilers) {
     const run = (flags) => {
       const output = spawnSync(
         binary,
-        ["mutate", "--node", process.execPath, "--format", "json", ...flags],
+        ["mutate", "--node", process.execPath, "--format", "json", ...(process.env.ERRSPEC_REUSE_SESSION?["--reuse-session"]:[]), ...flags],
         {
           cwd: root,
           encoding: "utf8",

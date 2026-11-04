@@ -46,6 +46,10 @@ nodeは変異する式・文の範囲、scopeは最も近い名前付き関数�
 
 Vitest、Jest、Playwrightは共通の実行要求と結果へ変換します。Jestはnative ESM、PlaywrightはViteとfixtureを使う方式に限定します。各実行器は独立した状態を持ち、並列枠数、分割、標本、時間予算を実行計画へ反映します。予算で開始しなかった候補はPendingとし、標本と予算の理由を区別します。Pendingが残る場合は全体スコアをnullにし、break閾値とfail-on-undetectedを合格にしません。実行済みの一部だけで100%の全体判定を作りません。
 
+Vitest sessionの再利用は`--reuse-session`／`reuseSession`で有効にし、既定はfreshとします。plain baselineは独立させ、probe以降のcontextだけを保持します。試行ごとにrequest・結果の格納先・provided context・test IDsを更新し、公開APIでテストファイルの収集cacheを消して再列挙します。workerはforks・isolateを維持し、timeoutは保存した初期値から毎回設定します。確認用の試行だけ3倍にし、次の候補へ持ち越しません。
+
+ルートまたは選択projectにglobalSetupがある場合は、各試行のsetup・teardownを維持するためfreshにします。公開の収集cache初期化APIを持たない版もfreshとし、利用可能／globalSetup／API不足の理由をengine.sessionReuseへ示します。保持中のcontextへ実行外のeventや古いrequestのmetadataが届いた場合、今回の検出として数えず未完了にします。closeでは保持中のcontextを終了し、cleanupの失敗を成功に変換しません。
+
 実行器は今回のプロセス群と所有情報を管理します。孤立プロセスの終了には保存した実行IDと起動情報の一致を必要とします。kill matrixでは途中の検出による省略を行わず、最初の検出で終了して得た結果をmatrixとして再利用しません。
 
 ### レポート・API・配布

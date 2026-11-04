@@ -519,6 +519,18 @@ fn run_inner(
         return Err(Failure::protocol("Baseline contains an unknown mutant key"));
     }
     report.baseline = baseline.tests.clone();
+    if request.reuse_session {
+        let mode = only(&prepared.messages, "prepared")?["sessionReuse"]
+            .as_str()
+            .filter(|mode| {
+                matches!(
+                    *mode,
+                    "available" | "fresh_global_setup" | "fresh_lifecycle_unknown"
+                )
+            })
+            .ok_or_else(|| Failure::protocol("Invalid session reuse capability"))?;
+        report.engine.session_reuse = Some(mode.to_owned());
+    }
     let selected_keys: BTreeSet<_> = request.policy.only.iter().cloned().collect();
     if let Some(key) = selected_keys.iter().find(|key| !keys.contains(*key)) {
         return Err(Failure::new(

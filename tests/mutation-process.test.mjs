@@ -18,7 +18,7 @@ function fixture(body) {
   return directory;
 }
 function start(directory) {
-  const child=spawn(binary,["mutate","--root",directory,"--node",process.execPath,"--format","json",...families.flatMap(f=>["--exclude-mutator",f])],
+  const child=spawn(binary,["mutate","--root",directory,"--node",process.execPath,"--format","json",...(process.env.ERRSPEC_REUSE_SESSION?["--reuse-session"]:[]),...families.flatMap(f=>["--exclude-mutator",f])],
     {env:{...process.env,TMPDIR:join(directory,"tmp")},stdio:["ignore","pipe","pipe"]});
   let stdout="",stderr="";child.stdout.on("data",c=>stdout+=c);child.stderr.on("data",c=>stderr+=c);
   const done=new Promise((resolve,reject)=>{child.on("error",reject);child.on("close",(code,signal)=>resolve({code,signal,stdout,stderr}));});

@@ -180,6 +180,9 @@
         "scope",
         null
       ]
+    },
+    "reuseSession": {
+      "type": "boolean"
     }
   },
   "allOf": [
