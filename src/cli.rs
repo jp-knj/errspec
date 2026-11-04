@@ -177,6 +177,11 @@ struct MutationArgs {
     /// Reuse stable assertion outcomes with exactly matching inputs.
     #[arg(long, conflicts_with = "no_cache")]
     cache: bool,
+    /// Allow project-root relocation for path-independent deterministic tests.
+    #[arg(long, conflicts_with = "no_cache_relocation")]
+    cache_relocation: bool,
+    #[arg(long)]
+    no_cache_relocation: bool,
     #[arg(long)]
     no_cache: bool,
     #[arg(long)]
@@ -376,6 +381,8 @@ impl Cli {
                     weak_mutation,
                     reuse_session,
                     cache,
+                    cache_relocation,
+                    no_cache_relocation: _,
                     no_cache: _,
                     cache_dir,
                     full_dry_run,
@@ -419,6 +426,7 @@ impl Cli {
                             weak_mutation,
                             reuse_session,
                             cache,
+                            cache_relocation,
                             cache_dir,
                             full_dry_run,
                             typecheck_project,

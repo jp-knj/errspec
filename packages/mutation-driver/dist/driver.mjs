@@ -2004,6 +2004,12 @@ var configurationHash = null;
 var normalize = (s) => s.replaceAll("\\", "/");
 var rel = (file) => normalize(relative2(root, file));
 var hash = (data) => createHash("sha256").update(data).digest("hex");
+var relocatedPath = (path) => {
+  if (!options.cacheRelocation || !isAbsolute(path))
+    return path;
+  const name = rel(path);
+  return name !== ".." && !name.startsWith("../") && !isAbsolute(name) ? { projectRootRelativePath: name } : path;
+};
 function failure(code, message) {
   const e = new Error(message);
   e.code = code;
@@ -2255,7 +2261,7 @@ async function execute(phase, request) {
           retry: config.retry,
           bail: config.bail,
           sequence,
-          setupFiles: config.setupFiles.filter((f) => f !== options.setup),
+          setupFiles: config.setupFiles.filter((f) => f !== options.setup).map(relocatedPath),
           globalSetup: config.globalSetup,
           environment: config.environment,
           environmentOptions: config.environmentOptions,
@@ -2378,7 +2384,7 @@ function send(request, type, payload = {}) {
 `);
 }
 function cacheFacts() {
-  return { version: 1, inputs: [...fingerprints], runnerPackage: packageDir, runtime: { node: process.versions.node, platform: process.platform, arch: process.arch, executable: process.execPath, cwd: process.cwd(), execArgv: process.execArgv, configurationHash, envHash: hash(JSON.stringify(Object.entries(process.env).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))) } };
+  return { version: 1, inputs: [...fingerprints], runnerPackage: packageDir, runtime: { node: process.versions.node, platform: process.platform, arch: process.arch, executable: process.execPath, cwd: process.cwd(), execArgv: process.execArgv, configurationHash, envHash: hash(JSON.stringify(Object.entries(process.env).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([name, value]) => [name, options.cacheRelocation && ["PWD", "INIT_CWD"].includes(name) ? relocatedPath(value) : value]))) } };
 }
 async function handle(request) {
   if (request.version !== PROTOCOL || typeof request.runId !== "string" || !Number.isSafeInteger(request.requestId))

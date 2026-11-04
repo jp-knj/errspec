@@ -29,6 +29,7 @@ export interface MutationOptions {
   weakMutation?: boolean;
   reuseSession?: boolean;
   cache?: boolean;
+  cacheRelocation?: boolean;
   cacheDir?: string | null;
   fullDryRun?: boolean;
   typecheckProject?: string | null;
@@ -106,6 +107,7 @@ export interface MutationReport {
   workers?: { active: number; recovered: number; unverified: number; endpointUnavailable?: number; warnings?: string[] };
   shard?: { index: number; total: number; algorithm: "sha256_prefix_v1"; eligible: number; selected: number; omitted: number };
   cache?: {
+    relocation?: boolean;
     directory: string; reused: number; executed: number; saved: number;
     invalidated: boolean; fingerprint?: string; disabledReason?: string; warnings?: string[];
     coverageReused?: boolean;

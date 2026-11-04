@@ -371,6 +371,7 @@ fn run_inner(
         let directory = crate::mutation_cache::directory(&request);
         report.cache = Some(mutation::cache::Info {
             directory: directory.display().to_string(),
+            relocation: request.cache_relocation,
             ..Default::default()
         });
         fs::create_dir_all(&directory)

@@ -130,8 +130,38 @@ struct Inputs<'a> {
     cache_directory: &'a Path,
     temp: &'a Path,
     signal: &'a AtomicI32,
+    relocation_root: Option<&'a Path>,
+}
+fn path_identity(path: &Path, relocation_root: Option<&Path>) -> Vec<u8> {
+    let mut identity = vec![];
+    if let Some(relative) = relocation_root.and_then(|root| project_relative(path, root)) {
+        identity.extend_from_slice(b"\0project\0");
+        identity.extend_from_slice(relative.as_os_str().as_encoded_bytes());
+    } else {
+        identity.extend_from_slice(b"\0absolute\0");
+        identity.extend_from_slice(path.as_os_str().as_encoded_bytes());
+    }
+    identity
+}
+fn project_relative<'a>(path: &'a Path, root: &Path) -> Option<&'a Path> {
+    let relative = path.strip_prefix(root).ok()?;
+    (!relative
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir)))
+    .then_some(relative)
+}
+fn relocate_value(value: &mut serde_json::Value, root: &Path) {
+    if let Some(relative) = value
+        .as_str()
+        .and_then(|path| project_relative(Path::new(path), root))
+    {
+        *value = serde_json::json!({"projectRootRelativePath":relative});
+    }
 }
 impl Inputs<'_> {
+    fn path(&mut self, path: &Path) {
+        part(&mut self.hash, &path_identity(path, self.relocation_root));
+    }
     fn interrupted(&self) -> Result<(), Error> {
         if self.signal.load(Ordering::SeqCst) != 0 {
             return Err(Error::Changed("Cache input acquisition interrupted".into()));
@@ -160,10 +190,12 @@ impl Inputs<'_> {
             }
             part(&mut self.hash, b"symlink");
             part(&mut self.hash, relative.as_os_str().as_encoded_bytes());
-            part(
-                &mut self.hash,
-                fs::read_link(path)?.as_os_str().as_encoded_bytes(),
-            );
+            let link = fs::read_link(path)?;
+            if self.relocation_root.is_some() && link.is_absolute() {
+                self.path(&link);
+            } else {
+                part(&mut self.hash, link.as_os_str().as_encoded_bytes());
+            }
             return self.tree(root, &target, visited);
         }
         if info.is_dir() {
@@ -205,12 +237,12 @@ impl Inputs<'_> {
         // Bind every dependency edge, including references to a package already
         // visited through another parent or a cycle.
         part(&mut self.hash, b"package-reference");
-        part(&mut self.hash, path.as_os_str().as_encoded_bytes());
+        self.path(&path);
         if !self.packages.insert(path.clone()) {
             return Ok(());
         }
         part(&mut self.hash, b"package");
-        part(&mut self.hash, path.as_os_str().as_encoded_bytes());
+        self.path(&path);
         self.tree(&path, &path, &mut BTreeSet::new())?;
         let manifest_path = path.join("package.json");
         if fs::metadata(&manifest_path)?.len() > 1024 * 1024 {
@@ -341,6 +373,7 @@ pub(crate) fn acquire(
         cache_directory: &cache_directory,
         temp: &temp,
         signal,
+        relocation_root: options.cache_relocation.then_some(options.root.as_path()),
     };
     part(&mut input.hash, cache::ENGINE_FINGERPRINT.as_bytes());
     let mut settings = serde_json::to_value(options).unwrap();
@@ -357,16 +390,29 @@ pub(crate) fn acquire(
     ] {
         settings.as_object_mut().unwrap().remove(field);
     }
+    if options.cache_relocation {
+        for field in [
+            "root",
+            "node",
+            "vitestConfig",
+            "vitestPackage",
+            "typecheckProject",
+            "typecheckPackage",
+        ] {
+            relocate_value(&mut settings[field], &options.root);
+        }
+    }
     part(&mut input.hash, &serde_json::to_vec(&settings).unwrap());
-    part(
-        &mut input.hash,
-        std::env::current_dir()?.as_os_str().as_encoded_bytes(),
-    );
+    input.path(&std::env::current_dir()?);
     let mut environment: Vec<_> = std::env::vars_os().collect();
     environment.sort();
     for (name, value) in environment {
         part(&mut input.hash, name.as_encoded_bytes());
-        part(&mut input.hash, value.as_encoded_bytes());
+        if options.cache_relocation && (name == "PWD" || name == "INIT_CWD") {
+            input.path(Path::new(&value));
+        } else {
+            part(&mut input.hash, value.as_encoded_bytes());
+        }
     }
     // NODE_PATH and preload hooks can acquire undeclared dependencies outside the
     // package graph. Keep execution fresh rather than guessing that graph.
@@ -384,10 +430,13 @@ pub(crate) fn acquire(
             "Node preload hooks prevent complete dependency acquisition".into(),
         ));
     }
-    part(
-        &mut input.hash,
-        &serde_json::to_vec(&facts.runtime).unwrap(),
-    );
+    let mut runtime = serde_json::to_value(&facts.runtime).unwrap();
+    if options.cache_relocation {
+        for field in ["cwd", "executable"] {
+            relocate_value(&mut runtime[field], &options.root);
+        }
+    }
+    part(&mut input.hash, &serde_json::to_vec(&runtime).unwrap());
     if !options.root.join("package.json").is_file() {
         return Err(Error::Unavailable(
             "A project package.json is required for dependency acquisition".into(),
@@ -448,7 +497,7 @@ pub(crate) fn acquire(
         }
         if baseline_paths.contains(&path) {
             part(&mut input.hash, b"resolved");
-            part(&mut input.hash, path.as_os_str().as_encoded_bytes());
+            input.path(&path);
             part(&mut input.hash, value.as_bytes());
         } else if input.files.get(&path) != Some(&value) {
             return Err(Error::Unavailable(format!(
@@ -712,5 +761,67 @@ mod tests {
         .unwrap();
         let after = acquire(&options, &facts, &temp, None, &AtomicI32::new(0)).unwrap();
         assert_ne!(before.hash, after.hash);
+    }
+    #[test]
+    fn relocation_preserves_project_and_dependency_identity_without_ignoring_external_inputs() {
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let temp = base.join("tool");
+        fs::create_dir(&temp).unwrap();
+        let mut stamps = vec![];
+        for name in ["a", "b"] {
+            let root = base.join(name);
+            package(&root, serde_json::json!({"runner":"1"}));
+            let runner = root.join("node_modules/runner");
+            package(&runner, serde_json::json!({}));
+            symlink("index.js", root.join("alias.js")).unwrap();
+            let facts = Facts {
+                version: 1,
+                inputs: vec![(
+                    root.join("index.js"),
+                    digest(&root.join("index.js")).unwrap(),
+                )],
+                runner_package: runner,
+                runtime: Runtime {
+                    node: "24".into(),
+                    platform: "test".into(),
+                    arch: "test".into(),
+                    executable: std::env::current_exe().unwrap(),
+                    cwd: root.clone(),
+                    exec_argv: vec![],
+                    configuration_hash: Some("f".repeat(64)),
+                    env_hash: "f".repeat(64),
+                },
+            };
+            let mut options = Options {
+                root,
+                cache: true,
+                ..Default::default()
+            };
+            let exact = acquire(&options, &facts, &temp, None, &AtomicI32::new(0)).unwrap();
+            options.cache_relocation = true;
+            let portable = acquire(&options, &facts, &temp, None, &AtomicI32::new(0)).unwrap();
+            let mut external = facts.clone();
+            external.runtime.cwd = base.join(name).with_extension("external");
+            let context = acquire(&options, &external, &temp, None, &AtomicI32::new(0)).unwrap();
+            fs::write(
+                options.root.join("node_modules/runner/index.js"),
+                "export const value=false;",
+            )
+            .unwrap();
+            let dependency = acquire(&options, &facts, &temp, None, &AtomicI32::new(0)).unwrap();
+            stamps.push((exact.hash, portable.hash, context.hash, dependency.hash));
+        }
+        assert_ne!(stamps[0].0, stamps[1].0);
+        assert_eq!(stamps[0].1, stamps[1].1);
+        assert_ne!(stamps[0].2, stamps[1].2);
+        assert_ne!(stamps[0].1, stamps[0].3);
+        assert_ne!(
+            path_identity(
+                Path::new("/project/../outside"),
+                Some(Path::new("/project"))
+            ),
+            path_identity(Path::new("/other/../outside"), Some(Path::new("/other")))
+        );
     }
 }

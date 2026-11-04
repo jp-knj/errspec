@@ -36,9 +36,11 @@ cacheは明示した`--cache`／`cache`だけで有効にし、専用ディレ�
 
 probeの到達・感染記録は`coverage-v1.json`へ別のkindと取得方式で保存します。今回のplain baselineが成功し、入力・全テストのID／名前／file／状態／開始有無・候補参照が一致した場合にだけ再利用し、cache.coverageReusedを示します。task IDは今回の値へ結び直し、timeoutの基準は今回と以前の長い方を使います。不正な参照・件数・状態や削除テストがあれば全probeを取り直します。`--full-dry-run`／`fullDryRun`は結果cacheから独立してprobeを全実行し、`--no-full-dry-run`で設定のtrueを解除できます。
 
-この指紋はビルド時に固定したRust・driver・依存lockとコンパイラ設定の識別子、Node/runtime・環境、実行設定、projectのファイル、今回取得したruntimeファイル、実際に解決したpackageとその内容を結びます。packageの循環と共有を扱い、すでに収集したpackageへの辺も同じ解決先へ結びます。cacheの自己出力と今回の一時ディレクトリを除外し、読み込みにくい入力は再利用しません。初期版は同じcheckoutで入力が完全に一致する場合だけとし、位置だけの変更も再検査します。関数単位・別checkoutの再利用は別段階で追加します。
+この指紋はビルド時に固定したRust・driver・依存lockとコンパイラ設定の識別子、Node/runtime・環境、実行設定、projectのファイル、今回取得したruntimeファイル、実際に解決したpackageとその内容を結びます。packageの循環と共有を扱い、すでに収集したpackageへの辺も同じ解決先へ結びます。cacheの自己出力と今回の一時ディレクトリを除外し、読み込みにくい入力は再利用しません。既定は同じcheckoutで入力が完全に一致する場合だけとし、位置だけの変更も再検査します。別checkoutは下記の明示指定で扱い、関数単位の再利用は後続で追加します。
 
 cacheが全件に命中しても、終了前にテストを実行せずファイル一覧を再収集します。実行後に指紋を再取得し、再利用中の入力変化を未完了にします。cacheの破損や証拠の不一致は今回の実行で検証し直します。保存は最終検証の後に一時ファイルからrenameし、人の承認を適用する前の比較結果を保存します。現在のquality gateと承認は再計算します。外部の制御されない状態に依存するテストはcacheの対象にしません。
+
+project移設は`--cache-relocation`／cacheRelocationの明示指定で許可し、既定は同じcheckoutに限定します。利用条件はproject絶対位置、cwd・PWD・INIT_CWDにテスト・依存の意味が依存しないことです。project内部のpathをtag付き相対identityへ変換し、package間の辺、runtimeと起動位置、既知のrunner setup pathにも同じ境界を適用します。外部path、その他の環境、provide値、設定の任意の値と全ファイル内容は一致を要求します。`..`を含む未解決pathを移設対象にしません。実行pathや利用先のコードは変換せず、指紋だけを変換し、mode自体も指紋とcache.relocationへ記録します。今回のordinary baseline・登録照合・task IDの再結合・終了時の実pathによる入力再取得を維持します。CI固有値が変わる場合も既定では再利用せず、cache保存だけで環境の同一性を推定しません。
 
 Gitの基準と変更行を取得し、nodeまたはscope単位で候補を選択します。検出テストがなくなった候補を再検証へ含め、未収集の変更テストを診断します。callgraph選択は明示した実験的な指定に限定します。承認は識別子と理由の別データとし、古いIDを案内します。
 
