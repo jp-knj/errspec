@@ -1,5 +1,23 @@
 use errspec::mutation::{self, Execution, Status};
 use serde_json::{Value, json};
+
+#[test]
+fn passing_cases_do_not_hide_baseline_module_failures() {
+    let mut baseline:errspec::mutation::Execution=serde_json::from_value(json!({"selected":[],"tests":[{"id":"pass","taskId":"1","file":"passing.test.ts","name":"passes","status":"passed","started":true,"duration":0,"errors":[],"hits":{}}],"failedModules":["missing.test.ts"],"errors":["Cannot resolve missing-dependency"],"staticHits":{},"hits":{},"wallTimeout":false})).unwrap();
+    let message =
+        errspec::mutation::validate_baseline(&baseline, "Unmodified baseline").unwrap_err();
+    assert!(message.contains("missing.test.ts"));
+    assert!(message.contains("Cannot resolve missing-dependency"));
+    baseline.failed_modules.clear();
+    baseline.errors.clear();
+    assert!(errspec::mutation::validate_baseline(&baseline, "Unmodified baseline").is_ok());
+    baseline.tests.clear();
+    assert!(
+        errspec::mutation::validate_baseline(&baseline, "Unmodified baseline")
+            .unwrap_err()
+            .contains("No passing test")
+    );
+}
 use std::{
     io::Write,
     process::{Command, Stdio},

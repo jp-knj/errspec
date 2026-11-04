@@ -152,6 +152,37 @@ pub fn validate_execution(result: &Execution, selected: &[String]) -> Result<(),
     Ok(())
 }
 
+/// An incomplete module can coexist with passing cases. Preserve its actual cause.
+pub fn validate_baseline(result: &Execution, label: &str) -> Result<(), String> {
+    let passed = result
+        .tests
+        .iter()
+        .any(|test| test.started && test.status == "passed");
+    if passed
+        && result.errors.is_empty()
+        && result.failed_modules.is_empty()
+        && !result.tests.iter().any(|test| test.status == "failed")
+    {
+        return Ok(());
+    }
+    let mut reasons = std::collections::BTreeSet::new();
+    if !passed {
+        reasons.insert("No passing test executed".to_owned());
+    }
+    for module in &result.failed_modules {
+        reasons.insert(format!("Test module failed: {module}"));
+    }
+    reasons.extend(result.errors.iter().cloned());
+    for test in result.tests.iter().filter(|test| test.status == "failed") {
+        reasons.insert(format!("{}: {} failed", test.file, test.name));
+        reasons.extend(test.errors.iter().cloned());
+    }
+    Err(format!(
+        "{label} failed:\n{}",
+        reasons.into_iter().collect::<Vec<_>>().join("\n")
+    ))
+}
+
 fn is_timeout(error: &str) -> bool {
     error.contains("ERRSPEC_HIT_LIMIT")
         || error.contains("Test timed out in ")

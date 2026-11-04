@@ -485,7 +485,16 @@ fn run_inner(
             "Baseline or generation timed out",
         ));
     }
-    prepared.check_error()?;
+    if let Err(mut failure) = prepared.check_error() {
+        if failure.code == "EC_MUTATION_BASELINE"
+            && let Ok(value) = only(&prepared.messages, "baseline")
+            && let Ok(plain) = execution(value)
+            && let Err(message) = mutation::validate_baseline(&plain, "Unmodified baseline")
+        {
+            failure.message = message;
+        }
+        return Err(failure);
+    }
     expected(
         &prepared.messages,
         &["progress", "baseline", "file", "prepared", "done"],
@@ -495,19 +504,10 @@ fn run_inner(
     let baseline = execution(only(&prepared.messages, "prepared")?)?;
     mutation::validate_execution(&plain, &[]).map_err(Failure::protocol)?;
     mutation::validate_execution(&baseline, &[]).map_err(Failure::protocol)?;
-    if baseline.tests.iter().any(|t| t.status == "failed")
-        || !baseline
-            .tests
-            .iter()
-            .any(|t| t.started && t.status == "passed")
-        || !baseline.errors.is_empty()
-        || !baseline.failed_modules.is_empty()
-    {
-        return Err(Failure::new(
-            "EC_MUTATION_BASELINE",
-            "Baseline failed or executed no tests",
-        ));
-    }
+    mutation::validate_baseline(&plain, "Unmodified baseline")
+        .map_err(|message| Failure::new("EC_MUTATION_BASELINE", message))?;
+    mutation::validate_baseline(&baseline, "Instrumented baseline")
+        .map_err(|message| Failure::new("EC_MUTATION_BASELINE", message))?;
     if baseline
         .hits
         .keys()

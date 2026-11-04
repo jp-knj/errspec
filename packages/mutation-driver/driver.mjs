@@ -68,6 +68,10 @@ function candidateFiles(excluded) {
   }
   return [...files].sort((a,b)=>rel(a)<rel(b)?-1:rel(a)>rel(b)?1:0);
 }
+function specIdentities(specs) {
+  return specs.map(s=>({file:s.moduleId,project:s.project.config.name||""}))
+    .sort((a,b)=>a.file<b.file?-1:a.file>b.file?1:a.project<b.project?-1:a.project>b.project?1:0);
+}
 function plugin(phase) {
   return {name:"errspec-mutation",enforce:"pre",configResolved(config) {
     if(config.configFile)configFiles.add(realpathSync(config.configFile));
@@ -166,7 +170,7 @@ async function execute(phase,request) {
     if(phase==="plain") {
       const files=candidateFiles(excluded);
       for(const file of files){const source=readFileSync(file,"utf8");inventory.set(file,{source,candidates:[]});remember(file);}
-      testSpecs=specs.map(s=>({file:s.moduleId,project:s.project.config.name||""}));
+      testSpecs=specIdentities(specs);
       for(const file of [...globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",{cwd:root,exclude:["**/node_modules/**"]})])remember(resolve(root,file));
       for(const file of globSync("**/*.snap",{cwd:root,exclude:["**/node_modules/**"]}))remember(resolve(root,file));
       for(let dir=root;;dir=dirname(dir)) {
@@ -174,7 +178,7 @@ async function execute(phase,request) {
         if(dirname(dir)===dir)break;
       }
     } else {
-      const currentSpecs=specs.map(s=>({file:s.moduleId,project:s.project.config.name||""}));
+      const currentSpecs=specIdentities(specs);
       if(JSON.stringify(currentSpecs)!==JSON.stringify(testSpecs)
         ||JSON.stringify(candidateFiles(excluded))!==JSON.stringify([...inventory.keys()]))
         throw failure("EC_MUTATION_INPUT","Source or test file inventory changed during the run");
