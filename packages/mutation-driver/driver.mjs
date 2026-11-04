@@ -38,7 +38,7 @@ function verifyInputs() {
 }
 function native(source,file,validateOnly=false) {
   const result=spawnSync(options.binary,["__mutation-source"], {
-    input:JSON.stringify({source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation}),
+    input:JSON.stringify({source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation,facts:!!options.since}),
     encoding:"utf8",maxBuffer:64*1024*1024,timeout:60000,
   });
   if(result.status!==0) throw failure("EC_MUTATION_INSTRUMENTATION",result.stderr||"Native parser failed");
@@ -257,7 +257,7 @@ async function handle(request) {
         native(entry.emitted.code,rel(file),true);
       }
       const critical=options.policy?.critical.some(pattern=>matchesGlob(rel(file),pattern))?entry.candidates.map(c=>c.key):entry.critical;
-      send(request,"file",{file:rel(file),candidates:entry.candidates,critical});count++;
+      send(request,"file",{file:rel(file),candidates:entry.candidates,critical,...(options.since?{metadata:generated.metadata}: {})});count++;
     }
     baseline=await execute("probe",request);
     const identity=e=>e.tests.map(t=>[t.id,t.status,t.started]);

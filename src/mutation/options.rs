@@ -19,6 +19,8 @@ pub struct Options {
     pub typecheck_project: Option<PathBuf>,
     pub typecheck_package: Option<PathBuf>,
     pub policy: super::policy::Policy,
+    pub since: Option<String>,
+    pub diff_unit: Option<super::selection::Unit>,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -37,12 +39,20 @@ impl Default for Options {
             typecheck_project: None,
             typecheck_package: None,
             policy: Default::default(),
+            since: None,
+            diff_unit: None,
         }
     }
 }
 impl Options {
     pub fn validate(&self) -> Result<(), String> {
         self.policy.validate()?;
+        if self.since.as_ref().is_some_and(|s| s.is_empty()) {
+            return Err("since must not be empty".into());
+        }
+        if self.diff_unit.is_some() && self.since.is_none() {
+            return Err("diffUnit requires since".into());
+        }
         if !self.typecheck && (self.typecheck_project.is_some() || self.typecheck_package.is_some())
         {
             return Err("typecheckProject and typecheckPackage require typecheck".into());

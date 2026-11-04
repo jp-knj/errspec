@@ -55,6 +55,20 @@ enum CliAnalysisEngine {
     Typescript,
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum MutationDiffUnit {
+    Node,
+    Scope,
+}
+impl From<MutationDiffUnit> for errspec::mutation::selection::Unit {
+    fn from(unit: MutationDiffUnit) -> Self {
+        match unit {
+            MutationDiffUnit::Node => Self::Node,
+            MutationDiffUnit::Scope => Self::Scope,
+        }
+    }
+}
+
 #[derive(clap::Args)]
 struct MutationPolicyArgs {
     #[arg(long)]
@@ -120,6 +134,11 @@ enum Action {
     },
     /// Generate mutations, run Vitest, and report detected and undetected changes.
     Mutate {
+        /// Git revision used to select changed mutation nodes or scopes.
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long, value_enum)]
+        diff_unit: Option<MutationDiffUnit>,
         /// Mutation settings; separate from the error-contract configuration.
         #[arg(long)]
         config_file: Option<PathBuf>,
@@ -294,6 +313,8 @@ impl Cli {
             Action::MutationSource => return Ok((Request::MutationSource, self.format)),
             Action::MutationApi => return Ok((Request::MutationApi, self.format)),
             Action::Mutate {
+                since,
+                diff_unit,
                 config_file,
                 root,
                 include,
@@ -327,6 +348,8 @@ impl Cli {
                         config_file,
                         overrides,
                         options: errspec::mutation::options::Options {
+                            since,
+                            diff_unit: diff_unit.map(Into::into),
                             root,
                             include,
                             exclude,

@@ -320,6 +320,12 @@ fn run_inner(
     request.root = absolute(request.root)?
         .canonicalize()
         .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e.to_string()))?;
+    let changes = request
+        .since
+        .as_ref()
+        .map(|since| crate::mutation_git::acquire(&request.root, since, &signal))
+        .transpose()
+        .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e))?;
     if request.policy.accepted_file.is_none()
         && request.root.join("errspec.accepted.json").is_file()
     {
@@ -412,6 +418,8 @@ fn run_inner(
     // Preserve successfully inventoried files even when prepare fails later.
     let mut files = BTreeSet::new();
     let mut keys = BTreeSet::new();
+    let mut syntax = std::collections::BTreeMap::new();
+    let mut sources = std::collections::BTreeMap::new();
     for file in prepared.messages.iter().filter(|m| m["type"] == "file") {
         let name = file["file"]
             .as_str()
@@ -421,6 +429,16 @@ fn run_inner(
         }
         let candidates: Vec<Candidate> = serde_json::from_value(file["candidates"].clone())
             .map_err(|e| Failure::protocol(e.to_string()))?;
+        if changes.is_some() {
+            let metadata: mutation::syntax::Metadata =
+                serde_json::from_value(file["metadata"].clone())
+                    .map_err(|e| Failure::protocol(e.to_string()))?;
+            let source = fs::read_to_string(request.root.join(name))?;
+            mutation::selection::validate(&metadata, &source, &candidates)
+                .map_err(Failure::protocol)?;
+            syntax.insert(name.to_owned(), metadata);
+            sources.insert(name.to_owned(), source);
+        }
         let critical: BTreeSet<String> =
             serde_json::from_value(file.get("critical").cloned().unwrap_or(json!([])))
                 .map_err(|e| Failure::protocol(e.to_string()))?;
@@ -512,6 +530,26 @@ fn run_inner(
         report
             .mutants
             .retain(|m| selected_keys.contains(&m.candidate.key));
+    }
+    if let Some(changes) = &changes {
+        let tests = baseline
+            .tests
+            .iter()
+            .map(|test| test.file.clone())
+            .collect();
+        let (selected, selection) = mutation::selection::select(
+            request.since.as_ref().unwrap(),
+            request.diff_unit.unwrap_or(mutation::selection::Unit::Node),
+            changes,
+            report.mutants.iter().map(|m| &m.candidate),
+            &syntax,
+            &sources,
+            &tests,
+        );
+        report
+            .mutants
+            .retain(|m| selected.contains(&m.candidate.key));
+        report.selection = Some(selection);
     }
     if request.typecheck {
         let response = driver.request(json!({"op":"typecheck", "keys":report.mutants.iter().map(|m| &m.candidate.key).collect::<Vec<_>>()}), Duration::MAX, startup)?;
@@ -794,6 +832,20 @@ fn run_inner(
     }
     close.check_error()?;
     expected(&close.messages, &["done"], 0)?;
+    if let Some(original) = changes {
+        let current = crate::mutation_git::acquire(
+            &request.root,
+            request.since.as_ref().unwrap(),
+            &driver.signal,
+        )
+        .map_err(|e| Failure::new("EC_MUTATION_INPUT", e))?;
+        if current != original {
+            return Err(Failure::new(
+                "EC_MUTATION_INPUT",
+                "Git selection inputs changed during execution",
+            ));
+        }
+    }
     report.run_complete = true;
     if !accepted.is_empty() {
         report.policy.as_mut().unwrap().acceptance =

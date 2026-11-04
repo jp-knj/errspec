@@ -2,17 +2,16 @@
 use crate::request::MutationRequest;
 use errspec::mutation::{Report, options::Options};
 use serde_json::Value;
-use std::os::unix::process::CommandExt;
 use std::{
     collections::BTreeSet,
     fs, io,
     path::Path,
-    process::{Child, Command, Stdio},
+    process::Command,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub(crate) fn run(request: MutationRequest) -> Report {
@@ -142,6 +141,8 @@ fn object_has_root(value: &Value) -> bool {
 pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) {
     for (id, key) in [
         ("root", "root"),
+        ("since", "since"),
+        ("diff_unit", "diffUnit"),
         ("node", "node"),
         ("include", "include"),
         ("exclude", "exclude"),
@@ -180,45 +181,6 @@ pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) 
     }
 }
 
-// Observe completion without reaping first: the child still owns its PID when we
-// terminate the process group. Never signal that numeric group after wait().
-struct OwnedChild(Option<Child>);
-impl OwnedChild {
-    fn completed(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
-        let child = self.0.as_ref().unwrap();
-        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-        if unsafe {
-            libc::waitid(
-                libc::P_PID,
-                child.id(),
-                &mut info,
-                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-            )
-        } == -1
-        {
-            return Err(io::Error::last_os_error());
-        }
-        if unsafe { info.si_pid() } == 0 {
-            return Ok(None);
-        }
-        let mut child = self.0.take().unwrap();
-        unsafe {
-            libc::kill(-(child.id() as i32), libc::SIGKILL);
-        }
-        child.wait().map(Some)
-    }
-}
-impl Drop for OwnedChild {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.0.take() {
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
 struct Signals(Vec<signal_hook::SigId>);
 impl Drop for Signals {
     fn drop(&mut self) {
@@ -236,8 +198,6 @@ fn script(node: &Path, path: &Path) -> Result<Vec<u8>, ConfigFailure> {
             &source,
             include_str!("../packages/mutation-driver/config.mjs"),
         )?;
-        let out = dir.path().join("output");
-        let err = dir.path().join("error");
         let mut handlers = Signals(vec![]);
         for number in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
             handlers.0.push(signal_hook::flag::register_usize(
@@ -246,46 +206,23 @@ fn script(node: &Path, path: &Path) -> Result<Vec<u8>, ConfigFailure> {
                 number as usize,
             )?);
         }
-        let mut child = OwnedChild(Some(
-            Command::new(node)
-                .arg(source)
-                .arg(path)
-                .stdin(Stdio::null())
-                .stdout(fs::File::create(&out)?)
-                .stderr(fs::File::create(&err)?)
-                .process_group(0)
-                .spawn()?,
-        ));
-        let start = Instant::now();
-        let status = loop {
-            if signal.load(Ordering::SeqCst) != 0 {
-                return Err(io::Error::other("Configuration loading interrupted"));
-            }
-            if start.elapsed() > Duration::from_secs(10) {
-                return Err(io::Error::other("Configuration loading timed out"));
-            }
-            if fs::metadata(&out)?.len() > 1024 * 1024 || fs::metadata(&err)?.len() > 1024 * 1024 {
-                return Err(io::Error::other("Configuration output exceeds 1 MiB"));
-            }
-            if let Some(status) = child.completed()? {
-                break status;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        drop(child);
-        if fs::metadata(&out)?.len() > 1024 * 1024 || fs::metadata(&err)?.len() > 1024 * 1024 {
-            return Err(io::Error::other("Configuration output exceeds 1 MiB"));
-        }
-        let logs = fs::read_to_string(err)?;
+        let output = crate::owned_process::capture(
+            Command::new(node).arg(source).arg(path),
+            Duration::from_secs(10),
+            1024 * 1024,
+            || signal.load(Ordering::SeqCst) != 0,
+        )?;
+        let logs = String::from_utf8_lossy(&output.stderr);
         if !logs.is_empty() {
             eprint!("{logs}");
         }
-        if !status.success() {
+        if !output.status.success() {
             return Err(io::Error::other(format!(
-                "Configuration loader exited {status}"
+                "Configuration loader exited {}",
+                output.status
             )));
         }
-        fs::read(out)
+        Ok(output.stdout)
     };
     invoke().map_err(|e| ConfigFailure {
         message: format!("{}: {e}", path.display()),
