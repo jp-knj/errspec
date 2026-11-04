@@ -180,6 +180,11 @@ enum Action {
         no_cache: bool,
         #[arg(long)]
         cache_dir: Option<PathBuf>,
+        /// Refresh observations from all tests even when coverage is cached.
+        #[arg(long, conflicts_with = "no_full_dry_run")]
+        full_dry_run: bool,
+        #[arg(long)]
+        no_full_dry_run: bool,
         #[arg(long)]
         no_reuse_session: bool,
         #[arg(long)]
@@ -345,6 +350,8 @@ impl Cli {
                 cache,
                 no_cache: _,
                 cache_dir,
+                full_dry_run,
+                no_full_dry_run: _,
                 no_reuse_session: _,
                 no_weak_mutation: _,
                 typecheck_project,
@@ -381,6 +388,7 @@ impl Cli {
                             reuse_session,
                             cache,
                             cache_dir,
+                            full_dry_run,
                             typecheck_project,
                             typecheck_package,
                             policy: (*policy).into(),

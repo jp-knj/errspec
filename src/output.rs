@@ -163,6 +163,11 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                     "cache: {} reused, {} executed, {} records saved",
                     cache.reused, cache.executed, cache.saved
                 ));
+                if cache.coverage_reused {
+                    lines.push(
+                        "  reused probe observations (current ordinary baseline passed)".into(),
+                    );
+                }
                 if let Some(reason) = &cache.disabled_reason {
                     lines.push(format!("  cache disabled: {reason}"));
                 }

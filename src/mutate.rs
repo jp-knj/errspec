@@ -252,9 +252,9 @@ impl Driver {
                         timeout: false,
                     });
                 }
-                Some("baseline" | "prepared" | "file" | "attempt" | "typechecked") => {
-                    messages.push(message)
-                }
+                Some(
+                    "baseline" | "prepared" | "file" | "attempt" | "typechecked" | "discovered",
+                ) => messages.push(message),
                 _ => return Err(Failure::protocol("Unknown driver message")),
             }
         }
@@ -443,7 +443,11 @@ fn run_inner(
     report.engine.node = info["node"].as_str().map(String::from);
     report.engine.vitest = info["vitest"].as_str().map(String::from);
     // Baselines use the project's runner timeouts, not a whole-run time budget.
-    let prepared = driver.request(json!({"op":"prepare"}), Duration::MAX, Duration::MAX)?;
+    let mut prepared = driver.request(
+        json!({"op":if request.cache {"discover"} else {"prepare"}}),
+        Duration::MAX,
+        Duration::MAX,
+    )?;
     report.tests_executed |= prepared.messages.iter().any(|m| m["type"] == "progress");
     if let Some(value) = prepared.messages.iter().find(|m| m["type"] == "baseline") {
         report.baseline = execution(value)?.tests;
@@ -457,7 +461,7 @@ fn run_inner(
         let name = file["file"]
             .as_str()
             .ok_or_else(|| Failure::protocol("Missing inventory filename"))?;
-        if !files.insert(name) {
+        if !files.insert(name.to_owned()) {
             return Err(Failure::protocol("Duplicate inventory file"));
         }
         let candidates: Vec<Candidate> = serde_json::from_value(file["candidates"].clone())
@@ -529,10 +533,83 @@ fn run_inner(
         }
         return Err(failure);
     }
+    let mut cache_store = None;
+    if request.cache {
+        expected(
+            &prepared.messages,
+            &["progress", "baseline", "file", "discovered", "done"],
+            files.len(),
+        )?;
+        let plain = execution(only(&prepared.messages, "baseline")?)?;
+        mutation::validate_execution(&plain, &[]).map_err(Failure::protocol)?;
+        mutation::validate_baseline(&plain, "Unmodified baseline")
+            .map_err(|message| Failure::new("EC_MUTATION_BASELINE", message))?;
+        let facts: crate::mutation_cache::Facts =
+            serde_json::from_value(only(&prepared.messages, "discovered")?["cacheFacts"].clone())
+                .map_err(|e| Failure::protocol(e.to_string()))?;
+        cache_store = match crate::mutation_cache::acquire(
+            &request,
+            &facts,
+            temp.path(),
+            None,
+            &driver.signal,
+        ) {
+            Ok(stamp) => Some(crate::mutation_cache::load(
+                crate::mutation_cache::directory(&request),
+                stamp,
+                report.cache.as_mut().unwrap(),
+            )),
+            Err(crate::mutation_cache::Error::Unavailable(reason)) => {
+                report.cache.as_mut().unwrap().disabled_reason = Some(reason);
+                None
+            }
+            Err(crate::mutation_cache::Error::Changed(reason)) => {
+                return Err(Failure::new("EC_MUTATION_INPUT", reason));
+            }
+        };
+        let coverage = if request.full_dry_run {
+            None
+        } else {
+            cache_store.as_ref().and_then(|store| {
+                crate::mutation_cache::load_coverage(
+                    &store.directory,
+                    report.cache.as_mut().unwrap(),
+                )
+                .and_then(|file| {
+                    let reused = file.reuse(&store.stamp.hash, &plain, &keys);
+                    if reused.is_none() {
+                        report.cache.as_mut().unwrap().warnings.push(
+                            "Coverage inputs or observations changed; refreshing observations"
+                                .into(),
+                        );
+                    }
+                    reused
+                })
+            })
+        };
+        report.cache.as_mut().unwrap().coverage_reused = coverage.is_some();
+        let probe = driver.request(
+            json!({"op":"probe","coverage":coverage}),
+            Duration::MAX,
+            Duration::MAX,
+        )?;
+        if probe.timeout {
+            return Err(Failure::new(
+                "EC_MUTATION_BASELINE",
+                "Probe baseline timed out",
+            ));
+        }
+        probe.check_error()?;
+        expected(&probe.messages, &["progress", "prepared", "done"], 0)?;
+        prepared
+            .messages
+            .retain(|m| m["type"] != "done" && m["type"] != "discovered");
+        prepared.messages.extend(probe.messages);
+    }
     expected(
         &prepared.messages,
         &["progress", "baseline", "file", "prepared", "done"],
-        files.len(),
+        if request.cache { 0 } else { files.len() },
     )?;
     let plain = execution(only(&prepared.messages, "baseline")?)?;
     let baseline = execution(only(&prepared.messages, "prepared")?)?;
@@ -718,36 +795,6 @@ fn run_inner(
         .policy
         .mutants_per_line
         .map(|maximum| mutation::policy::sample_per_line(&report.mutants, maximum));
-    let mut cache_store = if request.cache {
-        let snapshot = driver.request(json!({"op":"cache-facts"}), startup, startup)?;
-        if snapshot.timeout {
-            return Err(Failure::new(
-                "EC_MUTATION_CACHE",
-                "Cache input acquisition timed out",
-            ));
-        }
-        snapshot.check_error()?;
-        expected(&snapshot.messages, &["done"], 0)?;
-        let facts: crate::mutation_cache::Facts =
-            serde_json::from_value(only(&snapshot.messages, "done")?["cacheFacts"].clone())
-                .map_err(|e| Failure::protocol(e.to_string()))?;
-        match crate::mutation_cache::acquire(&request, &facts, temp.path(), None, &driver.signal) {
-            Ok(stamp) => Some(crate::mutation_cache::load(
-                crate::mutation_cache::directory(&request),
-                stamp,
-                report.cache.as_mut().unwrap(),
-            )),
-            Err(crate::mutation_cache::Error::Unavailable(reason)) => {
-                report.cache.as_mut().unwrap().disabled_reason = Some(reason);
-                None
-            }
-            Err(crate::mutation_cache::Error::Changed(reason)) => {
-                return Err(Failure::new("EC_MUTATION_INPUT", reason));
-            }
-        }
-    } else {
-        None
-    };
     for mutant in &mut report.mutants {
         if mutant.status != Status::Pending {
             continue;
@@ -952,7 +999,9 @@ fn run_inner(
             Err(crate::mutation_cache::Error::Unavailable(reason)) => Some(reason),
         };
         if let Some(reason) = problem {
-            if report.cache.as_ref().unwrap().reused > 0 {
+            if report.cache.as_ref().unwrap().reused > 0
+                || report.cache.as_ref().unwrap().coverage_reused
+            {
                 report.cache.as_mut().unwrap().invalidated = true;
                 return Err(Failure::new("EC_MUTATION_INPUT", reason));
             }
@@ -966,6 +1015,8 @@ fn run_inner(
                 );
             }
             crate::mutation_cache::save(store)
+                .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
+            crate::mutation_cache::save_coverage(store, &baseline)
                 .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
             report.cache.as_mut().unwrap().saved = store.data.len();
         }

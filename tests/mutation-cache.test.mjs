@@ -29,9 +29,59 @@ test("cache is opt-in, preserves current baselines, and labels reused assertion 
   assert.equal(cold.cache.executed,cold.summary.killed);assert.equal(cold.cache.reused,0);assert.ok(cold.cache.saved>0);
   assert.equal(warm.cache.disabledReason,undefined,JSON.stringify(warm.cache));
   assert.equal(warm.cache.executed,0);assert.equal(warm.cache.reused,cold.summary.killed);
+  assert.equal(warm.cache.coverageReused,true);
   assert.equal(warm.testsExecuted,true);assert.equal(warm.baseline.length,1);
   assert.ok(warm.mutants.every(m=>m.reused===true));
   assert.deepEqual(warm.mutants.map(m=>[m.key,m.status,m.killedBy]),cold.mutants.map(m=>[m.key,m.status,m.killedBy]));
+});
+test("coverage reuse skips only the probe and full dry runs refresh it independently",{timeout:60000},t=>{
+  const root=fixture(t),control=realpathSync(mkdtempSync(join(tmpdir(),"errspec-probe-calls-"))),calls=join(control,"calls");
+  t.after(()=>rmSync(control,{recursive:true,force:true}));writeFileSync(calls,"");
+  writeFileSync(join(root,"value.test.ts"),`import {appendFileSync} from 'node:fs';import {test,expect} from 'vitest';import {add} from './src/value';test('adds',()=>{appendFileSync(${JSON.stringify(calls)},'x');expect(add(2,3)).toBe(5)});`);
+  const cold=run(root,["--cache"]);assert.equal(cold.cache.coverageReused,undefined);
+  const count=()=>readFileSync(calls,"utf8").length,before=count();
+  const warm=run(root,["--cache"]);assert.equal(warm.cache.coverageReused,true);assert.equal(count()-before,1);
+  assert.equal(warm.cache.executed,0);assert.equal(warm.testsExecuted,true);
+  const after=count(),refresh=run(root,["--cache","--full-dry-run"]);
+  assert.equal(refresh.cache.coverageReused,undefined);assert.equal(refresh.cache.reused,cold.summary.killed);assert.equal(count()-after,2);
+  writeFileSync(join(root,"errspec.mutation.config.json"),JSON.stringify({cache:true,fullDryRun:true}));
+  run(root);assert.equal(run(root,["--no-full-dry-run"]).cache.coverageReused,true);
+});
+test("corrupt coverage refreshes observations and failed current baselines cannot use old evidence",{timeout:60000},t=>{
+  const root=fixture(t);run(root,["--cache"]);
+  writeFileSync(join(root,".errspec/mutation-cache/coverage-v1.json"),"{bad");
+  const report=run(root,["--cache"]);assert.equal(report.cache.coverageReused,undefined);
+  assert.ok(report.cache.warnings.some(w=>w.startsWith("Coverage cache")));assert.ok(report.summary.killed>0);
+  writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";test("broken",()=>expect(1).toBe(2));');
+  const failed=run(root,["--cache"],2);assert.equal(failed.runComplete,false);assert.equal(failed.summary.score,null);
+  assert.equal(failed.cache.reused,0);assert.equal(failed.cache.coverageReused,undefined);
+});
+test("cached probe observations preserve weak infection and static/concurrent attribution",{timeout:60000},t=>{
+  for(const mode of ["weak","static-concurrent"]){
+    const root=fixture(t);
+    if(mode==="weak"){
+      writeFileSync(join(root,"src/value.ts"),'export const add=(a:number,b:number)=>a+b;');
+      writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";import {add} from "./src/value";test("adds",()=>expect(add(2,0)).toBe(2));');
+    }else{
+      writeFileSync(join(root,"src/value.ts"),'const base=true?1:0;export const add=(a:number,b:number)=>a+b+base;');
+      writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";import {add} from "./src/value";test.concurrent("adds",()=>expect(add(2,3)).toBe(6));test.concurrent("adds again",()=>expect(add(1,2)).toBe(4));');
+    }
+    const args=["--cache",...(mode==="weak"?["--weak-mutation"]:[])],cold=run(root,args),warm=run(root,args);
+    assert.equal(warm.cache.coverageReused,true);assert.equal(warm.cache.executed,0);
+    assert.deepEqual(warm.mutants.map(m=>[m.key,m.status,m.coveredBy,m.infectedBy]),cold.mutants.map(m=>[m.key,m.status,m.coveredBy,m.infectedBy]));
+    if(mode==="weak")assert.ok(warm.mutants.some(m=>m.reason?.startsWith("not infected")));
+  }
+});
+for(const major of [5,6,7])test(`TS ${major} typechecking remains current with cached probe and trial results`,{timeout:60000},t=>{
+  const root=fixture(t),source='export const add=(a:number,b:number):number=>a+b;';
+  writeFileSync(join(root,"src/value.ts"),source);
+  writeFileSync(join(root,"tsconfig.json"),JSON.stringify({compilerOptions:{strict:true,noUncheckedIndexedAccess:true,target:"ES2022",module:"ESNext",moduleResolution:"Bundler",skipLibCheck:true},files:["src/value.ts"]}));
+  const args=["--cache","--typecheck","--typecheck-package",join(repo,`packages/analysis-driver/node_modules/typescript${major}`)];
+  const cold=run(root,args),warm=run(root,args);
+  assert.equal(warm.cache.coverageReused,true);assert.equal(warm.cache.executed,0);assert.equal(warm.cache.reused,cold.summary.killed);
+  assert.ok(warm.typecheck.checked>0);assert.ok(warm.mutants.some(m=>m.status==="CompileError"));
+  assert.deepEqual(warm.mutants.map(m=>[m.key,m.status]),cold.mutants.map(m=>[m.key,m.status]));
+  assert.equal(readFileSync(join(root,"src/value.ts"),"utf8"),source);
 });
 test("dependency contents, configuration and environment changes invalidate stored trials",{timeout:60000},t=>{
   const root=fixture(t),dependency=join(root,"node_modules/local-value");mkdirSync(dependency);
@@ -106,21 +156,31 @@ test("cache storage cannot overlap the project root or unrelated existing data",
   assert.equal(run(root,["--cache","--cache-dir","."],2).testsExecuted,false);
   assert.equal(readFileSync(join(root,"src/value.ts"),"utf8"),"export const add=(a:number,b:number)=>a+b;");
 });
-for(const kind of ["source","test"])test(`all-hit runs still detect a ${kind} added during final inspection`,{timeout:60000},t=>{
+for(const kind of ["source","test","dependency"])test(`reused evidence detects a ${kind} change during final inspection`,{timeout:60000},t=>{
   const root=fixture(t),control=realpathSync(mkdtempSync(join(tmpdir(),"errspec-cache-control-"))),marker=join(control,"enabled");
   t.after(()=>rmSync(control,{recursive:true,force:true}));
   const directory=join(root,"runner"),dist=join(directory,"dist"),vitest=join(repo,"examples/checkout/node_modules/vitest");
   mkdirSync(dist,{recursive:true});
   writeFileSync(join(directory,"package.json"),JSON.stringify({name:"vitest",version:"5.0.5",type:"module",dependencies:{vitest:"5.0.5"}}));
   writeFileSync(join(dist,"index.js"),`export * from ${JSON.stringify(pathToFileURL(join(vitest,"dist/index.js")).href)};`);
-  const path=join(root,kind==="source"?"src/added.ts":"new.test.ts");
-  const code=kind==="source"?"export const added=true;":'import {test} from "vitest";test("new",()=>{});';
+  if(kind==="dependency"){
+    const dependency=join(root,"node_modules/local-value");mkdirSync(dependency);
+    writeFileSync(join(dependency,"package.json"),JSON.stringify({name:"local-value",version:"1.0.0",type:"module"}));
+    writeFileSync(join(dependency,"index.js"),'export const unused=1;');
+    writeFileSync(join(root,"package.json"),JSON.stringify({type:"module",dependencies:{vitest:"5.0.5","local-value":"1.0.0"}}));
+    writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";test("smoke",()=>expect(1).toBe(1));');
+  }
+  const path=join(root,kind==="source"?"src/added.ts":kind==="test"?"new.test.ts":"node_modules/local-value/index.js");
+  const code=kind==="source"?"export const added=true;":kind==="test"?'import {test} from "vitest";test("new",()=>{});':'export const unused=2;';
   writeFileSync(join(dist,"node.js"),`import {existsSync,writeFileSync} from 'node:fs';import {createVitest as actual} from ${JSON.stringify(pathToFileURL(join(vitest,"dist/node.js")).href)};let contexts=0;export async function createVitest(...args){if(++contexts===3&&existsSync(${JSON.stringify(marker)}))writeFileSync(${JSON.stringify(path)},${JSON.stringify(code)});return actual(...args);}`);
   writeFileSync(join(root,"vitest.config.mjs"),'export default {test:{include:["*.test.ts"]}};');
-  const cold=run(root,["--cache","--vitest-package",directory]);assert.ok(cold.cache.saved>0);
+  const cold=run(root,["--cache","--vitest-package",directory]);
+  if(kind==="dependency")assert.ok(cold.summary.noCoverage>0);else assert.ok(cold.cache.saved>0);
   writeFileSync(marker,"enabled");
   const report=run(root,["--cache","--vitest-package",directory],2);
-  assert.ok(report.cache.reused>0,JSON.stringify(report.cache));
+  assert.equal(report.cache.coverageReused,true,JSON.stringify(report.cache));
+  if(kind==="dependency"){assert.equal(report.cache.reused,0);assert.equal(report.cache.invalidated,true);}
+  else assert.ok(report.cache.reused>0,JSON.stringify(report.cache));
   assert.equal(report.runComplete,false);assert.equal(report.summary.score,null);
   assert.equal(report.diagnostics[0].code,"EC_MUTATION_INPUT");
 });

@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub mod cache;
+pub mod coverage_cache;
 pub mod options;
 pub mod policy;
 pub mod selection;

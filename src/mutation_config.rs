@@ -159,6 +159,8 @@ pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) 
         ("cache", "cache"),
         ("no_cache", "cache"),
         ("cache_dir", "cacheDir"),
+        ("full_dry_run", "fullDryRun"),
+        ("no_full_dry_run", "fullDryRun"),
         ("no_reuse_session", "reuseSession"),
         ("no_weak_mutation", "weakMutation"),
         ("typecheck_project", "typecheckProject"),

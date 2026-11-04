@@ -130,6 +130,8 @@ pub struct Info {
     pub executed: usize,
     pub saved: usize,
     pub invalidated: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub coverage_reused: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fingerprint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

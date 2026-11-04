@@ -20,10 +20,10 @@
 | 組み込み18種のmutator | `mutate`で提供。規則と安全な配置の条件は[Design](features/mutation-testing/design.md)を参照 |
 | dry run、テスト単位の到達記録、到達したテストだけの実行、モジュール初期化時のmutant | `mutate`で提供。concurrentや初期化時はファイル全体へ選択を広げる |
 | Vitest/Vite内のメモリ上の変換とセッション再利用 | メモリ上の変換と`--reuse-session`によるinstrumented session再利用を提供。既定はfresh。globalSetupがある場合や必要な公開APIがない版ではfreshへ戻し、理由をengine.sessionReuseに示す |
-| 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 位置に依存しないID・AST scope情報、`--cache`による入力完全一致の結果再利用を提供。baselineは毎回実行。coverage再利用・別checkout・scope単位の無効化は後続。契約のsnapshotとは別の形式 |
+| 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 位置に依存しないID・AST scope情報、`--cache`による入力完全一致の結果・probe再利用を提供。ordinary baselineは毎回実行し、全テストの登録と状態を照合。別checkout・scope単位の無効化・pluginは後続。契約のsnapshotとは別の形式 |
 | `--since`によるGit差分の限定、`node`/`scope`単位の選択、検出テストの削除による再検査、未収集の変更テストの警告 | `--since`と`--diff-unit node/scope`を提供。テスト変更・削除やinventory外の変更では全候補を再検査し、未収集の変更テストを警告。検出テストを保存する履歴との照合は後続 |
 | `--only`で指定したmutantだけの再検査 | `mutate --only`で提供。未知のIDはエラー |
-| `--full-dry-run`による到達記録の再取得 | 未実装 |
+| `--full-dry-run`による到達記録の再取得 | 同名の指定と`fullDryRun`設定・APIを提供。結果cacheとは独立に、全テストでprobeを実行する |
 | `--experimental-callgraph`による生存mutantの再検査範囲の限定 | 未実装。`scan`はエラーの伝播先を調査し、テストの省略には使わない |
 | weak mutation、値の差によるテストの絞り込み、`not infected`の判定、無効化 | 比較・算術演算を`--weak-mutation`で提供。適用できない式と初期化・concurrentは全到達テストへ広げる |
 | 利用先のTypeScript 6以前／7以降でのmutantの型検査、`CompileError`、無効化 | `--typecheck` / `--no-typecheck`で提供。TS 5.9.3・6.0.3・7.0.2で検証 |

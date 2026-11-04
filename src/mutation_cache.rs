@@ -310,6 +310,7 @@ pub(crate) fn acquire(
         "cache",
         "cacheDir",
         "failOnUndetected",
+        "fullDryRun",
     ] {
         settings.as_object_mut().unwrap().remove(field);
     }
@@ -466,23 +467,90 @@ pub(crate) fn load(directory: PathBuf, stamp: Stamp, info: &mut cache::Info) -> 
     }
 }
 pub(crate) fn save(store: &Store) -> Result<(), std::io::Error> {
-    fs::create_dir_all(&store.directory)?;
+    save_document(
+        &store.directory,
+        "results-v1.json",
+        "errspec-result-",
+        &store.data,
+    )
+}
+
+pub(crate) fn load_coverage(
+    directory: &Path,
+    info: &mut cache::Info,
+) -> Option<errspec::mutation::coverage_cache::File> {
+    let result = (|| -> Result<_, String> {
+        let path = directory.join("coverage-v1.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+            return Err("Coverage cache is not a regular file".into());
+        }
+        let mut bytes = vec![];
+        file.take(64 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() > 64 * 1024 * 1024 {
+            return Err("Coverage cache exceeds 64 MiB".into());
+        }
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|e| e.to_string())
+    })();
+    match result {
+        Ok(value) => value,
+        Err(reason) => {
+            info.warnings.push(format!(
+                "Coverage cache was not reusable: {reason}; refreshing observations"
+            ));
+            None
+        }
+    }
+}
+pub(crate) fn save_coverage(
+    store: &Store,
+    execution: &errspec::mutation::Execution,
+) -> Result<(), std::io::Error> {
+    let data =
+        errspec::mutation::coverage_cache::File::new(store.stamp.hash.clone(), execution.clone());
+    save_document(
+        &store.directory,
+        "coverage-v1.json",
+        "errspec-coverage-",
+        &data,
+    )
+}
+fn save_document(
+    directory: &Path,
+    name: &str,
+    prefix: &str,
+    data: &impl Serialize,
+) -> Result<(), std::io::Error> {
+    fs::create_dir_all(directory)?;
     let mut temporary = tempfile::Builder::new()
-        .prefix("errspec-result-")
+        .prefix(prefix)
         .suffix(".tmp")
-        .tempfile_in(&store.directory)?;
-    serde_json::to_writer(&mut temporary, &store.data)?;
+        .tempfile_in(directory)?;
+    serde_json::to_writer(&mut temporary, data)?;
     temporary.write_all(b"\n")?;
     temporary.as_file().sync_all()?;
     temporary
-        .persist(store.directory.join("results-v1.json"))
+        .persist(directory.join(name))
         .map_err(|error| error.error)?;
     Ok(())
 }
 
 pub(crate) fn managed_file(name: &std::ffi::OsStr) -> bool {
     name.to_str().is_some_and(|name| {
-        name == "results-v1.json" || name.starts_with("errspec-result-") && name.ends_with(".tmp")
+        matches!(name, "results-v1.json" | "coverage-v1.json")
+            || (name.starts_with("errspec-result-") || name.starts_with("errspec-coverage-"))
+                && name.ends_with(".tmp")
     })
 }
 pub(crate) fn check_directory(path: &Path) -> Result<(), String> {

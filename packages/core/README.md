@@ -67,7 +67,7 @@ the CLI/API `node` option (or `node` on PATH), before a file can supply its own
 execution option. Loader logs go to stderr, with a 10-second deadline and 1 MiB
 output limits. Configuration scripts run as local project code.
 
-`selectTests`, `formatReport`, plugin APIs, coverage caches and additional runner
+`selectTests`, `formatReport`, plugin APIs and additional runner
 packages are subsequent implementation stages; this package currently exposes
 `defineConfig` and `runMutation`.
 
@@ -87,8 +87,8 @@ files absent from the baseline are warnings in `selection.warnings`; warnings
 are separate from quality failures. Invalid Git bases stop before running tests.
 A change to Git inputs during execution invalidates the result.
 
-Both unmodified and instrumented baselines still run all selected-project tests.
-This stage reduces mutant trials, rather than claiming baseline or result reuse.
+Without caching, both baselines run all selected-project tests. The unmodified
+baseline always runs; `--cache` can reuse the instrumented probe separately.
 A completed diff report describes only its selected mutants; consult
 `selection.selected`, `omitted` and `fullRunReason` before interpreting its score.
 Exact-input result reuse is available separately with `--cache`; removing tests
@@ -123,7 +123,7 @@ fresh contexts; reuse is validated with Vitest 5.0.0 and 5.0.5.
 `fresh_lifecycle_unknown` when requested. Cleanup errors and stale execution
 events invalidate the run. Interrupts/deadlines still terminate the owned group.
 
-## Exact-input result cache
+## Exact-input result and coverage caches
 
 `--cache` / `cache: true` reuses stable first-attempt `Killed` and `Survived`
 outcomes. It is off by default. Use `--no-cache` to override configuration and
@@ -132,17 +132,26 @@ outcomes. It is off by default. Use `--no-cache` to override configuration and
 directory to `.gitignore`. Cache storage is separate from error-contract snapshots
 and cannot overlap the project root or unrelated existing files.
 
-Both current baselines still execute. Reuse requires the same compiled engine,
+The ordinary baseline still executes. Reuse requires the same compiled engine,
 Node/runtime and environment, execution options, resolved configuration and
 provided values, project files, runtime inputs and installed dependency contents,
 plus matching candidate, covering and
 selected test IDs. Dependency edges are bound even when packages are shared.
 Gates are recomputed from the current request. `mutant.reused` and `report.cache`
-distinguish cached outcomes from current trials; the baseline remains current.
+distinguish cached outcomes from current trials.
+
+Probe observations use a separate `coverage-v1.json` document. Only after the
+current ordinary baseline passes, matching input fingerprints, candidate references
+and complete test registration/statuses allow reuse. `cache.coverageReused` marks
+this explicitly. Current task IDs and the longer of current/previous timings are
+used for selection and deadlines. Changed or removed tests refresh observations.
+`--full-dry-run` / `fullDryRun: true` always reruns the full instrumented probe,
+independently of result reuse. `--no-full-dry-run` overrides configured true.
 
 Unknown versions, malformed records and corrupt files cannot establish a
 detection. They trigger fresh verification. Timeouts, runtime errors, retried
-outcomes, typechecking and reachability are revalidated. Results are saved
+outcomes and typechecking are revalidated. Coverage with incompatible or malformed
+observations refreshes the full probe. Results and coverage are saved
 atomically after final input validation, before human acceptance is applied.
 Even an all-hit run refreshes source/test discovery at the end. Input changes
 invalidate reused evidence; uncertain cache inputs disable reuse instead.
@@ -156,6 +165,6 @@ until their external inputs and lifecycle can be acquired. Persistence errors
 remain visible as incomplete execution.
 
 The first cache is deliberately strict within a checkout: position-only edits
-keep mutant IDs but invalidate results. Coverage reuse, cross-checkout reuse,
+keep mutant IDs but invalidate results and coverage. Cross-checkout reuse,
 scope-aware invalidation and experimental callgraph selection are subsequent
-stages, not provided by this initial cache.
+stages.
