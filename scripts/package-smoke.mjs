@@ -225,6 +225,25 @@ if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equa
     writeFileSync(defineValue,"0");
     const recompiled=JSON.parse(run(process.execPath,compiledArgs));assert.equal(recompiled.cache.reused,0);assert.equal(recompiled.cache.invalidated,true);assert.equal(recompiled.summary.survived,1);
     extraChecks.push("installed-compilation-cache-invalidation");
+    writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\n");
+    writeFileSync(join(dir,"mutation.test.ts"),'import {test,expect} from "vitest";import {add} from "./src/mutation";test("adds",()=>expect(add(2,3)).toBe(5));');
+    writeFileSync(join(dir,"vitest.config.mjs"),'export default {test:{include:["mutation.test.ts"]}};');
+    writeFileSync(join(dir,"scope-api.mjs"),`
+import assert from 'node:assert/strict';
+import {defineConfig,runMutation} from '@errspec/core';
+const moved=process.argv.includes('--moved');
+const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},cache:true,cacheScope:true}));
+assert.equal(result.exitCode,0);assert.equal(result.report.runComplete,true);
+assert.equal(result.report.summary.killed,2);assert.equal(result.report.cache.scope,true);
+assert.equal(result.report.cache.disabledReason,undefined);
+assert.equal(result.report.cache.reused,moved?2:0);assert.equal(result.report.cache.executed,moved?0:2);
+assert.equal(result.report.cache.scopeReused,moved?2:undefined);
+assert.equal(result.report.cache.coverageReused,undefined);
+`);
+    run(process.execPath,["scope-api.mjs"]);
+    writeFileSync(join(dir,"src/mutation.ts"),"\nexport function add(a:number,b:number){return a+b;}\n");
+    run(process.execPath,["scope-api.mjs","--moved"]);
+    extraChecks.push("installed-core-scoped-position-reuse");
     const installed=JSON.parse(run(process.execPath,["--input-type=module","-e","import {nativeBinary} from '@errspec/cli/native';console.log(JSON.stringify(nativeBinary()));"]));
     run(process.execPath,["--test",fileURLToPath(new URL("../tests/mutation-ownership.test.mjs",import.meta.url))],0,{ERRSPEC_BIN:installed});
     extraChecks.push("installed-native-ownership-and-orphan-recovery");

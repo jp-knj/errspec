@@ -188,6 +188,7 @@
       "type": "boolean"
     },
     "cacheRelocation": { "type": "boolean" },
+    "cacheScope": { "type": "boolean" },
     "fullDryRun": {
       "type": "boolean"
     },

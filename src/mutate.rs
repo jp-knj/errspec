@@ -370,6 +370,7 @@ fn run_inner(
     if request.cache {
         let directory = crate::mutation_cache::directory(&request);
         report.cache = Some(mutation::cache::Info {
+            scope: request.cache_scope,
             directory: directory.display().to_string(),
             relocation: request.cache_relocation,
             ..Default::default()
@@ -522,7 +523,7 @@ fn run_inner(
         }
         let candidates: Vec<Candidate> = serde_json::from_value(file["candidates"].clone())
             .map_err(|e| Failure::protocol(e.to_string()))?;
-        if changes.is_some() {
+        if changes.is_some() || request.cache && request.cache_scope {
             let metadata: mutation::syntax::Metadata =
                 serde_json::from_value(file["metadata"].clone())
                     .map_err(|e| Failure::protocol(e.to_string()))?;
@@ -595,6 +596,23 @@ fn run_inner(
         }
         return Err(failure);
     }
+    let projections: crate::mutation_cache::Projections = syntax
+        .iter()
+        .map(|(name, metadata)| {
+            let module = metadata
+                .scopes
+                .get("module")
+                .ok_or_else(|| Failure::protocol("Missing syntax module"))?;
+            Ok((
+                request.root.join(name).canonicalize()?,
+                crate::mutation_cache::Projection {
+                    source_hash: metadata.source_hash.clone(),
+                    semantic_hash: module.effect_hash.clone(),
+                },
+            ))
+        })
+        .collect::<Result<_, Failure>>()?;
+    let projections = (request.cache && request.cache_scope).then_some(&projections);
     let mut cache_store = None;
     if request.cache {
         expected(
@@ -609,12 +627,13 @@ fn run_inner(
         let facts: crate::mutation_cache::Facts =
             serde_json::from_value(only(&prepared.messages, "discovered")?["cacheFacts"].clone())
                 .map_err(|e| Failure::protocol(e.to_string()))?;
-        cache_store = match crate::mutation_cache::acquire(
+        cache_store = match crate::mutation_cache::acquire_scoped(
             &request,
             &facts,
             temp.path(),
             None,
             &driver.signal,
+            projections,
         ) {
             Ok(stamp) => Some(crate::mutation_cache::load(
                 crate::mutation_cache::directory(&request),
@@ -692,6 +711,34 @@ fn run_inner(
         return Err(Failure::protocol("Baseline contains an unknown mutant key"));
     }
     report.baseline = baseline.tests.clone();
+    if let Some(store) = &mut cache_store
+        && let Some(envelope) = &store.stamp.scope_envelope
+    {
+        let mut grouped = std::collections::BTreeMap::new();
+        for mutant in &report.mutants {
+            grouped
+                .entry(mutant.candidate.location.file.clone())
+                .or_insert_with(Vec::new)
+                .push(mutant.candidate.clone());
+        }
+        let source_facts = syntax
+            .iter()
+            .map(|(file, metadata)| {
+                (
+                    file.clone(),
+                    mutation::scope_cache::Source {
+                        text: &sources[file],
+                        metadata,
+                        candidates: grouped.get(file).map(Vec::as_slice).unwrap_or(&[]),
+                    },
+                )
+            })
+            .collect();
+        let context =
+            mutation::scope_cache::from_probe(envelope.clone(), &source_facts, &baseline, true)
+                .map_err(Failure::protocol)?;
+        crate::mutation_cache::load_scope(store, context, report.cache.as_mut().unwrap());
+    }
     if request.reuse_session {
         let mode = only(&prepared.messages, "prepared")?["sessionReuse"]
             .as_str()
@@ -895,6 +942,21 @@ fn run_inner(
             report.cache.as_mut().unwrap().reused += 1;
             continue;
         }
+        if cache_store
+            .as_ref()
+            .and_then(|store| store.scope.as_ref())
+            .is_some_and(|scope| {
+                scope
+                    .previous
+                    .as_ref()
+                    .is_some_and(|data| data.reuse(&scope.context, mutant, &selected))
+            })
+        {
+            let info = report.cache.as_mut().unwrap();
+            info.reused += 1;
+            info.scope_reused += 1;
+            continue;
+        }
         if request.concurrency > 1 {
             jobs.push((index, mutant.clone()));
             continue;
@@ -995,12 +1057,13 @@ fn run_inner(
         let current = if let Some(error) = merge_error {
             Err(error)
         } else {
-            crate::mutation_cache::acquire(
+            crate::mutation_cache::acquire_scoped(
                 &request,
                 &facts,
                 temp.path(),
                 Some(&store.stamp.baseline_paths),
                 &driver.signal,
+                projections,
             )
         };
         let problem = match current {
@@ -1031,7 +1094,9 @@ fn run_inner(
                 .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
             crate::mutation_cache::save_coverage(store, &baseline)
                 .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
-            report.cache.as_mut().unwrap().saved = store.data.len();
+            let scoped = crate::mutation_cache::save_scope(store, &report.mutants)
+                .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
+            report.cache.as_mut().unwrap().saved = store.data.len().max(scoped);
         }
     }
     report.run_complete = true;

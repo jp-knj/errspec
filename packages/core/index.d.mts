@@ -30,6 +30,7 @@ export interface MutationOptions {
   reuseSession?: boolean;
   cache?: boolean;
   cacheRelocation?: boolean;
+  cacheScope?: boolean;
   cacheDir?: string | null;
   fullDryRun?: boolean;
   typecheckProject?: string | null;

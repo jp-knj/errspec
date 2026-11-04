@@ -130,6 +130,10 @@ impl File {
 #[serde(rename_all = "camelCase")]
 pub struct Info {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub scope: bool,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub scope_reused: usize,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub relocation: bool,
     pub directory: String,
     pub reused: usize,
@@ -144,4 +148,7 @@ pub struct Info {
     pub disabled_reason: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+}
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }

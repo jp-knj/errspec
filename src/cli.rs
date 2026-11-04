@@ -182,6 +182,11 @@ struct MutationArgs {
     cache_relocation: bool,
     #[arg(long)]
     no_cache_relocation: bool,
+    /// Reuse unchanged function outcomes with complete, disjoint test-file cohorts.
+    #[arg(long, conflicts_with = "no_cache_scope")]
+    cache_scope: bool,
+    #[arg(long)]
+    no_cache_scope: bool,
     #[arg(long)]
     no_cache: bool,
     #[arg(long)]
@@ -383,6 +388,8 @@ impl Cli {
                     cache,
                     cache_relocation,
                     no_cache_relocation: _,
+                    cache_scope,
+                    no_cache_scope: _,
                     no_cache: _,
                     cache_dir,
                     full_dry_run,
@@ -427,6 +434,7 @@ impl Cli {
                             reuse_session,
                             cache,
                             cache_relocation,
+                            cache_scope,
                             cache_dir,
                             full_dry_run,
                             typecheck_project,

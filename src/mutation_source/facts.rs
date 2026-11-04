@@ -217,6 +217,12 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
             fingerprint(rules, *node, false, &mut full);
             let mut effects = Sha256::new();
             fingerprint(rules, *node, name == "module", &mut effects);
+            // Compiler pragmas can alter behavior without changing syntax. Until
+            // their attachments are acquired, commented files require raw identity.
+            if name == "module" && !comments::acquire(rules.file).is_empty() {
+                effects.update(b"comment-sensitive-source-v1\0");
+                effects.update(rules.file.text().as_bytes());
+            }
             let mut refs = BTreeSet::new();
             let mut unknown = false;
             references(*node, *node, &mut refs, &mut unknown);
