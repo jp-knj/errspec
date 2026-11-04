@@ -7,8 +7,8 @@ use std::{
     collections::BTreeSet,
     fs,
     io::{self, BufRead, BufReader, Read, Write},
-    os::unix::process::CommandExt,
-    path::PathBuf,
+    os::unix::{fs::PermissionsExt, process::CommandExt},
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, ExitCode, Stdio},
     sync::{
         Arc,
@@ -26,7 +26,17 @@ pub(crate) fn source_entry() -> ExitCode {
             io::stdin()
                 .read_to_string(&mut input)
                 .map_err(|e| e.to_string())?;
-            let request = serde_json::from_str(&input).map_err(|e| e.to_string())?;
+            let mut input: Value = serde_json::from_str(&input).map_err(|e| e.to_string())?;
+            if let Some(expected) = input
+                .as_object_mut()
+                .and_then(|object| object.remove("engineFingerprint"))
+                && expected.as_str() != Some(mutation::cache::ENGINE_FINGERPRINT)
+            {
+                return Err(
+                    "EC_MUTATION_INPUT: Native mutation engine changed during execution".into(),
+                );
+            }
+            let request = serde_json::from_value(input).map_err(|e| e.to_string())?;
             mutation_source::generate(request)
         })
         .map_err(|e| e.to_string())
@@ -110,6 +120,8 @@ struct Driver {
     signal: Arc<AtomicI32>,
     stopped: bool,
     started: Arc<AtomicBool>,
+    ownership: crate::mutation_ownership::Launch,
+    endpoint_available: Option<bool>,
 }
 struct Response {
     messages: Vec<Value>,
@@ -130,14 +142,16 @@ impl Response {
 }
 impl Driver {
     fn start(
-        node: &PathBuf,
-        script: &PathBuf,
+        node: &Path,
+        script: &Path,
         run_id: &str,
         signal: Arc<AtomicI32>,
         started: Arc<AtomicBool>,
     ) -> Result<Self, Failure> {
-        let mut child = Command::new(node)
-            .arg(script)
+        let ownership = crate::mutation_ownership::Launch::new(node, script, run_id)?;
+        let mut child = Command::new(std::env::current_exe()?)
+            .arg("__mutation-supervisor")
+            .arg(&ownership.configuration)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -163,6 +177,8 @@ impl Driver {
             signal,
             stopped: false,
             started,
+            ownership,
+            endpoint_available: None,
         })
     }
     fn stop(&mut self) {
@@ -173,6 +189,7 @@ impl Driver {
             }
             let _ = self.child.wait();
             self.stopped = true;
+            self.ownership.cleanup();
         }
     }
     fn request(
@@ -226,6 +243,20 @@ impl Driver {
                 ));
             }
             match message["type"].as_str() {
+                Some("ownership") => {
+                    if self.sequence != 1
+                        || request["op"] != "open"
+                        || self.endpoint_available.is_some()
+                        || message["supervisor"] != json!(self.child.id())
+                    {
+                        return Err(Failure::protocol("Invalid worker ownership handshake"));
+                    }
+                    self.endpoint_available = Some(match message["mode"].as_str() {
+                        Some("endpoint") => true,
+                        Some("parent_monitor") => false,
+                        _ => return Err(Failure::protocol("Invalid ownership capability")),
+                    });
+                }
                 Some("progress") => {
                     match message["event"].as_str() {
                         Some("testStart") if request["op"] != "typecheck" => {
@@ -320,6 +351,10 @@ fn run_inner(
     request.root = absolute(request.root)?
         .canonicalize()
         .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e.to_string()))?;
+    let recovery = crate::mutation_ownership::recover(&signal)?;
+    if !recovery.is_empty() {
+        report.workers = Some(recovery);
+    }
     if request.cache {
         let directory = crate::mutation_cache::directory(&request);
         report.cache = Some(mutation::cache::Info {
@@ -396,6 +431,7 @@ fn run_inner(
     }
     let temp = tempfile::Builder::new()
         .prefix("errspec-mutation-")
+        .permissions(fs::Permissions::from_mode(0o700))
         .tempdir()?;
     let script = temp.path().join("driver.mjs");
     let setup = temp.path().join("setup.mjs");
@@ -419,6 +455,7 @@ fn run_inner(
         .replace('-', "");
     let mut options = serde_json::to_value(&request).unwrap();
     options["binary"] = json!(std::env::current_exe()?);
+    options["engineFingerprint"] = json!(mutation::cache::ENGINE_FINGERPRINT);
     options["temp"] = json!(temp.path());
     options["setup"] = json!(setup);
     options["state"] = json!(temp.path().join("state.json"));
@@ -442,6 +479,9 @@ fn run_inner(
     let info = only(&open.messages, "done")?;
     report.engine.node = info["node"].as_str().map(String::from);
     report.engine.vitest = info["vitest"].as_str().map(String::from);
+    if driver.endpoint_available == Some(false) {
+        report.workers.get_or_insert_default().endpoint_unavailable += 1;
+    }
     // Baselines use the project's runner timeouts, not a whole-run time budget.
     let mut prepared = driver.request(
         json!({"op":if request.cache {"discover"} else {"prepare"}}),

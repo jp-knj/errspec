@@ -6,6 +6,20 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) fn retain_children() -> io::Result<()> {
+    // An inherited SIG_IGN / SA_NOCLDWAIT would let the kernel recycle a child
+    // PID before our group termination. Keep children waitable until we reap.
+    let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+    action.sa_sigaction = libc::SIG_DFL;
+    unsafe {
+        libc::sigemptyset(&mut action.sa_mask);
+    }
+    if unsafe { libc::sigaction(libc::SIGCHLD, &action, std::ptr::null_mut()) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 struct OwnedChild(Option<Child>);
 impl OwnedChild {
     fn completed(&mut self) -> io::Result<Option<std::process::ExitStatus>> {

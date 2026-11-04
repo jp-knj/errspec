@@ -60,6 +60,8 @@ Vitest sessionの再利用は`--reuse-session`／`reuseSession`で有効にし�
 
 実行器は今回のプロセス群と所有情報を管理します。孤立プロセスの終了には保存した実行IDと起動情報の一致を必要とします。kill matrixでは途中の検出による省略を行わず、最初の検出で終了して得た結果をmatrixとして再利用しません。
 
+Native supervisorをgroup leaderとし、Nodeは同じgroupとstdioを継承します。親はsupervisorをreapする前にgroupを終了し、supervisorはkernelの親関係が変わった場合に自分のgroupを終了します。privateなUID別registryには版・run ID・256-bit token・owner／supervisor・Unix endpointを保存します。次回の起動は3秒・256件まで照会し、生きているsupervisor自身が親とgroupを確認して終了します。保存PIDへ直接signalを送らず、active・不一致・未確認の記録を終了しません。Unix endpointが禁止された場合も親監視は維持し、workers.endpointUnavailableを示します。実行器と生成器のengine fingerprintも照合して、起動中のbinary差替えを未完了にします。
+
 ### レポート・API・配布
 
 Rustの結果からtext、mutation-testing-elements形式、agent、simplify、テスト選択、kill matrixを生成します。表示とquality gateは別の判定にし、保存先とstdoutを区別します。追加のnpm APIは機械可読の内部要求を使い、CLI引数の解析を実装の契約に含めません。

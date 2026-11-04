@@ -43,6 +43,7 @@ jobs:
       - run: node --test tests/analysis-driver.test.mjs
       - run: node --test tests/mutation-emitter.test.mjs
       - run: node --test tests/mutation-process.test.mjs
+      - run: node --test tests/mutation-ownership.test.mjs
       - run: node --test tests/mutation-process.test.mjs
         env:
           ERRSPEC_REUSE_SESSION: "1"

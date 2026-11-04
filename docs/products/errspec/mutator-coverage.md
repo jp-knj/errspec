@@ -35,7 +35,7 @@
 | `-j`による並列実行、長い実行の分割 | 未実装 |
 | `--mutants-per-line`の決定的な標本選択、`--time-budget`、未実行の`Pending`表示 | 同名の指定と、理由付きの`Pending`で提供 |
 | hit limit、stall／total timeout、予算を延長した再実行、RuntimeErrorの再確認 | `mutate`で提供。再試行は一候補につき一度まで |
-| SIGINT／SIGTERM時の子プロセス終了、前回の孤立プロセスの検査と終了 | 今回所有するプロセス群の終了を提供。前回のプロセス探索は未実装 |
+| SIGINT／SIGTERM時の子プロセス終了、前回の孤立プロセスの検査と終了 | Native supervisorが所有するrunner groupを終了。親の異常終了を自動検出し、次回の起動でもcapabilityを照合して孤立groupを回収する。古いPIDへsignalを送らない。Unix endpoint禁止時は親監視を維持し、その状態をreportへ示す |
 
 ## 組み込みmutator
 

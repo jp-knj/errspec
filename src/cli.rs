@@ -200,6 +200,8 @@ enum Action {
     MutationSource,
     #[command(name = "__mutation-api", hide = true)]
     MutationApi,
+    #[command(name = "__mutation-supervisor", hide = true)]
+    MutationSupervisor { configuration: PathBuf },
     /// Generate configuration and intentionally failing tests for one exported type.
     Init {
         #[arg(long, default_value = "tsconfig.json")]
@@ -329,6 +331,9 @@ impl Cli {
             }
             Action::MutationSource => return Ok((Request::MutationSource, self.format)),
             Action::MutationApi => return Ok((Request::MutationApi, self.format)),
+            Action::MutationSupervisor { configuration } => {
+                return Ok((Request::MutationSupervisor(configuration), self.format));
+            }
             Action::Mutate {
                 since,
                 diff_unit,

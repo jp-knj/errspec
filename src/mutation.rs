@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 pub mod cache;
 pub mod coverage_cache;
 pub mod options;
+pub mod ownership;
 pub mod policy;
 pub mod selection;
 pub mod syntax;
@@ -354,6 +355,8 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache: Option<cache::Info>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub workers: Option<ownership::Info>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<policy::PolicyReport>,
     #[serde(skip)]
     fail_on_undetected: bool,
@@ -402,6 +405,7 @@ impl Report {
             typecheck: None,
             selection: None,
             cache: None,
+            workers: None,
             policy: None,
             fail_on_undetected: gate,
         }

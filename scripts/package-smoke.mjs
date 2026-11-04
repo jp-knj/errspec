@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "nod
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 const manifestPath = resolve(
   process.argv[2] ||
@@ -19,11 +20,12 @@ const files = manifest.packages.map((pkg) => {
   return path;
 });
 const dir = mkdtempSync(join(tmpdir(), "errspec-consumer-"));
-function run(command, args, expected = 0) {
+function run(command, args, expected = 0, environment={}) {
   const result = spawnSync(command, args, {
     cwd: dir,
     encoding: "utf8",
     timeout: 120000,
+    env:{...process.env,...environment},
   });
   assert.equal(
     result.status,
@@ -190,6 +192,9 @@ if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equa
     writeFileSync(join(dir,"src/mutation.ts"),"export function add(a:number,b:number){return a+b;}\nexport const extra=true;\n");
     run(process.execPath,["api.mjs","--diff"]);
     extraChecks.push("installed-core-git-selection");
+    const installed=JSON.parse(run(process.execPath,["--input-type=module","-e","import {nativeBinary} from '@errspec/cli/native';console.log(JSON.stringify(nativeBinary()));"]));
+    run(process.execPath,["--test",fileURLToPath(new URL("../tests/mutation-ownership.test.mjs",import.meta.url))],0,{ERRSPEC_BIN:installed});
+    extraChecks.push("installed-native-ownership-and-orphan-recovery");
   }
   console.log(
     JSON.stringify({
