@@ -493,3 +493,11 @@ node scripts/demo-failure-paths.mjs
 [mizchiさんのmutator紹介記事](https://zenn.dev/mizchi/articles/introduce-mutator)を読んだことが開発のきっかけです。
 errspecでは、エラー型から列挙したタグと、利用者が宣言した失敗シナリオ・必須の検証を対応付けます。
 mutation testingの提供目標と実装状況は[機能対応表](docs/products/errspec/mutator-coverage.md)を参照してください。
+
+### Mutation configuration and API
+
+`errspec mutate` can load `errspec.mutation.config.{ts,mts,mjs,js,json}`.
+Explicit CLI flags override configuration properties, including negative flags.
+`@errspec/core` provides `defineConfig` and `runMutation` through the same native
+request and verdict pipeline. See the [configuration and API guide](packages/core/README.md).
+The full workflow plan is tracked in the [implementation status](docs/products/errspec/implementation-status.md); additional APIs, caching and runners remain in progress.

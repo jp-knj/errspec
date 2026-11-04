@@ -1,5 +1,6 @@
 //! Mutation process ownership, protocol validation, and acquisition.
-use crate::{mutation_source, request::MutationRequest};
+use crate::mutation_source;
+use errspec::mutation::options::Options as MutationRequest;
 use errspec::mutation::{self, Candidate, Execution, Mutant, Report, Status};
 use serde_json::{Value, json};
 use std::{

@@ -6,6 +6,8 @@ mod failure_paths;
 mod input;
 mod mutate;
 mod mutation_actions;
+mod mutation_api;
+mod mutation_config;
 mod mutation_source;
 mod onboard;
 mod output;
@@ -25,7 +27,22 @@ fn main() -> ExitCode {
     let explicit_config =
         matches.value_source("config") == Some(clap::parser::ValueSource::CommandLine);
     let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-    let (request, format) = match cli.into_request(explicit_config) {
+    let (request, format) = match cli.into_request(
+        explicit_config,
+        matches
+            .subcommand()
+            .filter(|(name, _)| *name == "mutate")
+            .map(|(_, cmd)| {
+                cmd.ids()
+                    .filter(|id| {
+                        cmd.value_source(id.as_str())
+                            == Some(clap::parser::ValueSource::CommandLine)
+                    })
+                    .map(|id| id.to_string())
+                    .collect()
+            })
+            .unwrap_or_default(),
+    ) {
         Ok(request) => request,
         Err(error) => {
             if let Some(("mutate", command)) = matches.subcommand() {
@@ -45,6 +62,9 @@ fn main() -> ExitCode {
     };
     if matches!(request, request::Request::MutationSource) {
         return mutate::source_entry();
+    }
+    if matches!(request, request::Request::MutationApi) {
+        return mutation_api::entry();
     }
     output::write(app::execute(request), format)
 }

@@ -6,8 +6,9 @@ pub(crate) enum Request {
     Scan(ScanRequest),
     Init(InitRequest),
     Coverage(CoverageRequest),
-    Mutation(MutationRequest),
+    Mutation(Box<MutationRequest>),
     MutationSource,
+    MutationApi,
     Accept {
         root: PathBuf,
         file: PathBuf,
@@ -16,23 +17,10 @@ pub(crate) enum Request {
     },
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct MutationRequest {
-    pub root: PathBuf,
-    pub include: Vec<String>,
-    pub exclude: Vec<String>,
-    pub exclude_mutator: Vec<String>,
-    pub vitest_config: Option<PathBuf>,
-    pub vitest_project: Option<String>,
-    pub vitest_package: Option<PathBuf>,
-    pub node: PathBuf,
-    pub fail_on_undetected: bool,
-    pub typecheck: bool,
-    pub weak_mutation: bool,
-    pub typecheck_project: Option<PathBuf>,
-    pub typecheck_package: Option<PathBuf>,
-    pub policy: errspec::mutation::policy::Policy,
+    pub options: errspec::mutation::options::Options,
+    pub config_file: Option<PathBuf>,
+    pub overrides: std::collections::BTreeSet<String>,
 }
 
 pub(crate) struct ContractRequest {

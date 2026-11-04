@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/jp-knj/errspec/main/packages/core/schema/mutation.schema.json",
+  "title": "errspec mutation configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "node": {
+      "type": "string",
+      "minLength": 1
+    },
+    "vitestConfig": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "vitestProject": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "vitestPackage": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "typecheckProject": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "typecheckPackage": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "include": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "exclude": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "excludeMutator": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "enum": [
+          "ArithmeticOperator",
+          "ArrayDeclaration",
+          "ArrowFunction",
+          "AssignmentOperator",
+          "BlockStatement",
+          "BooleanLiteral",
+          "CallExpression",
+          "ConditionalExpression",
+          "EqualityOperator",
+          "FnValue",
+          "LogicalOperator",
+          "MethodExpression",
+          "ObjectLiteral",
+          "OptionalChaining",
+          "Regex",
+          "StringLiteral",
+          "UnaryOperator",
+          "UpdateOperator"
+        ]
+      }
+    },
+    "failOnUndetected": {
+      "type": "boolean"
+    },
+    "typecheck": {
+      "type": "boolean"
+    },
+    "weakMutation": {
+      "type": "boolean"
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "only": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          }
+        },
+        "critical": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mutantsPerLine": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "timeBudget": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "failOnSurvived": {
+          "type": "boolean"
+        },
+        "acceptedFile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thresholdHigh": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "thresholdLow": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "thresholdBreak": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "$schema": {
+      "type": "string"
+    }
+  }
+}

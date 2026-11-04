@@ -71,8 +71,8 @@
 
 | mutator 0.2.0の機能 | errspecの実装状況・関連機能 |
 | --- | --- |
-| `mutator.config.ts`／mts／mjs／js／json、`defineConfig`、JSON Schema、CLI優先順位と否定フラグ、root／include／exclude | `mutate`はCLIのroot／include／excludeを提供。専用の設定ファイル、Schema、否定フラグは未実装 |
-| `runMutation`、report formatter、plugin定義などのprogrammatic APIとcore／runner／typecheck／CLIのpackage分離 | 未実装。Rustの判定APIとESM testkitを提供 |
+| `mutator.config.ts`／mts／mjs／js／json、`defineConfig`、JSON Schema、CLI優先順位と否定フラグ、root／include／exclude | `errspec.mutation.config.{ts,mts,mjs,js,json}`、`defineConfig`、JSON Schema、明示CLI/API優先、否定フラグを提供。受け入れ検証は`tests/mutation-options.test.mjs` |
+| `runMutation`、report formatter、plugin定義などのprogrammatic APIとcore／runner／typecheck／CLIのpackage分離 | `@errspec/core`の`runMutation`と`defineConfig`を提供。共通の版付き要求をRustへ渡しCLIと同じ判定を使う。formatter・plugin API・runner/typecheck package分離は未実装 |
 | npm CLIと各adapterの配布、Node.js 24以降での利用 | `mutate`のdriverをネイティブバイナリへ同梱。Node 24以降を要求。errspecの配布物は準備中、npm/crates.io未公開 |
 | GitHub Action、差分のbase取得、失敗時も保存するsnapshot cache、別checkoutでの再利用 | ミューテーション用は未実装。errspecのCIはRust・testkit・Bun/Vitest受け入れ検証を実行 |
 | Agent Skillsの同梱、skills-npm、`init-skill`、導入・反復修正・Playwrightの手順 | 未実装。既存のREADMEと導入例を提供 |
@@ -89,3 +89,5 @@
 | 既存Vitestテストが確かめたエラータグの集計 | `coverage`で提供 |
 
 ミューテーション機能は個別のRequirements・Designで具体化し、実装と検証に合わせてこの表を更新します。
+
+全仕様の実装・受け入れ検証の追跡は[implementation status](implementation-status.md)を参照してください。

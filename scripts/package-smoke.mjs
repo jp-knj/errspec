@@ -139,7 +139,17 @@ scenarioTest(test, import.meta.url, {contract:'Failure',id:'case-1',tag:'Offline
     ),
   );
   assert.equal(all.ok, false);
-  const extraChecks=[];
+  writeFileSync(join(dir,"api.mjs"), `
+import assert from 'node:assert/strict';
+import {defineConfig,runMutation} from '@errspec/core';
+const result=await runMutation(defineConfig({include:['does-not-exist/**']}));
+assert.equal(result.exitCode,2);
+assert.equal(result.report.testsExecuted,false);
+assert.equal(result.report.kind,'errspec/mutation');
+assert.equal(result.report.diagnostics[0].code,'EC_MUTATION_CONFIG');
+`);
+  run(process.execPath,["api.mjs"]);
+  const extraChecks=["installed-core-native-api"];
   for (const compiler of JSON.parse(process.env.ERRSPEC_TYPESCRIPT_PACKAGES || "[]")) {
     writeFileSync(join(dir,"tsconfig.json"),JSON.stringify({compilerOptions:{strict:true,target:"ES2022",module:"ESNext",moduleResolution:"Bundler",skipLibCheck:true},files:["errors.ts"]}));
     const options=["--analysis-engine","typescript","--typescript-package",resolve(compiler),"--analysis-node",process.execPath,"--format","json"];
@@ -156,7 +166,16 @@ scenarioTest(test, import.meta.url, {contract:'Failure',id:'case-1',tag:'Offline
     writeFileSync(join(dir,"vitest.config.mjs"),'export default {test:{include:["mutation.test.ts"]}};');
     const mutation=JSON.parse(run(process.execPath,[launcher,"mutate","--node",process.execPath,"--vitest-package",resolve(process.env.ERRSPEC_VITEST_PACKAGE),"--fail-on-undetected","--format","json"]));
     assert.equal(mutation.runComplete,true);assert.equal(mutation.summary.killed,2);
-    extraChecks.push("embedded-mutation-driver");
+    writeFileSync(join(dir,"api.mjs"), `
+import assert from 'node:assert/strict';
+import {defineConfig,runMutation} from '@errspec/core';
+const result=await runMutation(defineConfig({node:process.execPath,vitestPackage:${JSON.stringify(resolve(process.env.ERRSPEC_VITEST_PACKAGE))},failOnUndetected:true}));
+assert.equal(result.exitCode,0);
+assert.equal(result.report.runComplete,true);
+assert.equal(result.report.summary.killed,2);
+`);
+    run(process.execPath,["api.mjs"]);
+    extraChecks.push("embedded-mutation-driver","installed-core-mutation");
   }
   console.log(
     JSON.stringify({

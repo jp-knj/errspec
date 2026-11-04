@@ -78,6 +78,12 @@ sequenceDiagram
 
 既存のmutateの引数は維持し、型検査、差分、履歴、予算、追加ランナー、レポートの指定を追加します。型検査は--typecheck、--no-typecheck、--typecheck-project、--typecheck-packageで指定し、既存の--nodeを使います。意味解析用の--analysis-engineなどとは区別します。
 
+mutation専用設定は`errspec.mutation.config.{ts,mts,mjs,js,json}`から1つを選び、`--config-file`で明示できます。親ディレクトリを探索せず、複数ある場合はエラーにします。設定ファイル全体を検証してから、明示されたCLI/APIのプロパティだけを上書きします。policyはプロパティ単位で、配列は置き換えます。否定フラグは設定のtrueを解除でき、型検査を無効にすると明示されなかったコンパイラパスも解除します。
+
+設定のrootは設定ファイルからの相対パス、設定内のパスは有効なproject rootからの相対パスです。明示CLI/APIのroot・パスは呼び出し元ディレクトリを基準にします。script設定はNode 24のtype strippingで取得し、JSON互換のdefault exportを要求します。取得の期限は10秒、出力上限は1 MiBで、ログはstderrへ送ります。子をreapする前に所有するprocess groupを終了し、reap後のPIDへsignalを送りません。
+
+共通の`mutation::options::Options`をCLIとAPIで使用します。`@errspec/core`の`runMutation`はprotocol 1のJSON要求をnative binaryへ送り、CLI解析を経由しません。`defineConfig`は型付きidentity関数で、最終的な入力検証と判定はRustが行います。設定・品質不合格はreportとexitCodeを返し、起動失敗や不正な応答はPromiseのrejectにします。公開型とJSON Schemaはpackageに同梱します。
+
 内部要求と応答は版・実行ID・要求ID・件数を照合します。候補IDの欠落・重複・不一致、壊れた診断、実行していない対象の結果をエラーとします。型検査の状態は既存のengine.typecheckと追加の版情報で示します。
 
 ## 外部サービスとの連携方式
