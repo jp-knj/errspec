@@ -21,7 +21,7 @@ function fixture(files) {
 }
 function run(work,only,args=[],expected=0) {
   const exclusions=families.filter(f=>!only.includes(f)).flatMap(f=>["--exclude-mutator",f]);
-  const result=spawnSync(binary,["mutate","--root",work,"--node",process.execPath,"--format","json",...exclusions,...args],{encoding:"utf8",timeout:120000});
+  const result=spawnSync(binary,["mutate","--root",work,"--node",process.execPath,"--format","json",...(process.env.ERRSPEC_REUSE_SESSION?["--reuse-session"]:[]),...exclusions,...args],{encoding:"utf8",timeout:120000});
   assert.equal(result.error,undefined,String(result.error));
   assert.equal(result.status,expected,`${result.stderr}\n${result.stdout}`);
   const report=JSON.parse(result.stdout);

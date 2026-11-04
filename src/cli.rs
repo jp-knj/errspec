@@ -170,6 +170,11 @@ enum Action {
         no_typecheck: bool,
         #[arg(long, conflicts_with = "no_weak_mutation")]
         weak_mutation: bool,
+        /// Reuse an instrumented Vitest session with isolated workers.
+        #[arg(long, conflicts_with = "no_reuse_session")]
+        reuse_session: bool,
+        #[arg(long)]
+        no_reuse_session: bool,
         #[arg(long)]
         no_weak_mutation: bool,
         #[arg(long)]
@@ -329,6 +334,8 @@ impl Cli {
                 typecheck,
                 no_typecheck: _,
                 weak_mutation,
+                reuse_session,
+                no_reuse_session: _,
                 no_weak_mutation: _,
                 typecheck_project,
                 typecheck_package,
@@ -361,6 +368,7 @@ impl Cli {
                             fail_on_undetected,
                             typecheck,
                             weak_mutation,
+                            reuse_session,
                             typecheck_project,
                             typecheck_package,
                             policy: (*policy).into(),

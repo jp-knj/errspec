@@ -23,6 +23,7 @@ export interface MutationOptions {
   failOnUndetected?: boolean;
   typecheck?: boolean;
   weakMutation?: boolean;
+  reuseSession?: boolean;
   typecheckProject?: string | null;
   typecheckPackage?: string | null;
   policy?: MutationPolicy;
@@ -80,6 +81,7 @@ export interface MutationReport {
     tsrsRevision: string; rulesVersion: string;
     node: string | null; vitest: string | null;
     typecheck: string; coverageScope: string;
+    sessionReuse?: "available" | "fresh_global_setup" | "fresh_lifecycle_unknown";
   };
   runComplete: boolean;
   ok: boolean;

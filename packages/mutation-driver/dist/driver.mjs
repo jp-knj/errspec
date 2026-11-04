@@ -1996,6 +1996,8 @@ var projectName;
 var configFiles = new Set;
 var current;
 var infrastructureFailure;
+var warmContext;
+var reuseMode = "fresh_lifecycle_unknown";
 var normalize = (s) => s.replaceAll("\\", "/");
 var rel = (file) => normalize(relative2(root, file));
 var hash = (data) => createHash("sha256").update(data).digest("hex");
@@ -2135,29 +2137,59 @@ function recordModule(module, execution, request) {
       execution.errors.push(`${e.name || "Error"}: ${e.message || e}`);
     }
 }
+async function closeContext(ctx) {
+  process.exitCode = 0;
+  await ctx.close();
+  const failed = process.exitCode;
+  process.exitCode = 0;
+  if (failed)
+    throw failure("EC_MUTATION_RUNNER", "Vitest cleanup reported a failure; see stderr");
+}
 async function execute(phase, request) {
   verifyInputs();
+  if (phase === "plain" && warmContext) {
+    const saved = warmContext;
+    warmContext = undefined;
+    await closeContext(saved.ctx);
+  }
   infrastructureFailure = undefined;
   const execution = { selected: request.selected || [], tests: [], failedModules: [], errors: [], staticHits: {}, hits: {}, wallTimeout: false, moduleDurations: {} };
   request.started = new Set;
-  let ctx;
+  const previous = phase !== "plain" ? warmContext : undefined;
+  if (previous?.state.failure)
+    throw previous.state.failure;
+  warmContext = undefined;
+  const state = previous?.state || {};
+  Object.assign(state, { request, execution, active: true });
+  const active = () => {
+    if (!state.active) {
+      state.failure = failure("EC_MUTATION_PROTOCOL", "Runner emitted an event outside its execution request");
+      return false;
+    }
+    return true;
+  };
+  let ctx, completed = false, reusable = false, timeouts = previous?.timeouts;
   const report = {
     onTestCaseReady(test) {
+      if (!active())
+        return;
       if (!test.diagnostic()?.startTime)
         return;
-      request.started.add(test.id);
-      send(request, "progress", { event: "testStart" });
+      state.request.started.add(test.id);
+      send(state.request, "progress", { event: "testStart" });
     },
     onTestModuleEnd(module) {
-      try {
-        recordModule(module, execution, request);
-      } catch (error) {
-        infrastructureFailure = error;
-      }
+      if (active())
+        try {
+          recordModule(module, state.execution, state.request);
+        } catch (error) {
+          state.failure = error;
+        }
     },
     onTestRunEnd(_modules, errors) {
-      for (const e of errors)
-        execution.errors.push(`${e.name || "Error"}: ${e.message || e}`);
+      if (active())
+        for (const e of errors)
+          state.execution.errors.push(`${e.name || "Error"}: ${e.message || e}`);
     },
     onUserConsoleLog(log) {
       process.stderr.write(log.content);
@@ -2165,7 +2197,7 @@ async function execute(phase, request) {
     }
   };
   try {
-    ctx = await api.createVitest({
+    ctx = previous?.ctx || await api.createVitest({
       root,
       config: options.vitestConfig || undefined,
       project: options.vitestProject ? [options.vitestProject] : undefined,
@@ -2192,6 +2224,13 @@ async function execute(phase, request) {
     if (project.config.browser?.enabled)
       throw failure("EC_MUTATION_CONFIG", "Vitest Browser Mode is not supported by mutate");
     const config = project.config;
+    const rootProject = typeof ctx.getRootProject === "function" ? ctx.getRootProject() : undefined;
+    if (options.reuseSession && phase !== "plain") {
+      const globalSetup = [...ctx.projects, ...rootProject ? [rootProject] : []].some((p) => p.config.globalSetup?.length);
+      reuseMode = globalSetup ? "fresh_global_setup" : rootProject && typeof ctx.clearSpecificationsCache === "function" ? "available" : "fresh_lifecycle_unknown";
+      reusable = reuseMode === "available";
+    }
+    timeouts ??= { test: config.testTimeout, hook: config.hookTimeout };
     config.watch = false;
     config.update = false;
     config.snapshotOptions = { ...config.snapshotOptions, updateSnapshot: "none" };
@@ -2213,11 +2252,12 @@ async function execute(phase, request) {
       weakMutation: options.weakMutation
     } };
     project.provide("__errspecMutation", config.provide.__errspecMutation);
-    if (request.multiplier === 3) {
-      config.testTimeout *= 3;
-      config.hookTimeout *= 3;
-    }
-    await ctx.standalone();
+    config.testTimeout = timeouts.test * (request.multiplier || 1);
+    config.hookTimeout = timeouts.hook * (request.multiplier || 1);
+    if (!previous)
+      await ctx.standalone();
+    if (typeof ctx.clearSpecificationsCache === "function")
+      ctx.clearSpecificationsCache();
     const specs = await ctx.globTestSpecifications();
     const excluded = new Set([...configFiles, ...config.setupFiles, ...config.globalSetup || [], ...specs.map((s) => s.moduleId)].filter((f) => existsSync2(f)).map((f) => realpathSync2(f)));
     for (const file of globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", { cwd: root, exclude: ["**/node_modules/**"] }))
@@ -2262,6 +2302,8 @@ async function execute(phase, request) {
         spec.testIds = grouped.get(spec.moduleId);
     }
     await ctx.runTestSpecifications(planned, true);
+    if (state.failure)
+      throw state.failure;
     if (infrastructureFailure)
       throw infrastructureFailure;
     for (const project of ctx.projects)
@@ -2273,14 +2315,18 @@ async function execute(phase, request) {
         }
     verifyInputs();
     execution.tests.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : 0);
+    completed = true;
     return execution;
   } catch (error) {
     if (!ctx && !error.code?.startsWith("EC_MUTATION_"))
       throw failure(phase === "plain" ? "EC_MUTATION_CONFIG" : "EC_MUTATION_RUNNER", error.stack || String(error));
     throw error;
   } finally {
-    if (ctx)
-      await ctx.close();
+    state.active = false;
+    if (ctx && completed && reusable && !state.failure)
+      warmContext = { ctx, state, timeouts };
+    else if (ctx)
+      await closeContext(ctx);
     current = undefined;
     process.exitCode = 0;
   }
@@ -2364,7 +2410,7 @@ async function handle(request) {
     if (JSON.stringify(identity(plain)) !== JSON.stringify(identity(baseline)) || baseline.errors.length || baseline.failedModules.length)
       throw failure("EC_MUTATION_INSTRUMENTATION", "Probe baseline changed test registration or results");
     writeFileSync(options.state, JSON.stringify({ baseline, plain, testSpecs, projectName, inventory: [...inventory], fingerprints: [...fingerprints] }));
-    send(request, "prepared", { execution: baseline });
+    send(request, "prepared", { execution: baseline, ...options.reuseSession ? { sessionReuse: reuseMode } : {} });
     send(request, "done", { count });
     return;
   }
@@ -2396,6 +2442,14 @@ async function handle(request) {
   }
   if (request.op === "close") {
     verifyInputs();
+    if (warmContext) {
+      const saved = warmContext;
+      warmContext = undefined;
+      await closeContext(saved.ctx);
+      if (saved.state.failure)
+        throw saved.state.failure;
+    }
+    verifyInputs();
     send(request, "done", { count: 0 });
     return;
   }
@@ -2408,11 +2462,21 @@ for await (const line of lines) {
     request = JSON.parse(line);
     await handle(request);
   } catch (error) {
-    if (current)
-      try {
-        await current.close();
-      } catch {}
+    try {
+      if (current)
+        await closeContext(current);
+      if (warmContext) {
+        const saved = warmContext;
+        warmContext = undefined;
+        await closeContext(saved.ctx);
+      }
+    } catch (cleanup) {
+      error = failure(error.code || "EC_MUTATION_RUNNER", `${error.stack || error}
+Cleanup failed: ${cleanup.stack || cleanup}`);
+    }
     send(request || { requestId: 0 }, "error", { code: error.code?.startsWith("EC_MUTATION_") ? error.code : "EC_MUTATION_RUNNER", message: error.stack || String(error) });
     process.exitCode = 0;
   }
 }
+if (warmContext)
+  await closeContext(warmContext.ctx);

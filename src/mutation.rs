@@ -297,6 +297,8 @@ pub struct Engine {
     pub vitest: Option<String>,
     pub typecheck: &'static str,
     pub coverage_scope: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_reuse: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -377,6 +379,7 @@ impl Report {
                 vitest: None,
                 typecheck: "not_run",
                 coverage_scope: "vitest_vite_workers",
+                session_reuse: None,
             },
             run_complete: false,
             ok: false,

@@ -18,6 +18,7 @@ let options, root, runId, api, packageDir, inventory = new Map(), fingerprints =
 let plain, baseline, testSpecs, projectName, configFiles = new Set();
 let current;
 let infrastructureFailure;
+let warmContext, reuseMode="fresh_lifecycle_unknown";
 const normalize = s => s.replaceAll("\\", "/");
 const rel = file => normalize(relative(root,file));
 const hash = data => createHash("sha256").update(data).digest("hex");
@@ -121,23 +122,41 @@ function recordModule(module,execution,request) {
     execution.errors.push(`${e.name||"Error"}: ${e.message||e}`);
   }
 }
+async function closeContext(ctx) {
+  process.exitCode=0;
+  await ctx.close();
+  const failed=process.exitCode;
+  process.exitCode=0;
+  if(failed)throw failure("EC_MUTATION_RUNNER","Vitest cleanup reported a failure; see stderr");
+}
 async function execute(phase,request) {
   verifyInputs();
+  if(phase==="plain"&&warmContext){const saved=warmContext;warmContext=undefined;await closeContext(saved.ctx);}
   infrastructureFailure=undefined;
   const execution={selected:request.selected||[],tests:[],failedModules:[],errors:[],staticHits:{},hits:{},wallTimeout:false,moduleDurations:{}};
   request.started=new Set();
-  let ctx;
+  const previous=phase!=="plain"?warmContext:undefined;
+  if(previous?.state.failure)throw previous.state.failure;
+  warmContext=undefined;
+  const state=previous?.state||{};
+  Object.assign(state,{request,execution,active:true});
+  const active=()=>{
+    if(!state.active){state.failure=failure("EC_MUTATION_PROTOCOL","Runner emitted an event outside its execution request");return false;}
+    return true;
+  };
+  let ctx, completed=false, reusable=false, timeouts=previous?.timeouts;
   const report = {
     onTestCaseReady(test){
+      if(!active())return;
       if(!test.diagnostic()?.startTime)return;
-      request.started.add(test.id); send(request,"progress",{event:"testStart"});
+      state.request.started.add(test.id); send(state.request,"progress",{event:"testStart"});
     },
-    onTestModuleEnd(module){try{recordModule(module,execution,request);}catch(error){infrastructureFailure=error;}},
-    onTestRunEnd(_modules,errors){for(const e of errors)execution.errors.push(`${e.name||"Error"}: ${e.message||e}`);},
+    onTestModuleEnd(module){if(active())try{recordModule(module,state.execution,state.request);}catch(error){state.failure=error;}},
+    onTestRunEnd(_modules,errors){if(active())for(const e of errors)state.execution.errors.push(`${e.name||"Error"}: ${e.message||e}`);},
     onUserConsoleLog(log){process.stderr.write(log.content);return false;},
   };
   try {
-    ctx=await api.createVitest({root,config:options.vitestConfig||undefined,
+    ctx=previous?.ctx||await api.createVitest({root,config:options.vitestConfig||undefined,
       project:options.vitestProject?[options.vitestProject]:undefined,
       watch:false,update:false,coverage:{enabled:false},reporters:[report],
       pool:"forks",isolate:true,maxWorkers:1,fileParallelism:false,
@@ -150,6 +169,13 @@ async function execute(phase,request) {
     const project=projects[0];projectName=project.config.name||"";
     if(project.config.browser?.enabled)throw failure("EC_MUTATION_CONFIG","Vitest Browser Mode is not supported by mutate");
     const config=project.config;
+    const rootProject=typeof ctx.getRootProject==="function"?ctx.getRootProject():undefined;
+    if(options.reuseSession&&phase!=="plain") {
+      const globalSetup=[...ctx.projects,...(rootProject?[rootProject]:[])].some(p=>p.config.globalSetup?.length);
+      reuseMode=globalSetup?"fresh_global_setup":rootProject&&typeof ctx.clearSpecificationsCache==="function"?"available":"fresh_lifecycle_unknown";
+      reusable=reuseMode==="available";
+    }
+    timeouts??={test:config.testTimeout,hook:config.hookTimeout};
     config.watch=false;config.update=false;config.snapshotOptions={...config.snapshotOptions,updateSnapshot:"none"};
     ctx.config.snapshotOptions.updateSnapshot="none";ctx.snapshot.options.updateSnapshot="none";
     config.pool="forks";config.isolate=true;config.maxWorkers=1;config.fileParallelism=false;config.fsModuleCache=false;
@@ -159,8 +185,12 @@ async function execute(phase,request) {
     config.provide={...config.provide,__errspecMutation:{runId,requestId:request.requestId,
       activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER,weakMutation:options.weakMutation}};
     project.provide("__errspecMutation",config.provide.__errspecMutation);
-    if(request.multiplier===3) {config.testTimeout*=3;config.hookTimeout*=3;}
-    await ctx.standalone();
+    config.testTimeout=timeouts.test*(request.multiplier||1);
+    config.hookTimeout=timeouts.hook*(request.multiplier||1);
+    if(!previous)await ctx.standalone();
+    // Re-enumerate files and obtain fresh specification objects. Previous testIds
+    // and discovery caches must not constrain the next mutation's selection.
+    if(typeof ctx.clearSpecificationsCache==="function")ctx.clearSpecificationsCache();
     const specs=await ctx.globTestSpecifications();
     const excluded=new Set([...configFiles,...config.setupFiles,...(config.globalSetup||[]),...specs.map(s=>s.moduleId)]
       .filter(f=>existsSync(f)).map(f=>realpathSync(f)));
@@ -195,6 +225,7 @@ async function execute(phase,request) {
       for(const spec of planned)spec.testIds=grouped.get(spec.moduleId);
     }
     await ctx.runTestSpecifications(planned,true);
+    if(state.failure)throw state.failure;
     if(infrastructureFailure)throw infrastructureFailure;
     // Include local Vite dependencies, not just mutation targets.
     for(const project of ctx.projects)for(const environment of Object.values(project.vite.environments))
@@ -204,12 +235,16 @@ async function execute(phase,request) {
       }
     verifyInputs();
     execution.tests.sort((a,b)=>a.file<b.file?-1:a.file>b.file?1:0); // retain registration order within each module
+    completed=true;
     return execution;
   } catch(error) {
     if(!ctx&&!error.code?.startsWith("EC_MUTATION_"))throw failure(phase==="plain"?"EC_MUTATION_CONFIG":"EC_MUTATION_RUNNER",error.stack||String(error));
     throw error;
   } finally {
-    if(ctx)await ctx.close();current=undefined;process.exitCode=0;
+    state.active=false;
+    if(ctx&&completed&&reusable&&!state.failure)warmContext={ctx,state,timeouts};
+    else if(ctx)await closeContext(ctx);
+    current=undefined;process.exitCode=0;
   }
 }
 function send(request,type,payload={}) {
@@ -268,7 +303,7 @@ async function handle(request) {
     if(JSON.stringify(identity(plain))!==JSON.stringify(identity(baseline))||baseline.errors.length||baseline.failedModules.length)
       throw failure("EC_MUTATION_INSTRUMENTATION","Probe baseline changed test registration or results");
     writeFileSync(options.state,JSON.stringify({baseline,plain,testSpecs,projectName,inventory:[...inventory],fingerprints:[...fingerprints]}));
-    send(request,"prepared",{execution:baseline});send(request,"done",{count});return;
+    send(request,"prepared",{execution:baseline,...(options.reuseSession?{sessionReuse:reuseMode}:{})});send(request,"done",{count});return;
   }
   if(request.op==="run") {
     if(!baseline)throw failure("EC_MUTATION_PROTOCOL","Missing baseline");
@@ -288,7 +323,11 @@ async function handle(request) {
       send(request,"typechecked",result);send(request,"done",{count:result.outcomes.length});return;
     } catch(error) { throw failure("EC_MUTATION_TYPECHECK",error.stack||String(error)); }
   }
-  if(request.op==="close") {verifyInputs();send(request,"done",{count:0});return;}
+  if(request.op==="close") {
+    verifyInputs();
+    if(warmContext){const saved=warmContext;warmContext=undefined;await closeContext(saved.ctx);if(saved.state.failure)throw saved.state.failure;}
+    verifyInputs();send(request,"done",{count:0});return;
+  }
   throw failure("EC_MUTATION_PROTOCOL",`Unknown operation: ${request.op}`);
 }
 const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
@@ -296,8 +335,12 @@ for await(const line of lines) {
   let request;
   try {request=JSON.parse(line);await handle(request);}
   catch(error) {
-    if(current)try{await current.close();}catch{}
+    try {
+      if(current)await closeContext(current);
+      if(warmContext){const saved=warmContext;warmContext=undefined;await closeContext(saved.ctx);}
+    }catch(cleanup){error=failure(error.code||"EC_MUTATION_RUNNER",`${error.stack||error}\nCleanup failed: ${cleanup.stack||cleanup}`);}
     send(request||{requestId:0},"error",{code:error.code?.startsWith("EC_MUTATION_")?error.code:"EC_MUTATION_RUNNER",message:error.stack||String(error)});
     process.exitCode=0;
   }
 }
+if(warmContext)await closeContext(warmContext.ctx);

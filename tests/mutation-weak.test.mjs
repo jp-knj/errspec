@@ -98,6 +98,7 @@ function project(t, tests) {
 function run(root, weak) {
   const args = [
     "mutate",
+    ...(process.env.ERRSPEC_REUSE_SESSION?["--reuse-session"]:[]),
     "--node",
     process.execPath,
     "--format",

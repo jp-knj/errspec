@@ -103,3 +103,21 @@ that score is unknown, and `--fail-on-undetected` also rejects unexecuted select
 candidates. `--fail-on-survived` continues to check survival specifically. Diff
 selection reports omitted candidates separately; its score applies to the selected
 request, as shown by `selection`.
+
+## Reusing Vitest sessions
+
+`--reuse-session` / `reuseSession: true` keeps the instrumented Vitest/Vite
+context between the probe baseline and mutant trials. The unmodified baseline
+still uses its own context. This option is off by default; `--no-reuse-session`
+overrides a configured true value. Isolated fork workers, request-specific probes,
+test selection, and original timeout values are renewed for each attempt. Only
+timeout confirmation receives the extended timeout.
+
+Vite configuration/lifecycle hooks run once for the instrumented session. Test
+setup files and isolated test modules run for each attempt. Configurations with
+`globalSetup` keep fresh contexts so their setup and teardown retain the existing
+per-attempt lifecycle. Versions missing the public discovery-reset API also keep
+fresh contexts; reuse is validated with Vitest 5.0.0 and 5.0.5.
+`engine.sessionReuse` reports `available`, `fresh_global_setup` or
+`fresh_lifecycle_unknown` when requested. Cleanup errors and stale execution
+events invalidate the run. Interrupts/deadlines still terminate the owned group.

@@ -155,6 +155,8 @@ pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) 
         ("typecheck", "typecheck"),
         ("no_typecheck", "typecheck"),
         ("weak_mutation", "weakMutation"),
+        ("reuse_session", "reuseSession"),
+        ("no_reuse_session", "reuseSession"),
         ("no_weak_mutation", "weakMutation"),
         ("typecheck_project", "typecheckProject"),
         ("typecheck_package", "typecheckPackage"),
