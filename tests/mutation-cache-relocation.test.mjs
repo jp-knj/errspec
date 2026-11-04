@@ -7,10 +7,11 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {runMutation} from '../packages/core/index.mjs';
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=process.env.ERRSPEC_BIN||join(repo,'target/debug/errspec');
-function fixture(t,provided=false){
+function fixture(t,provided=false,localRunner=false){
  const base=realpathSync(mkdtempSync(join(tmpdir(),'errspec-cache-relocation-'))),a=join(base,'a'),b=join(base,'b');t.after(()=>rmSync(base,{recursive:true,force:true}));
  mkdirSync(join(a,'src'),{recursive:true});mkdirSync(join(a,'node_modules/fixturedep'),{recursive:true});
- symlinkSync(join(repo,'examples/checkout/node_modules/vitest'),join(a,'node_modules/vitest'),'dir');
+ if(localRunner)cpSync(join(repo,'examples/checkout/node_modules'),join(a,'node_modules'),{recursive:true,verbatimSymlinks:true});
+ else symlinkSync(join(repo,'examples/checkout/node_modules/vitest'),join(a,'node_modules/vitest'),'dir');
  writeFileSync(join(a,'package.json'),JSON.stringify({type:'module',dependencies:{vitest:'5.0.5',fixturedep:'1.0.0'}}));
  writeFileSync(join(a,'node_modules/fixturedep/package.json'),JSON.stringify({name:'fixturedep',version:'1.0.0',type:'module',exports:'./index.js'}));
  writeFileSync(join(a,'node_modules/fixturedep/index.js'),'export const constant=7;');
@@ -38,6 +39,10 @@ test('default cache keeps absolute checkout identity and explicit mode changes c
  const {a,b,copy}=fixture(t);const cold=run(a);copy();const moved=run(b);assert.equal(moved.cache.reused,0);assert.notEqual(moved.cache.fingerprint,cold.cache.fingerprint);
  const portable=run(b,['--cache-relocation']);assert.equal(portable.cache.reused,0);assert.equal(portable.cache.invalidated,true);
  const exact=run(b,['--no-cache-relocation']);assert.equal(exact.cache.reused,0);assert.equal(exact.cache.relocation,undefined);
+});
+test('relocation includes the installed runner dependency tree and Vite filesystem aliases',{timeout:60000},t=>{
+ const {a,b,copy}=fixture(t,false,true),cold=run(a,['--cache-relocation']);copy();
+ const warm=run(b,['--cache-relocation']);assert.equal(warm.cache.fingerprint,cold.cache.fingerprint);assert.equal(warm.cache.reused,2);assert.equal(warm.cache.coverageReused,true);
 });
 test('provided absolute values and non-location environment changes remain bound',{timeout:60000},t=>{
  const {a,b,copy}=fixture(t,true);const cold=run(a,['--cache-relocation']);copy();const moved=run(b,['--cache-relocation']);assert.equal(moved.cache.reused,0);assert.notEqual(moved.cache.fingerprint,cold.cache.fingerprint);

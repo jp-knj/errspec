@@ -113,6 +113,51 @@ test("resolved provided values invalidate results even when configuration source
   writeFileSync(value,"second");
   const changed=run(root,["--cache"]);assert.equal(changed.cache.reused,0);assert.equal(changed.cache.invalidated,true);
 });
+test("resolved Vite defines invalidate cached detections when configuration source is unchanged",{timeout:60000},t=>{
+  const root=fixture(t),control=realpathSync(mkdtempSync(join(tmpdir(),'errspec-cache-define-'))),value=join(control,'value');
+  t.after(()=>rmSync(control,{recursive:true,force:true}));writeFileSync(value,'1');
+  writeFileSync(join(root,'src/value.ts'),'export const add=(value:number)=>value-value;');
+  writeFileSync(join(root,'value.test.ts'),`import {test,expect} from 'vitest';import {add} from './src/value';test('cancellation',()=>expect(add(__ERRSPEC_INPUT__)).toBe(0));`);
+  writeFileSync(join(root,'vitest.config.mjs'),`import {readFileSync} from 'node:fs';export default {define:{__ERRSPEC_INPUT__:readFileSync(${JSON.stringify(value)},'utf8')},test:{include:['value.test.ts']}};`);
+  const cold=run(root,['--cache']);assert.equal(cold.summary.killed,2);
+  assert.equal(run(root,['--cache']).cache.reused,2);
+  writeFileSync(value,'0');
+  const changed=run(root,['--cache']);assert.equal(changed.cache.reused,0);assert.equal(changed.cache.invalidated,true);assert.equal(changed.cache.coverageReused,undefined);assert.equal(changed.summary.survived,1);
+});
+test("environment compilation overrides participate in the cache fingerprint",{timeout:60000},t=>{
+  const root=fixture(t),control=realpathSync(mkdtempSync(join(tmpdir(),'errspec-cache-environment-'))),value=join(control,'value');
+  t.after(()=>rmSync(control,{recursive:true,force:true}));writeFileSync(value,'1');
+  writeFileSync(join(root,'src/value.ts'),'export const add=(value:number)=>value-value;');
+  writeFileSync(join(root,'value.test.ts'),`import {test,expect} from 'vitest';import {add} from './src/value';test('cancellation',()=>expect(add(__ERRSPEC_INPUT__)).toBe(0));`);
+  writeFileSync(join(root,'vitest.config.mjs'),`import {readFileSync} from 'node:fs';export default {define:{__ERRSPEC_INPUT__:'0'},plugins:[{name:'fixture-environment',configEnvironment(name){if(name==='ssr'||name==='__vitest__')return {define:{__ERRSPEC_INPUT__:readFileSync(${JSON.stringify(value)},'utf8')}};}}],test:{include:['value.test.ts']}};`);
+  const cold=run(root,['--cache']);assert.equal(cold.summary.killed,2);assert.equal(run(root,['--cache']).cache.reused,2);
+  writeFileSync(value,'0');
+  const changed=run(root,['--cache']);assert.equal(changed.cache.reused,0);assert.equal(changed.cache.invalidated,true);assert.equal(changed.summary.survived,1);
+});
+test("unserializable compilation options keep verification fresh",{timeout:60000},t=>{
+  for(const config of [
+    `resolve:{alias:[{find:'__unused_alias__',replacement:'unused',customResolver:()=>null}]},test:{include:['value.test.ts']}`,
+    `define:{__UNUSED_DEFINE__:'1+0'},test:{include:['value.test.ts']}`,
+    `plugins:[{name:'asset-callback',configResolved(config){config.assetsInclude=()=>false;}}],test:{include:['value.test.ts']}`,
+    `test:{include:['value.test.ts'],css:{include:[/.*/]}}`,
+  ]){
+    const root=fixture(t);writeFileSync(join(root,'vitest.config.mjs'),`export default {${config}};`);
+    for(let attempt=0;attempt<2;attempt++){
+      const report=run(root,['--cache']);assert.equal(report.cache.reused,0);assert.equal(report.cache.saved,0);assert.ok(report.cache.executed>0);assert.match(report.cache.disabledReason,/configuration cannot be fingerprinted/);
+    }
+  }
+});
+test("unacquired transform closures and duplicate builtin names cannot reuse detections",{timeout:60000},t=>{
+  for(const name of ['fixture-transform','alias']){
+    const root=fixture(t),control=realpathSync(mkdtempSync(join(tmpdir(),'errspec-cache-transform-'))),value=join(control,'value');
+    t.after(()=>rmSync(control,{recursive:true,force:true}));writeFileSync(value,'1');
+    writeFileSync(join(root,'src/value.ts'),'export const add=(value:number)=>value-value;');
+    writeFileSync(join(root,'value.test.ts'),`import {test,expect} from 'vitest';import {add} from './src/value';test('cancellation',()=>expect(add(__ERRSPEC_INPUT__)).toBe(0));`);
+    writeFileSync(join(root,'vitest.config.mjs'),`import {readFileSync} from 'node:fs';export default {plugins:[{name:${JSON.stringify(name)},enforce:'post',transform(code,id){if(id.includes('value.test.ts'))return code.replace('__ERRSPEC_INPUT__',readFileSync(${JSON.stringify(value)},'utf8'));}}],test:{include:['value.test.ts']}};`);
+    const cold=run(root,['--cache']);assert.equal(cold.summary.killed,2);assert.equal(cold.cache.saved,0);assert.match(cold.cache.disabledReason,/configuration cannot be fingerprinted/);
+    writeFileSync(value,'0');const current=run(root,['--cache']);assert.equal(current.cache.reused,0);assert.equal(current.summary.survived,1);
+  }
+});
 test("global setup inputs keep execution fresh until their lifecycle can be acquired",{timeout:60000},t=>{
   const root=fixture(t);
   writeFileSync(join(root,"setup.mjs"),'export default ({provide})=>{provide("external",Date.now());};');
@@ -156,7 +201,7 @@ test("cache storage cannot overlap the project root or unrelated existing data",
   assert.equal(run(root,["--cache","--cache-dir","."],2).testsExecuted,false);
   assert.equal(readFileSync(join(root,"src/value.ts"),"utf8"),"export const add=(a:number,b:number)=>a+b;");
 });
-for(const kind of ["source","test","dependency"])test(`reused evidence detects a ${kind} change during final inspection`,{timeout:60000},t=>{
+for(const kind of ["source","test","dependency","compilation"])test(`reused evidence detects a ${kind} change during final inspection`,{timeout:60000},t=>{
   const root=fixture(t),control=realpathSync(mkdtempSync(join(tmpdir(),"errspec-cache-control-"))),marker=join(control,"enabled");
   t.after(()=>rmSync(control,{recursive:true,force:true}));
   const directory=join(root,"runner"),dist=join(directory,"dist"),vitest=join(repo,"examples/checkout/node_modules/vitest");
@@ -170,10 +215,15 @@ for(const kind of ["source","test","dependency"])test(`reused evidence detects a
     writeFileSync(join(root,"package.json"),JSON.stringify({type:"module",dependencies:{vitest:"5.0.5","local-value":"1.0.0"}}));
     writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";test("smoke",()=>expect(1).toBe(1));');
   }
-  const path=join(root,kind==="source"?"src/added.ts":kind==="test"?"new.test.ts":"node_modules/local-value/index.js");
-  const code=kind==="source"?"export const added=true;":kind==="test"?'import {test} from "vitest";test("new",()=>{});':'export const unused=2;';
+  const path=kind==="compilation"?join(control,'define'):join(root,kind==="source"?"src/added.ts":kind==="test"?"new.test.ts":"node_modules/local-value/index.js");
+  const code=kind==="compilation"?'0':kind==="source"?"export const added=true;":kind==="test"?'import {test} from "vitest";test("new",()=>{});':'export const unused=2;';
   writeFileSync(join(dist,"node.js"),`import {existsSync,writeFileSync} from 'node:fs';import {createVitest as actual} from ${JSON.stringify(pathToFileURL(join(vitest,"dist/node.js")).href)};let contexts=0;export async function createVitest(...args){if(++contexts===3&&existsSync(${JSON.stringify(marker)}))writeFileSync(${JSON.stringify(path)},${JSON.stringify(code)});return actual(...args);}`);
   writeFileSync(join(root,"vitest.config.mjs"),'export default {test:{include:["*.test.ts"]}};');
+  if(kind==="compilation"){
+    writeFileSync(path,'1');writeFileSync(join(root,'src/value.ts'),'export const add=(value:number)=>value-value;');
+    writeFileSync(join(root,'value.test.ts'),`import {test,expect} from 'vitest';import {add} from './src/value';test('cancellation',()=>expect(add(__ERRSPEC_INPUT__)).toBe(0));`);
+    writeFileSync(join(root,'vitest.config.mjs'),`import {readFileSync} from 'node:fs';export default {define:{__ERRSPEC_INPUT__:readFileSync(${JSON.stringify(path)},'utf8')},test:{include:['*.test.ts']}};`);
+  }
   const cold=run(root,["--cache","--vitest-package",directory]);
   if(kind==="dependency")assert.ok(cold.summary.noCoverage>0);else assert.ok(cold.cache.saved>0);
   writeFileSync(marker,"enabled");
