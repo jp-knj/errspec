@@ -48,6 +48,7 @@ jobs:
       - run: node --test tests/mutation-emitter.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-plugins.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-matrix-selection.test.mjs
+      - run: node --test tests/practical-mutation.test.mjs
       - run: node --test tests/mutation-process.test.mjs
       - run: node --test tests/mutation-ownership.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-parallel.test.mjs
