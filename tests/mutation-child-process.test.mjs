@@ -80,7 +80,7 @@ test('actual worker launches produce attributed warnings without raw arguments; 
 test('parallel workers receive the same observation helper before executing their probes',async t=>{
   const root=project(t);
   writeFileSync(join(root,'src/inprocess.ts'),'export function enabled(n:number){return n>0;}');
-  writeFileSync(join(root,'value.test.ts'),'import {test,expect} from "vitest";import {enabled} from "./src/inprocess";test("in-process",()=>expect(enabled(1)).toBe(true));');
+  writeFileSync(join(root,'value.test.ts'),'import {test,expect} from "vitest";import {enabled} from "./src/inprocess";test.each([-1,0,1])("in-process %s",n=>expect(enabled(n)).toBe(n>0));');
   const result=await runMutation({node:process.execPath,include:['src/inprocess.ts'],concurrency:2,reuseSession:true},{binary,cwd:root});
   assert.equal(result.exitCode,0,JSON.stringify(result));assert.equal(result.report.runComplete,true);
   assert.equal(result.report.engine.parallel.workers,2);
