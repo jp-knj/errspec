@@ -447,6 +447,8 @@ fn run_inner(
     } else {
         std::collections::BTreeMap::new()
     };
+    request.runner_config = request.runner_config.map(absolute).transpose()?;
+    request.runner_package = request.runner_package.map(absolute).transpose()?;
     request.vitest_config = request.vitest_config.map(absolute).transpose()?;
     request.vitest_package = request.vitest_package.map(absolute).transpose()?;
     request.typecheck_project = request.typecheck_project.map(absolute).transpose()?;
@@ -514,6 +516,13 @@ fn run_inner(
             .map_err(|e| Failure::protocol(e.to_string()))?;
     report.engine.node = info["node"].as_str().map(String::from);
     report.engine.vitest = info["vitest"].as_str().map(String::from);
+    report.engine.runner = info["runner"].as_str().map(String::from);
+    report.engine.runner_version = info["runnerVersion"].as_str().map(String::from);
+    report.engine.coverage_scope = match report.engine.runner.as_deref() {
+        Some("jest") => "jest_native_esm_workers",
+        Some("playwright") => "playwright_vite_browser",
+        _ => "vitest_vite_workers",
+    };
     if driver.endpoint_available == Some(false) {
         report.workers.get_or_insert_default().endpoint_unavailable += 1;
     }

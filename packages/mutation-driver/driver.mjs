@@ -10,6 +10,9 @@ import { instrument } from "./emitter.mjs";
 import { typecheckMutants } from "./typecheck.mjs";
 import { compilerInputs } from "./cache-inputs.mjs";
 import { loadPlugins } from "./plugins.mjs";
+import { detectRunner, resolvePackage } from "./runners.mjs";
+import { createJestAdapter } from "./jest.mjs";
+import { createPlaywrightAdapter } from "./playwright.mjs";
 
 const protocolWrite = process.stdout.write.bind(process.stdout);
 // Config evaluation happens in this process, before Vitest redirects test logs.
@@ -19,7 +22,7 @@ console.info = console.log;
 const PROTOCOL = 1;
 let options, root, runId, api, packageDir, toolTemp, inventory = new Map(), fingerprints = new Map();
 let plain, baseline, testSpecs, projectName, configFiles = new Set();
-let current;
+let current, adapter, runner;
 let infrastructureFailure;
 let warmContext, reuseMode="fresh_lifecycle_unknown";
 let configurationHash=null;
@@ -63,18 +66,6 @@ async function generateSource(source,file,base) {
   const acquired=base??native(source,file);
   const edits=await mutationPlugins.edits(source,file,acquired.metadata);
   return native(source,file,false,edits);
-}
-function packagePath(explicit) {
-  if (explicit) {
-    if(!existsSync(join(explicit,"package.json")))throw failure("EC_MUTATION_CONFIG",`Vitest package not found: ${explicit}`);
-    return realpathSync(explicit);
-  }
-  for(let dir=root;;dir=dirname(dir)) {
-    const candidate=join(dir,"node_modules/vitest");
-    if(existsSync(join(candidate,"package.json")))return realpathSync(candidate);
-    if(dirname(dir)===dir)break;
-  }
-  throw failure("EC_MUTATION_CONFIG","Cannot find Vitest; use --vitest-package");
 }
 function candidateFiles(excluded) {
   const patterns=options.include.length?options.include:["src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"];
@@ -191,7 +182,39 @@ async function closeContext(ctx) {
   process.exitCode=0;
   if(failed)throw failure("EC_MUTATION_RUNNER","Vitest cleanup reported a failure; see stderr");
 }
+async function executeAdapter(phase,request) {
+  verifyInputs();
+  const inspected=await adapter.execute("inspect",request,inventory,baseline);
+  const specs=inspected.specs;
+  const excluded=new Set([...inspected.excluded,...mutationPlugins.files,...configFiles].filter(f=>existsSync(f)).map(f=>realpathSync(f)));
+  for(const file of excluded)remember(file);
+  const files=candidateFiles(excluded);
+  if(phase==="plain") {
+    for(const file of files){inventory.set(file,{source:readFileSync(file,"utf8"),candidates:[]});remember(file);}
+    testSpecs=specs;
+    if(options.plugins?.length)for(const [file,entry] of inventory)
+      entry.generated=await generateSource(entry.source,rel(file));
+    for(const file of mutationPlugins.files)inventory.delete(file);
+    // Adapters revalidate conservatively: all local source/test/config inputs
+    // are immutable for this run, and unknown external inputs disable caching.
+    for(const file of globSync("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,json,snap,html,css,scss,sass,less,svg,png,jpg,jpeg,webp,avif,gif,wasm,txt,md}",{cwd:root,exclude:["**/node_modules/**","**/.git/**"]})) {
+      const absolute=resolve(root,file);
+      if(!absolute.startsWith(toolTemp+"/")&&!absolute.includes("/.errspec/"))remember(absolute);
+    }
+    for(const file of globSync("**/.env*",{cwd:root,exclude:["**/node_modules/**","**/.git/**"]}))remember(resolve(root,file));
+    for(let dir=root;;dir=dirname(dir)){
+      for(const name of ["package.json","package-lock.json","bun.lock","bun.lockb","pnpm-lock.yaml","yarn.lock","tsconfig.json"])remember(join(dir,name));
+      if(dirname(dir)===dir)break;
+    }
+  } else if(JSON.stringify(specs)!==JSON.stringify(testSpecs)||JSON.stringify(files)!==JSON.stringify([...inventory.keys()]))
+    throw failure("EC_MUTATION_INPUT","Source or test file inventory changed during the run");
+  if(phase==="inspect"){verifyInputs();return;}
+  const result=await adapter.execute(phase,request,inventory,baseline);
+  verifyInputs();
+  return result.execution;
+}
 async function execute(phase,request) {
+  if(adapter)return executeAdapter(phase,request);
   verifyInputs();
   if(phase==="plain"&&warmContext){const saved=warmContext;warmContext=undefined;await closeContext(saved.ctx);}
   infrastructureFailure=undefined;
@@ -237,7 +260,7 @@ async function execute(phase,request) {
       reuseMode=globalSetup?"fresh_global_setup":rootProject&&typeof ctx.clearSpecificationsCache==="function"?"available":"fresh_lifecycle_unknown";
       reusable=reuseMode==="available";
     }
-    timeouts??={test:config.testTimeout,hook:config.hookTimeout};
+    timeouts??={test:config.testTimeout,hook:config.hookTimeout,retry:config.retry,bail:config.bail};
     if(options.cache){
       try {
         if([...ctx.projects,...(rootProject?[rootProject]:[])].some(p=>p.config.globalSetup?.length))throw new Error("globalSetup may provide external inputs");
@@ -262,6 +285,7 @@ async function execute(phase,request) {
     config.provide={...config.provide,__errspecMutation:{runId,requestId:request.requestId,
       activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER,weakMutation:options.weakMutation}};
     project.provide("__errspecMutation",config.provide.__errspecMutation);
+    config.retry=request.complete?0:timeouts.retry;config.bail=request.complete?0:timeouts.bail;
     config.testTimeout=timeouts.test*(request.multiplier||1);
     config.hookTimeout=timeouts.hook*(request.multiplier||1);
     if(!previous)await ctx.standalone();
@@ -366,14 +390,35 @@ async function handle(request) {
     options=request.options;
     pendingGenerated.clear();
     if(Number(process.versions.node.split(".")[0])<24)throw failure("EC_MUTATION_CONFIG","mutate requires Node 24 or newer");
-    root=realpathSync(options.root);toolTemp=realpathSync(options.toolTemp||options.temp);packageDir=packagePath(options.vitestPackage);
+    root=realpathSync(options.root);toolTemp=realpathSync(options.toolTemp||options.temp);
     mutationPlugins=await loadPlugins(options.plugins,root,remember,options.excludeMutator);
+    try{runner=detectRunner(root,options);}catch(error){throw failure("EC_MUTATION_CONFIG",error.message);}
+    if(!["vitest","vite-plus"].includes(runner)&&(options.vitestConfig||options.vitestPackage||options.vitestProject))throw failure("EC_MUTATION_CONFIG","Vitest options do not match the selected runner");
+    options.vitestConfig??=options.runnerConfig;options.vitestProject??=options.runnerProject;
+    const packageName={vitest:"vitest","vite-plus":"vite-plus",jest:"jest",playwright:"@playwright/test"}[runner];
+    try{packageDir=resolvePackage(root,packageName,options.runnerPackage||options.vitestPackage);}catch(error){throw failure("EC_MUTATION_CONFIG",error.message);}
+    if(!packageDir)throw failure("EC_MUTATION_CONFIG",`Cannot find ${packageName}; use --runner-package`);
+    const runnerVersion=JSON.parse(readFileSync(join(packageDir,"package.json"),"utf8")).version;
+    if(runner==="vite-plus") {
+      remember(join(packageDir,"package.json"));
+      const vitest=resolvePackage(packageDir,"vitest");
+      if(!vitest)throw failure("EC_MUTATION_CONFIG","Vite+ must expose a compatible Vitest 5 installation");
+      packageDir=vitest;
+    }
     const pkg=JSON.parse(readFileSync(join(packageDir,"package.json"),"utf8"));
     remember(join(packageDir,"package.json"));
-    if(!/^5\./.test(pkg.version))throw failure("EC_MUTATION_CONFIG",`mutate requires Vitest 5.x; found ${pkg.version}`);
-    api=await import(pathToFileURL(join(packageDir,"dist/node.js")).href);
-    const setup=readFileSync(options.setup,"utf8").replace('"__VITEST_ENTRY__"',JSON.stringify(normalize(join(packageDir,"dist/index.js"))));
-    if(setup!==readFileSync(options.setup,"utf8"))writeFileSync(options.setup,setup);
+    if(["vitest","vite-plus"].includes(runner)){
+      if(!/^5\./.test(pkg.version))throw failure("EC_MUTATION_CONFIG",`mutate requires Vitest 5.x; found ${pkg.version}`);
+      api=await import(pathToFileURL(join(packageDir,"dist/node.js")).href);
+      const setup=readFileSync(options.setup,"utf8").replace('"__VITEST_ENTRY__"',JSON.stringify(normalize(join(packageDir,"dist/index.js"))));
+      if(setup!==readFileSync(options.setup,"utf8"))writeFileSync(options.setup,setup);
+    }else if(runner==="jest"){
+      if(!/^30\./.test(pkg.version))throw failure("EC_MUTATION_CONFIG",`mutate requires Jest 30.x native ESM; found ${pkg.version}`);
+      adapter=await createJestAdapter({root,options,packageDir,remember,failure,rel,runId,progress:request=>send(request,"progress",{event:"testStart"})});
+    }else {
+      if(!/^1\./.test(pkg.version))throw failure("EC_MUTATION_CONFIG",`mutate requires Playwright Test 1.x; found ${pkg.version}`);
+      adapter=await createPlaywrightAdapter({root,options,packageDir,remember,failure,rel,runId,inventory,progress:request=>send(request,"progress",{event:"testStart"})});
+    }
     if(request.restore) {
       const saved=JSON.parse(readFileSync(options.state,"utf8"));
       baseline=saved.baseline;plain=saved.plain;testSpecs=saved.testSpecs;projectName=saved.projectName;
@@ -383,7 +428,7 @@ async function handle(request) {
       inventory=new Map(saved.inventory);fingerprints=restoredInputs;verifyInputs();
       for(const [file,entry] of inventory)entry.emitted=instrument(entry.source,entry.candidates,file,runId);
     }
-    send(request,"done",{node:process.versions.node,vitest:pkg.version,mutators:mutationPlugins.names,count:0});return;
+    send(request,"done",{mutators:mutationPlugins.names,capabilities:{complete:true},node:process.versions.node,...(["vitest","vite-plus"].includes(runner)?{vitest:pkg.version}:{}),...(runner!=="vitest"?{runner,runnerVersion}:{}),count:0});return;
   }
   if(!options)throw failure("EC_MUTATION_PROTOCOL","Driver was not opened");
   if(request.op==="prime"){

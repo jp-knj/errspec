@@ -160,6 +160,15 @@ struct MutationArgs {
     /// Load a custom mutation plugin module or package (repeatable).
     #[arg(long = "plugin")]
     plugins: Vec<String>,
+    /// Test runner; auto detects root config files, then installed packages.
+    #[arg(long, default_value = "auto", value_parser = ["auto", "vitest", "vite-plus", "jest", "playwright"])]
+    runner: String,
+    #[arg(long)]
+    runner_config: Option<PathBuf>,
+    #[arg(long)]
+    runner_project: Option<String>,
+    #[arg(long)]
+    runner_package: Option<PathBuf>,
     #[arg(long)]
     vitest_config: Option<PathBuf>,
     #[arg(long)]
@@ -395,6 +404,10 @@ impl Cli {
                     exclude,
                     exclude_mutator,
                     plugins,
+                    runner,
+                    runner_config,
+                    runner_project,
+                    runner_package,
                     vitest_config,
                     vitest_project,
                     vitest_package,
@@ -452,6 +465,10 @@ impl Cli {
                                 .into_iter()
                                 .map(errspec::mutation::options::Plugin::Module)
                                 .collect(),
+                            runner,
+                            runner_config,
+                            runner_project,
+                            runner_package,
                             vitest_config,
                             vitest_project,
                             vitest_package,

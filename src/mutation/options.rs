@@ -12,6 +12,10 @@ pub struct Options {
     pub exclude: Vec<String>,
     pub exclude_mutator: Vec<String>,
     pub plugins: Vec<Plugin>,
+    pub runner: String,
+    pub runner_config: Option<PathBuf>,
+    pub runner_project: Option<String>,
+    pub runner_package: Option<PathBuf>,
     pub vitest_config: Option<PathBuf>,
     pub vitest_project: Option<String>,
     pub vitest_package: Option<PathBuf>,
@@ -46,6 +50,10 @@ impl Default for Options {
             exclude: vec![],
             exclude_mutator: vec![],
             plugins: vec![],
+            runner: "auto".into(),
+            runner_config: None,
+            runner_project: None,
+            runner_package: None,
             vitest_config: None,
             vitest_project: None,
             vitest_package: None,
@@ -78,6 +86,9 @@ impl Options {
         super::reporting::validate_reporters(&self.reporters)?;
         if self.experimental_callgraph && (!self.cache || !self.cache_scope) {
             return Err("experimentalCallgraph requires cache and cacheScope".into());
+        }
+        if !["auto", "vitest", "vite-plus", "jest", "playwright"].contains(&self.runner.as_str()) {
+            return Err("runner must be auto, vitest, vite-plus, jest or playwright".into());
         }
         if self.arid_callees.as_ref().is_some_and(|patterns| {
             patterns
@@ -114,6 +125,8 @@ impl Options {
             return Err("include and exclude patterns must not be empty".into());
         }
         if [
+            &self.runner_config,
+            &self.runner_package,
             &self.cache_dir,
             &self.report_dir,
             &self.vitest_config,
@@ -124,6 +137,7 @@ impl Options {
         .into_iter()
         .flatten()
         .any(|p| p.as_os_str().is_empty())
+            || self.runner_project.as_ref().is_some_and(|p| p.is_empty())
             || self.vitest_project.as_ref().is_some_and(|p| p.is_empty())
         {
             return Err("Configured paths and project names must not be empty".into());
