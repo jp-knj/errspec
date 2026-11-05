@@ -2378,11 +2378,12 @@ function environment(Base, attachWeakBinary, load) {
       if (event.name === "run_start") {
         if (this.state.context.complete) {
           this.global[Symbol.for("RETRY_TIMES")] = 0;
-          state.describeRetryOptions?.clear();
         }
         const counts = new Map, selected = this.state.selected;
         const file = relative(this.state.root, this.file).replaceAll("\\", "/");
         const walk = (node) => {
+          if (this.state.context.complete)
+            state.describeRetryOptions?.delete(node);
           for (const child of node.children || []) {
             if (child.type === "test") {
               const names = [];

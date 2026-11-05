@@ -828,6 +828,42 @@ fn retry_judgments_never_count_an_incomplete_execution_as_survival() {
 }
 
 #[test]
+fn runner_deadlines_stay_incomplete_while_assertion_and_locator_failures_remain_kills() {
+    let selected = vec!["test".into()];
+    let inputs = [
+        ("Error: Exceeded timeout of 40 ms for a test.", true),
+        ("Error: Exceeded timeout of 40 ms for a hook.", true),
+        ("Test timeout of 1500ms exceeded.", true),
+        (
+            "Error: Timed out 5000ms waiting for expect(locator).toHaveText",
+            false,
+        ),
+        ("TimeoutError: locator.click: Timeout 30ms exceeded.", false),
+        ("AssertionError: timeout value was incorrect", false),
+    ];
+    let results: Vec<_> = inputs
+        .into_iter()
+        .map(|(error, deadline)| {
+            let result = execution("failed", vec![error]);
+            let attempt = mutation::judge(&result, &selected, 1);
+            let observation = mutation::kill_matrix::Observation::acquire(&result, &selected);
+            assert_eq!(
+                attempt.status,
+                if deadline {
+                    Status::Timeout
+                } else {
+                    Status::Killed
+                }
+            );
+            assert_eq!(observation.complete, !deadline);
+            assert_eq!(observation.killed_by.is_empty(), deadline);
+            json!({"error":error,"attempt":attempt,"matrix":observation})
+        })
+        .collect();
+    insta::assert_json_snapshot!(results);
+}
+
+#[test]
 fn protocol_identity_is_stricter_than_missing_test_results() {
     let selected = vec!["test".into()];
     let mut result = execution("passed", vec![]);
