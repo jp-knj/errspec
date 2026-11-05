@@ -141,13 +141,14 @@ test("dynamic plugin inputs are acquired before baseline tests and cannot change
   assert.equal(changed.runComplete,false);assert.equal(changed.diagnostics[0].code,"EC_MUTATION_INPUT");assert.match(changed.diagnostics[0].message,/data\.txt/);
 });
 test("plugins generate once per source with static imports and format through the shared reporter",async t=>{
-  const root=fixture(t),log=join(root,'visits.log');
+  const root=fixture(t),audit=realpathSync(mkdtempSync(join(tmpdir(),'errspec-plugin-audit-'))),log=join(audit,'visits.log');
+  t.after(()=>rmSync(audit,{recursive:true,force:true}));
   writeFileSync(join(root,'plugin.mjs'),`import {appendFileSync} from 'node:fs';export default {name:'Number',cache:'deterministic',visit(n){if(n.kind==='NumericLiteral'){appendFileSync(${JSON.stringify(log)},'visit\\n');return [{replacement:'3'}]}}};`);
   const options={node:process.execPath,plugins:['./plugin.mjs'],cache:true,cacheScope:true,experimentalCallgraph:true,reuseSession:true};
   const cold=await runMutation(options,{binary,cwd:root}),warm=await runMutation(options,{binary,cwd:root});
   for(const result of [cold,warm])assert.equal(result.exitCode,0,JSON.stringify(result));
   assert.equal(readFileSync(log,'utf8'),'visit\nvisit\n','static import acquisition must consume the generated plugin result');
-  assert.equal(warm.report.cache.executed,0);assert.ok(warm.report.cache.reused>0);
+  assert.equal(warm.report.cache.executed,0,JSON.stringify(warm.report.cache));assert.ok(warm.report.cache.reused>0);
   assert.equal(warm.report.mutants.filter(m=>m.mutator==='Number').length,1);
   assert.deepEqual(warm.report.mutants.map(m=>[m.key,m.status]),cold.report.mutants.map(m=>[m.key,m.status]));
   const agent=JSON.parse(await formatReport(warm.report,{reporter:'agent'},{binary,cwd:root}));
