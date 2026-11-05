@@ -272,7 +272,7 @@ fn record_reach(
 /// Results crossing the execution/output boundary contain no compiler handles.
 pub(crate) enum Outcome {
     TestSelection(Box<errspec::mutation::test_selection::Report>),
-    MutationAction(crate::mutation_actions::ActionOutput),
+    Command(crate::command_output::Output),
     Mutation(Box<errspec::mutation::Report>),
     Contract(Report),
     Scan {
@@ -288,12 +288,15 @@ pub(crate) enum Outcome {
 
 pub(crate) fn execute(request: Request) -> Outcome {
     match request {
+        Request::InitSkill { directory, force } => {
+            Outcome::Command(crate::skill_actions::run(&directory, force))
+        }
         Request::Accept {
             root,
             file,
             keys,
             reason,
-        } => Outcome::MutationAction(crate::mutation_actions::accept(
+        } => Outcome::Command(crate::mutation_actions::accept(
             &root, &file, &keys, &reason,
         )),
         Request::Mutation(request) => {

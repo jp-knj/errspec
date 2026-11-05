@@ -113,7 +113,7 @@ pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
             }
             ExitCode::from(report.exit_code())
         }
-        Outcome::MutationAction(result) => {
+        Outcome::Command(result) => {
             match format {
                 Format::Json => println!("{}", serde_json::to_string_pretty(&result.json).unwrap()),
                 Format::Text | Format::Markdown | Format::Files => {

@@ -39,6 +39,7 @@ jobs:
         env:
           ERRSPEC_TYPESCRIPT_PACKAGES: '["${{ github.workspace }}/packages/analysis-driver/node_modules/typescript6","${{ github.workspace }}/packages/analysis-driver/node_modules/typescript7"]'
           ERRSPEC_VITEST_PACKAGE: '${{ github.workspace }}/examples/checkout/node_modules/vitest'
+      - run: node scripts/skills-package-smoke.mjs artifacts/npm/manifest-${{ matrix.target }}.json
       - run: node scripts/action-package-smoke.mjs artifacts/npm/manifest-${{ matrix.target }}.json
         env:
           ERRSPEC_VITEST_PACKAGE: '${{ github.workspace }}/examples/checkout/node_modules/vitest'

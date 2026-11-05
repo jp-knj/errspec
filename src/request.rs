@@ -11,6 +11,10 @@ pub(crate) enum Request {
     MutationSource,
     MutationApi,
     FormatReport,
+    InitSkill {
+        directory: PathBuf,
+        force: bool,
+    },
     MutationSupervisor(PathBuf),
     Accept {
         root: PathBuf,

@@ -75,7 +75,7 @@
 | `runMutation`、report formatter、plugin定義などのprogrammatic APIとcore／runner／typecheck／CLIのpackage分離 | `@errspec/core`の`runMutation`と`defineConfig`を提供。共通の版付き要求をRustへ渡しCLIと同じ判定を使う。`formatReport`も同じRust formatterを使用。plugin定義APIも提供。runner/typecheck package分離は後続 |
 | npm CLIと各adapterの配布、Node.js 24以降での利用 | `mutate`のdriverをネイティブバイナリへ同梱。Node 24以降を要求。errspecの配布物は準備中、npm/crates.io未公開 |
 | GitHub Action、差分のbase取得、失敗時も保存するsnapshot cache、別checkoutでの再利用 | composite Actionが不足baseを取得し公式cacheをrestore/save。失敗時もalwaysで保存。既存native APIへ委譲し、実shallow clone・quality failure・同一inputs/環境の別checkout再利用・installed CLIの受入を提供。環境変化は指紋へ反映し、live workflowはCI実行待ち |
-| Agent Skillsの同梱、skills-npm、`init-skill`、導入・反復修正・Playwrightの手順 | 未実装。既存のREADMEと導入例を提供 |
+| Agent Skillsの同梱、skills-npm、`init-skill`、導入・反復修正・Playwrightの手順 | CLI packageのskillsへ3手順を同梱しnativeにも同じ本文を埋め込む。init-skillは全件衝突検査・同一本文保持・明示force・rollbackを実装。構造/実CLI/実mutation loopとinstalled byte一致の受入を提供 |
 
 ## errspecが追加する検証
 

@@ -3,11 +3,7 @@ use errspec::mutation::policy::Acceptance;
 use serde_json::json;
 use std::{collections::BTreeMap, fs, io::Write, path::Path};
 
-pub(crate) struct ActionOutput {
-    pub json: serde_json::Value,
-    pub text: String,
-    pub code: u8,
-}
+pub(crate) use crate::command_output::Output as ActionOutput;
 
 pub(crate) fn accept(root: &Path, file: &Path, keys: &[String], reason: &str) -> ActionOutput {
     let result = (|| -> Result<_, String> {
