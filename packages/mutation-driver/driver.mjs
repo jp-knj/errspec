@@ -136,6 +136,14 @@ function childProcessEntries(fact) {
   }
   return childProcessClosure([...entries]);
 }
+function recordChildProcesses(execution,moduleFile,facts) {
+  for(const fact of facts) {
+    const entries=childProcessEntries(fact);
+    if(!entries.length)continue;
+    const test=execution.tests.find(t=>t.file===moduleFile&&t.taskId===fact.taskId&&t.started)?.id||null;
+    (execution.childProcesses||=[]).push({test,file:moduleFile,executable:basename(fact.argv[0]),entries,method:fact.method});
+  }
+}
 function recordModule(module,execution,request) {
   const counts=new Map();
   const moduleFile=rel(module.moduleId);
@@ -161,12 +169,7 @@ function recordModule(module,execution,request) {
   if(meta) {
     if(options.weakMutation&&meta.weakVersion!==1)throw failure("EC_MUTATION_PROTOCOL","Worker does not support weak mutation");
     if(meta.runId!==runId||meta.requestId!==request.requestId) throw failure("EC_MUTATION_PROTOCOL","Stale module metadata");
-    for(const fact of meta.childProcesses||[]) {
-      const entries=childProcessEntries(fact);
-      if(!entries.length)continue;
-      const test=execution.tests.find(t=>t.file===moduleFile&&t.taskId===fact.taskId&&t.started)?.id||null;
-      (execution.childProcesses||=[]).push({test,file:moduleFile,executable:basename(fact.argv[0]),entries,method:fact.method});
-    }
+    recordChildProcesses(execution,moduleFile,meta.childProcesses||[]);
     for(const [key,count] of Object.entries(meta.hits))execution.hits[key]=(execution.hits[key]||0)+count;
     for(const key of Object.keys(meta.staticHits)) (execution.staticHits[key]||=[]).push(moduleFile);
   }
@@ -417,10 +420,10 @@ async function handle(request) {
       if(setup!==readFileSync(options.setup,"utf8"))writeFileSync(options.setup,setup);
     }else if(runner==="jest"){
       if(!/^30\./.test(pkg.version))throw failure("EC_MUTATION_CONFIG",`mutate requires Jest 30.x native ESM; found ${pkg.version}`);
-      adapter=await createJestAdapter({root,options,packageDir,remember,failure,rel,runId,progress:request=>send(request,"progress",{event:"testStart"})});
+      adapter=await createJestAdapter({root,options,packageDir,remember,failure,rel,runId,recordChildProcesses,progress:request=>send(request,"progress",{event:"testStart"})});
     }else {
       if(!/^1\./.test(pkg.version))throw failure("EC_MUTATION_CONFIG",`mutate requires Playwright Test 1.x; found ${pkg.version}`);
-      adapter=await createPlaywrightAdapter({root,options,packageDir,remember,failure,rel,runId,inventory,progress:request=>send(request,"progress",{event:"testStart"})});
+      adapter=await createPlaywrightAdapter({root,options,packageDir,remember,failure,rel,runId,inventory,recordChildProcesses,progress:request=>send(request,"progress",{event:"testStart"})});
     }
     if(request.restore) {
       const saved=JSON.parse(readFileSync(options.state,"utf8"));

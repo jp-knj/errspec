@@ -1,7 +1,7 @@
 // driver.mjs
 import { readFileSync as readFileSync6, writeFileSync as writeFileSync3, realpathSync as realpathSync6, existsSync as existsSync6, globSync, statSync } from "node:fs";
 import { basename, dirname as dirname5, resolve as resolve5, relative as relative2, join as join6, isAbsolute as isAbsolute2, matchesGlob } from "node:path";
-import { pathToFileURL as pathToFileURL4 } from "node:url";
+import { pathToFileURL as pathToFileURL5 } from "node:url";
 import { createHash as createHash2 } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -2280,6 +2280,7 @@ import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync4
 import { join as join4, resolve as resolve3 } from "node:path";
 import { createRequire as createRequire4 } from "node:module";
 import { createHash } from "node:crypto";
+import { pathToFileURL as pathToFileURL3 } from "node:url";
 
 // process-runner.mjs
 import { spawn } from "node:child_process";
@@ -2349,21 +2350,38 @@ function environment(Base, attachWeakBinary, load) {
   const { join, relative } = load("node:path");
   const { createHash } = load("node:crypto");
   return class extends Base {
+    #file;
+    #state;
+    #data;
+    #active;
+    #concurrent = false;
+    #stopObserving;
+    #identities = new WeakMap;
     constructor(config, context) {
       super(config, context);
-      this.file = context.testPath;
+      this.#file = context.testPath;
     }
     async setup() {
-      await super.setup();
-      this.state = JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE, "utf8"));
-      this.data = { runId: this.state.context.runId, requestId: this.state.context.requestId, phase: this.state.phase, file: this.file, tests: [], hits: {}, staticHits: {} };
-      const self = this, ctx = this.state.context;
+      this.#state = JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE, "utf8"));
+      this.#data = { runId: this.#state.context.runId, requestId: this.#state.context.requestId, phase: this.#state.phase, file: this.#file, tests: [], hits: {}, staticHits: {} };
+      const { observeChildProcesses } = await import(this.#state.nodeObserver);
+      this.#stopObserving = observeChildProcesses((fact) => {
+        const taskId = this.#active && !this.#concurrent ? this.#identities.get(this.#active.test)?.id : null;
+        (this.#data.childProcesses ||= []).push({ ...fact, taskId: taskId || null });
+      });
+      try {
+        await super.setup();
+      } catch (error) {
+        this.#stopObserving();
+        throw error;
+      }
+      const self = this, ctx = this.#state.context;
       const record = this.global[Symbol.for(`errspec.mutation.${ctx.runId}`)] = (key) => {
-        const count = self.data.hits[key] = (self.data.hits[key] || 0) + 1;
-        if (self.active && !self.concurrent) {
-          self.active.hits[key] = (self.active.hits[key] || 0) + 1;
+        const count = self.#data.hits[key] = (self.#data.hits[key] || 0) + 1;
+        if (self.#active && !self.#concurrent) {
+          self.#active.hits[key] = (self.#active.hits[key] || 0) + 1;
         } else
-          self.data.staticHits[key] = true;
+          self.#data.staticHits[key] = true;
         if (key === ctx.activeKey && count > ctx.hitLimit) {
           const e = new Error("ERRSPEC_HIT_LIMIT");
           e.name = "ErrspecHitLimitError";
@@ -2373,8 +2391,8 @@ function environment(Base, attachWeakBinary, load) {
       };
       if (ctx.weakMutation)
         attachWeakBinary(record, (key) => {
-          if (self.active && !self.concurrent)
-            self.active.infected[key] = true;
+          if (self.#active && !self.#concurrent)
+            self.#active.infected[key] = true;
         }, ctx.activeKey);
     }
     async handleTestEvent(event, state) {
@@ -2382,13 +2400,14 @@ function environment(Base, attachWeakBinary, load) {
         await super.handleTestEvent(event, state);
       const t = event.test;
       if (event.name === "run_start") {
-        if (this.state.context.complete) {
+        if (this.#state.context.complete) {
           this.global[Symbol.for("RETRY_TIMES")] = 0;
         }
-        const counts = new Map, selected = this.state.selected;
-        const file = relative(this.state.root, this.file).replaceAll("\\", "/");
+        const counts = new Map, selected = this.#state.selected;
+        let order = 0;
+        const file = relative(this.#state.root, this.#file).replaceAll("\\", "/");
         const walk = (node) => {
-          if (this.state.context.complete)
+          if (this.#state.context.complete)
             state.describeRetryOptions?.delete(node);
           for (const child of node.children || []) {
             if (child.type === "test") {
@@ -2397,19 +2416,20 @@ function environment(Base, attachWeakBinary, load) {
                 names.unshift(n.name);
               const name = names.join(" "), occurrence = counts.get(name) || 0;
               counts.set(name, occurrence + 1);
-              child.errspec = { id: JSON.stringify(["", file, name, occurrence]), order: counts.size };
-              if (selected.length && !selected.includes(child.errspec.id))
+              const identity = { id: JSON.stringify(["", file, name, occurrence]), order: order++ };
+              this.#identities.set(child, identity);
+              if (selected.length && !selected.includes(identity.id))
                 child.mode = "skip";
               if (child.concurrent)
-                this.concurrent = true;
+                this.#concurrent = true;
             } else
               walk(child);
           }
         };
         walk(state.rootDescribeBlock);
       }
-      if (event.name === "test_start") {
-        this.active = { test: t, hits: {}, infected: {} };
+      if (event.name === "test_started") {
+        this.#active = { test: t, hits: {}, infected: {} };
         if (process.send)
           process.send({ errspec: "testStart" });
       }
@@ -2417,23 +2437,25 @@ function environment(Base, attachWeakBinary, load) {
         const names = [];
         for (let n = t;n && n.name !== "ROOT_DESCRIBE_BLOCK"; n = n.parent)
           names.unshift(n.name);
-        const meta = this.active?.test === t ? this.active : { hits: {}, infected: {} };
-        if (this.state.context.complete && (t.invocations > 1 || t.repeatCount > 0))
-          this.data.acquisitionIncomplete = "Jest repeated or retried a selected test";
-        const result = { id: t.errspec.id, order: t.errspec.order, name: names.join(" "), status: event.name === "test_skip" ? "skipped" : event.name === "test_todo" ? "pending" : t.errors.length ? "failed" : "passed", started: event.name === "test_done", duration: t.duration || 0, errors: t.errors.map((e) => String(e?.[0]?.stack || e?.stack || e)), hits: meta.hits, infected: Object.keys(meta.infected) };
-        const index = this.data.tests.findIndex((t) => t.id === result.id);
+        const meta = this.#active?.test === t ? this.#active : { hits: {}, infected: {} };
+        if (this.#state.context.matrix && (t.invocations > 1 || t.repeatCount > 0))
+          this.#data.acquisitionIncomplete = "Jest repeated or retried a selected test";
+        const identity = this.#identities.get(t);
+        const result = { id: identity.id, order: identity.order, name: names.join(" "), status: event.name === "test_skip" ? "skipped" : event.name === "test_todo" ? "pending" : t.errors.length ? "failed" : "passed", started: event.name === "test_done", duration: t.duration || 0, errors: t.errors.map((e) => String(e?.[0]?.stack || e?.stack || e)), hits: meta.hits, infected: Object.keys(meta.infected) };
+        const index = this.#data.tests.findIndex((t) => t.id === result.id);
         if (index >= 0)
-          this.data.tests[index] = result;
+          this.#data.tests[index] = result;
         else
-          this.data.tests.push(result);
-        this.active = undefined;
+          this.#data.tests.push(result);
+        this.#active = undefined;
       }
     }
     async teardown() {
       try {
-        writeFileSync(join(this.state.output, createHash("sha256").update(this.file).digest("hex") + ".json"), JSON.stringify(this.data));
-      } finally {
         await super.teardown();
+      } finally {
+        this.#stopObserving?.();
+        writeFileSync(join(this.#state.output, createHash("sha256").update(this.#file).digest("hex") + ".json"), JSON.stringify(this.#data));
       }
     }
   };
@@ -2505,7 +2527,8 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
       transforms: normalized.transform,
       output,
       selected: request.selected || [],
-      context: { runId: ctx.runId, requestId: request.requestId, activeKey: request.key || null, hitLimit: request.hitLimit || Number.MAX_SAFE_INTEGER, weakMutation: options.weakMutation, complete: !!request.complete },
+      nodeObserver: pathToFileURL3(join4(options.toolTemp, "child-process.mjs")).href,
+      context: { matrix: !!options.killMatrix, runId: ctx.runId, requestId: request.requestId, activeKey: request.key || null, hitLimit: request.hitLimit || Number.MAX_SAFE_INTEGER, weakMutation: options.weakMutation, complete: !!request.complete },
       inventory: Object.fromEntries([...inventory].map(([file, entry]) => [file, { source: entry.source, code: phase === "plain" ? entry.source : entry.emitted.code }]))
     }));
     const selectedFiles = request.selected?.length ? [...new Set(request.selected.map((id) => {
@@ -2532,6 +2555,7 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
           delete test.order;
           execution.tests.push({ ...test, taskId: test.id, file: name });
         }
+        ctx.recordChildProcesses(execution, name, data.childProcesses || []);
         for (const [key, count] of Object.entries(data.hits))
           execution.hits[key] = (execution.hits[key] || 0) + count;
         for (const key of Object.keys(data.staticHits))
@@ -2543,6 +2567,7 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
         execution.errors.push(`Jest native ESM module failed: ${fileResult.message || name}`);
       }
     }
+    execution.tests.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : 0);
     if (report.runExecError)
       execution.errors.push(String(report.runExecError));
     if (![0, 1].includes(outcome.code))
@@ -2552,9 +2577,9 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
 }
 
 // playwright.mjs
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync2, existsSync as existsSync5, mkdirSync as mkdirSync2, realpathSync as realpathSync5, rmSync as rmSync2 } from "node:fs";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync2, existsSync as existsSync5, mkdirSync as mkdirSync2, realpathSync as realpathSync5, rmSync as rmSync2, readdirSync } from "node:fs";
 import { join as join5, dirname as dirname4, resolve as resolve4 } from "node:path";
-import { pathToFileURL as pathToFileURL3 } from "node:url";
+import { pathToFileURL as pathToFileURL4 } from "node:url";
 function browserRuntime(context, weak) {
   const counts = {}, pending = globalThis.__errspecMutationPending = [];
   const notify = (key, infected = false) => {
@@ -2601,7 +2626,7 @@ function reporter(load) {
     }
     onTestEnd(test, result) {
       const item = this.tests.get(test.id);
-      if (this.state.complete && (result.retry > 0 || test.repeatEachIndex > 0))
+      if (this.state.matrix && (result.retry > 0 || test.repeatEachIndex > 0))
         this.acquisitionIncomplete = "Playwright repeated or retried a selected test";
       item.status = result.status === "skipped" ? "skipped" : result.status === test.expectedStatus ? "passed" : "failed";
       item.started = result.status !== "skipped";
@@ -2611,9 +2636,30 @@ function reporter(load) {
         item.errors.push(`Expected ${test.expectedStatus}; received ${result.status}`);
       const attachment = result.attachments.find((a) => a.name === "errspec-mutation");
       if (attachment) {
-        const data = JSON.parse(attachment.body?.toString() || readFileSync(attachment.path, "utf8"));
-        if (data.runId !== this.state.context.runId || data.requestId !== this.state.context.requestId)
-          throw new Error("Stale errspec Playwright observation");
+        let data;
+        try {
+          data = JSON.parse(attachment.body?.toString() || readFileSync(attachment.path, "utf8"));
+        } catch {
+          this.protocolError = "Invalid Playwright mutation fixture metadata";
+          item.started = false;
+          return;
+        }
+        if (data.runId !== this.state.context.runId || data.requestId !== this.state.context.requestId) {
+          this.protocolError = "Stale errspec Playwright observation";
+          item.started = false;
+          return;
+        }
+        if (data.nodeObserverVersion !== 1) {
+          this.errors.push("Playwright mutation fixture does not support Node observations; reinstall the matching @errspec/playwright artifact");
+          item.started = false;
+          return;
+        }
+        const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+        if (!object(data.hits) || !object(data.infected) || Object.values(data.hits).some((count) => !Number.isSafeInteger(count) || count < 0) || Object.values(data.infected).some((value) => value !== true)) {
+          this.protocolError = "Invalid Playwright mutation fixture facts";
+          item.started = false;
+          return;
+        }
         item.hits = data.hits;
         item.infected = Object.keys(data.infected);
       } else if (item.started) {
@@ -2625,7 +2671,7 @@ function reporter(load) {
       this.errors.push(error.stack || error.message || String(error));
     }
     onEnd() {
-      writeFileSync(this.state.report, JSON.stringify({ tests: [...this.tests.values()], errors: this.errors, ...this.acquisitionIncomplete ? { acquisitionIncomplete: this.acquisitionIncomplete } : {} }));
+      writeFileSync(this.state.report, JSON.stringify({ tests: [...this.tests.values()], errors: this.errors, ...this.protocolError ? { protocolError: this.protocolError } : {}, ...this.acquisitionIncomplete ? { acquisitionIncomplete: this.acquisitionIncomplete } : {} }));
     }
   };
 }
@@ -2646,7 +2692,7 @@ async function createPlaywrightAdapter(ctx) {
   writeFileSync2(reporterFile, `module.exports=(${reporter.toString()})(require);`);
   const configRoot = dirname4(configFile);
   const weakRuntime = readFileSync5(join5(options.toolTemp, "weak-runtime.mjs"), "utf8").replace("export function attachWeakBinary", "function attachWeakBinary");
-  writeFileSync2(wrapper, `import original from ${JSON.stringify(pathToFileURL3(configFile).href)};
+  writeFileSync2(wrapper, `import original from ${JSON.stringify(pathToFileURL4(configFile).href)};
 import {resolve} from "node:path";
 const base=${JSON.stringify(configRoot)};
 const absolute=value=>value?resolve(base,value):undefined;
@@ -2654,7 +2700,7 @@ const servers=[original.webServer||[]].flat();
 if(servers.some(server=>server.command&&!/^(?:vite|vp dev)(?:\\s|$)/.test(server.command)))throw new Error("errspec Playwright supports a Vite app; custom webServer commands are unsupported");
 const project=p=>({...p,retries:0,repeatEach:1,timeout:(p.timeout??original.timeout??30000)*Number(process.env.ERRSPEC_TIMEOUT_MULTIPLIER||1),testDir:absolute(p.testDir||original.testDir||"."),snapshotDir:absolute(p.snapshotDir||original.snapshotDir),use:{...original.use,...p.use,baseURL:process.env.ERRSPEC_VITE_URL}});
 export default {...original,...project(original),globalSetup:[original.globalSetup||[]].flat().map(absolute),globalTeardown:[original.globalTeardown||[]].flat().map(absolute),webServer:undefined,workers:1,retries:0,repeatEach:1,fullyParallel:false,maxFailures:process.env.ERRSPEC_COMPLETE==="1"?0:original.maxFailures,updateSnapshots:"none",outputDir:${JSON.stringify(join5(directory, "test-results"))},reporter:[[${JSON.stringify(reporterFile)}]],projects:original.projects?.map(project)};`);
-  const vite = await import(pathToFileURL3(join5(viteDir, "dist/node/index.js")).href);
+  const vite = await import(pathToFileURL4(join5(viteDir, "dist/node/index.js")).href);
   let phase = "plain";
   const plugin = { name: "errspec-mutation", enforce: "pre", configResolved(config) {
     if (config.configFile)
@@ -2694,10 +2740,17 @@ export default {...original,...project(original),globalSetup:[original.globalSet
         throw failure("EC_MUTATION_PROTOCOL", `Unknown test ID: ${id}`);
       return test.taskId;
     });
+    const nodeObservations = join5(directory, `observations-${request.requestId}-${nextPhase}`);
+    rmSync2(nodeObservations, { recursive: true, force: true });
+    mkdirSync2(nodeObservations, { recursive: true });
     writeFileSync2(stateFile, JSON.stringify({
       root,
+      phase: nextPhase,
+      nodeObservations,
+      nodeObserver: pathToFileURL4(join5(options.toolTemp, "child-process.mjs")).href,
       report: reportFile,
       context,
+      matrix: !!options.killMatrix,
       complete: !!request.complete,
       selectedTaskIds,
       runtime: `(()=>{${weakRuntime}
@@ -2710,6 +2763,8 @@ export default {...original,...project(original),globalSetup:[original.globalSet
       if (!existsSync5(reportFile))
         throw failure("EC_MUTATION_CONFIG", `Playwright failed before providing test results (${outcome.code ?? outcome.signal}); inspect stderr`);
       const report = JSON.parse(readFileSync5(reportFile, "utf8"));
+      if (report.protocolError)
+        throw failure("EC_MUTATION_PROTOCOL", report.protocolError);
       const files = [...new Set(report.tests.map((t) => resolve4(root, t.file)))];
       files.forEach((file) => remember(file));
       const specs = report.tests.map((t) => ({ file: t.file, project: JSON.parse(t.id)[0], id: t.id }));
@@ -2724,6 +2779,13 @@ export default {...original,...project(original),globalSetup:[original.globalSet
         for (const [key, count] of Object.entries(test.hits))
           execution.hits[key] = (execution.hits[key] || 0) + count;
         execution.moduleDurations[test.file] = (execution.moduleDurations[test.file] || 0) + test.duration;
+      }
+      for (const file of readdirSync(nodeObservations)) {
+        const data = JSON.parse(readFileSync5(join5(nodeObservations, file), "utf8"));
+        if (data.runId !== ctx.runId || data.requestId !== request.requestId || data.phase !== nextPhase)
+          throw failure("EC_MUTATION_PROTOCOL", "Stale Playwright Node observations");
+        for (const fact of data.facts)
+          ctx.recordChildProcesses(execution, ctx.rel(fact.file), [fact]);
       }
       if (![0, 1].includes(outcome.code))
         execution.errors.push(`Playwright process terminated: ${outcome.code ?? outcome.signal}`);
@@ -2903,6 +2965,15 @@ function childProcessEntries(fact) {
   }
   return childProcessClosure([...entries]);
 }
+function recordChildProcesses(execution, moduleFile, facts) {
+  for (const fact of facts) {
+    const entries = childProcessEntries(fact);
+    if (!entries.length)
+      continue;
+    const test = execution.tests.find((t) => t.file === moduleFile && t.taskId === fact.taskId && t.started)?.id || null;
+    (execution.childProcesses ||= []).push({ test, file: moduleFile, executable: basename(fact.argv[0]), entries, method: fact.method });
+  }
+}
 function recordModule(module, execution, request) {
   const counts = new Map;
   const moduleFile = rel(module.moduleId);
@@ -2939,13 +3010,7 @@ function recordModule(module, execution, request) {
       throw failure("EC_MUTATION_PROTOCOL", "Worker does not support weak mutation");
     if (meta.runId !== runId || meta.requestId !== request.requestId)
       throw failure("EC_MUTATION_PROTOCOL", "Stale module metadata");
-    for (const fact of meta.childProcesses || []) {
-      const entries = childProcessEntries(fact);
-      if (!entries.length)
-        continue;
-      const test = execution.tests.find((t) => t.file === moduleFile && t.taskId === fact.taskId && t.started)?.id || null;
-      (execution.childProcesses ||= []).push({ test, file: moduleFile, executable: basename(fact.argv[0]), entries, method: fact.method });
-    }
+    recordChildProcesses(execution, moduleFile, meta.childProcesses || []);
     for (const [key, count] of Object.entries(meta.hits))
       execution.hits[key] = (execution.hits[key] || 0) + count;
     for (const key of Object.keys(meta.staticHits))
@@ -3330,18 +3395,18 @@ async function handle(request) {
     if (["vitest", "vite-plus"].includes(runner)) {
       if (!/^5\./.test(pkg.version))
         throw failure("EC_MUTATION_CONFIG", `mutate requires Vitest 5.x; found ${pkg.version}`);
-      api = await import(pathToFileURL4(join6(packageDir, "dist/node.js")).href);
+      api = await import(pathToFileURL5(join6(packageDir, "dist/node.js")).href);
       const setup = readFileSync6(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join6(packageDir, "dist/index.js"))));
       if (setup !== readFileSync6(options.setup, "utf8"))
         writeFileSync3(options.setup, setup);
     } else if (runner === "jest") {
       if (!/^30\./.test(pkg.version))
         throw failure("EC_MUTATION_CONFIG", `mutate requires Jest 30.x native ESM; found ${pkg.version}`);
-      adapter = await createJestAdapter({ root, options, packageDir, remember, failure, rel, runId, progress: (request) => send(request, "progress", { event: "testStart" }) });
+      adapter = await createJestAdapter({ root, options, packageDir, remember, failure, rel, runId, recordChildProcesses, progress: (request) => send(request, "progress", { event: "testStart" }) });
     } else {
       if (!/^1\./.test(pkg.version))
         throw failure("EC_MUTATION_CONFIG", `mutate requires Playwright Test 1.x; found ${pkg.version}`);
-      adapter = await createPlaywrightAdapter({ root, options, packageDir, remember, failure, rel, runId, inventory, progress: (request) => send(request, "progress", { event: "testStart" }) });
+      adapter = await createPlaywrightAdapter({ root, options, packageDir, remember, failure, rel, runId, inventory, recordChildProcesses, progress: (request) => send(request, "progress", { event: "testStart" }) });
     }
     if (request.restore) {
       const saved = JSON.parse(readFileSync6(options.state, "utf8"));
