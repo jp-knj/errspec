@@ -1,0 +1,8 @@
+import {test, expect} from 'vitest';
+import {accepts, firstIndex, reference} from './src/value';
+
+test('short input remains valid', () => expect(accepts('')).toBe(true));
+test('excess input is rejected', () => expect(accepts('x'.repeat(9))).toBe(false));
+test('duplicate references keep the first index', () => expect(firstIndex([{kind:'notice',ref:'a'},{kind:'notice',ref:'a'}], 'a')).toBe(0));
+test('null has no reference', () => expect(reference(null)).toBeUndefined());
+test('a numeric reference is rejected', () => expect(reference({ref:42})).toBeUndefined());
