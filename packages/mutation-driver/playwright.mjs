@@ -97,7 +97,7 @@ export async function createPlaywrightAdapter(ctx){
       const outcome=await runChild(args,{root,env:{ERRSPEC_BROWSER_STATE:stateFile,ERRSPEC_VITE_URL:url,ERRSPEC_TIMEOUT_MULTIPLIER:String(request.multiplier||1),ERRSPEC_COMPLETE:request.complete?"1":"0"},onProgress:()=>ctx.progress(request)});
       if(!existsSync(reportFile))throw failure("EC_MUTATION_CONFIG",`Playwright failed before providing test results (${outcome.code??outcome.signal}); inspect stderr`);
       const report=JSON.parse(readFileSync(reportFile,"utf8"));
-      const files=[...new Set(report.tests.map(t=>resolve(root,t.file)))];files.forEach(remember);
+      const files=[...new Set(report.tests.map(t=>resolve(root,t.file)))];files.forEach(file=>remember(file));
       const specs=report.tests.map(t=>({file:t.file,project:JSON.parse(t.id)[0],id:t.id}));
       if(nextPhase==="inspect"){
         if(outcome.code!==0||report.errors.length)throw failure("EC_MUTATION_CONFIG",report.errors.join("\n")||"Playwright test discovery failed");
