@@ -74,7 +74,7 @@
 | `mutator.config.ts`／mts／mjs／js／json、`defineConfig`、JSON Schema、CLI優先順位と否定フラグ、root／include／exclude | `errspec.mutation.config.{ts,mts,mjs,js,json}`、`defineConfig`、JSON Schema、明示CLI/API優先、否定フラグを提供。受け入れ検証は`tests/mutation-options.test.mjs` |
 | `runMutation`、report formatter、plugin定義などのprogrammatic APIとcore／runner／typecheck／CLIのpackage分離 | `@errspec/core`の`runMutation`と`defineConfig`を提供。共通の版付き要求をRustへ渡しCLIと同じ判定を使う。`formatReport`も同じRust formatterを使用。plugin定義APIも提供。runner/typecheck package分離は後続 |
 | npm CLIと各adapterの配布、Node.js 24以降での利用 | `mutate`のdriverをネイティブバイナリへ同梱。Node 24以降を要求。errspecの配布物は準備中、npm/crates.io未公開 |
-| GitHub Action、差分のbase取得、失敗時も保存するsnapshot cache、別checkoutでの再利用 | ミューテーション用は未実装。errspecのCIはRust・testkit・Bun/Vitest受け入れ検証を実行 |
+| GitHub Action、差分のbase取得、失敗時も保存するsnapshot cache、別checkoutでの再利用 | composite Actionが不足baseを取得し公式cacheをrestore/save。失敗時もalwaysで保存。既存native APIへ委譲し、実shallow clone・quality failure・同一inputs/環境の別checkout再利用・installed CLIの受入を提供。環境変化は指紋へ反映し、live workflowはCI実行待ち |
 | Agent Skillsの同梱、skills-npm、`init-skill`、導入・反復修正・Playwrightの手順 | 未実装。既存のREADMEと導入例を提供 |
 
 ## errspecが追加する検証
