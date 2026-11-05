@@ -85,3 +85,24 @@ jobs:
           name: valibot-pilot
           path: artifacts/valibot-pilot.json
           if-no-files-found: error
+  runners:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tests/fixtures/runners/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: tests/fixtures/runners
+      - run: node node_modules/@playwright/test/cli.js install --with-deps chromium
+        working-directory: tests/fixtures/runners
+      - run: cargo build --locked
+      - run: node --test --test-concurrency=1 tests/mutation-runners.test.mjs

@@ -54,9 +54,9 @@
 
 | mutator 0.2.0の機能 | errspecの実装状況・関連機能 |
 | --- | --- |
-| Vitest 5、Vite+、ランナーの自動選択と設定指定 | `mutate`はVitest 5系のNodeプロジェクトと設定指定に対応。Vite+固有の対応は未検証 |
-| Jest 30のnative ESM adapter（実験的） | 未実装 |
-| Playwright TestとVite dev serverのbrowser adapter、fixture、複数project（実験的） | 未実装 |
+| Vitest 5、Vite+、ランナーの自動選択と設定指定 | auto / vitest / vite-plus / jest / playwrightを設定・CLI・APIから選択。Vite+ 1.5.0の実fixtureはproject直下のVitestに依存せず、同梱Vitest 5.1.0で検証 |
+| Jest 30のnative ESM adapter（実験的） | Jest 30.5.2の実fixtureで共通native判定、TypeScript、独自async ESM変換、重複ID、skip/concurrent、並列実行とCLI/API同等性を検証。CommonJSとJest複数projectは対象外 |
+| Playwright TestとVite dev serverのbrowser adapter、fixture、複数project（実験的） | Playwright 1.64.1＋Vite 8.3.4のChromium実fixtureで複数project、既存fixture拡張、遷移・iframe、project選択、並列probeとSIGINT/SIGKILL後の実browser子孫回収を検証。外部入力が不明なcacheは再検証 |
 | text、mutation-testing-elements形式のJSON・HTML、保存ディレクトリの指定 | 従来の`--format json`を維持。`--reporter text/json/html`、`--report-dir`、MTE schema v2、外部リソース不要のHTMLを提供。実Vitest結果のupstream schema検証・HTML viewer実行を受入テストで確認 |
 | `not detected`／`not infected`／`not reached`の分類、子プロセス内で実行された可能性の警告 | レポートで3区分を表示。実際のNode子プロセス起動をテストへ関連付け、相対script依存のAST閉包に警告。raw argv/envは公開しない。動的な依存名・package/alias・shell展開は推測しない |
 | `--reporter agent`の不足・関数本文・到達テスト・修正案、stdoutとstderrの分離 | `--reporter agent` / `formatReport`で未検出区分、ASTの関数本文、到達テスト、修正案を単一JSONへ出力。GitHub環境でもannotationを混在させない |
