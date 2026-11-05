@@ -410,6 +410,7 @@ fn cleanup_temporary(configuration: &Configuration) {
         "driver.mjs".to_owned(),
         "setup.mjs".into(),
         "weak-runtime.mjs".into(),
+        "child-process.mjs".into(),
         "state.json".into(),
         format!("supervisor-{}.json", &configuration.identity.token[..16]),
     ] {
