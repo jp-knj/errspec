@@ -73,6 +73,22 @@ the same preparation/run scripts with real shallow Git checkouts, native reports
 failed gates and copied history. Those checks do not substitute for a successful
 live workflow on each supported distribution platform.
 
+The [Distribution workflow](../../.github/workflows/distribution.yml) now invokes
+`uses: ./` on Linux x64 and macOS ARM64/Intel. It deliberately fails a completed
+quality gate, verifies composite outputs and saved reports, records cache file
+hashes, and removes the local cache. An exact GitHub service restore must reproduce
+those bytes. The workflow then strengthens the fixture test and calls the composite
+again: the same old survivor must be killed after a current successful baseline.
+No GitHub environment values are hidden and cross-step native reuse is not
+required. Reports and a compact acceptance record are retained as artifacts.
+
+[Test-only setup and verifiers](../../scripts/action-live-acceptance.mjs) have
+[local real-native and negative tests](../../tests/action.test.mjs), including
+wrong outputs, cache misses, wrong keys and corrupted content. Local copied-cache
+tests validate those helpers, not the GitHub service. The live proof remains
+pending until these Distribution jobs actually execute successfully; billing
+failures before job startup provide no evidence.
+
 The cache steps use GitHub's [restore action](https://github.com/actions/cache/blob/main/restore/README.md)
 and [save action](https://github.com/actions/cache/blob/main/save/README.md).
 The Action is a [composite action](https://docs.github.com/en/actions/tutorials/create-actions/create-a-composite-action),
