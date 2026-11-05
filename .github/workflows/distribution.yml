@@ -51,6 +51,73 @@ jobs:
         env:
           ERRSPEC_RUNNER_DEPENDENCIES: '${{ github.workspace }}/tests/fixtures/runners/node_modules'
           ERRSPEC_TYPESCRIPT_PACKAGES: '["${{ github.workspace }}/packages/analysis-driver/node_modules/typescript6","${{ github.workspace }}/packages/analysis-driver/node_modules/typescript7"]'
+      - name: Prepare real composite Action acceptance
+        id: live_fixture
+        run: node scripts/action-live-acceptance.mjs setup
+        env:
+          ERRSPEC_LIVE_NATIVE_BINARY: target/release/errspec
+          ERRSPEC_LIVE_VITEST_PACKAGE: examples/checkout/node_modules/vitest
+      - name: Exercise a completed quality failure through the composite
+        id: live_failure
+        continue-on-error: true
+        uses: ./
+        with:
+          working-directory: ${{ steps.live_fixture.outputs.project }}
+          native-binary: ${{ steps.live_fixture.outputs.binary }}
+          since: ${{ steps.live_fixture.outputs.base }}
+          options: ${{ steps.live_fixture.outputs.options }}
+          cache: 'true'
+          report-directory: ${{ steps.live_fixture.outputs.first-report }}
+      - name: Verify failed Action outputs and remove local cache
+        run: node scripts/action-live-acceptance.mjs verify-failure
+        env:
+          ERRSPEC_LIVE_METADATA: ${{ steps.live_fixture.outputs.metadata }}
+          ERRSPEC_LIVE_OUTCOME: ${{ steps.live_failure.outcome }}
+          ERRSPEC_LIVE_EXIT_CODE: ${{ steps.live_failure.outputs.exit-code }}
+          ERRSPEC_LIVE_RUN_COMPLETE: ${{ steps.live_failure.outputs.run-complete }}
+          ERRSPEC_LIVE_REPORT_DIRECTORY: ${{ steps.live_failure.outputs.report-directory }}
+      - name: Restore the failed Action's cache from GitHub
+        id: live_service_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.live_fixture.outputs.cache-path }}
+          key: ${{ steps.live_fixture.outputs.cache-key }}
+          fail-on-cache-miss: true
+      - name: Verify exact restored bytes and strengthen the current test
+        run: node scripts/action-live-acceptance.mjs verify-restored
+        env:
+          ERRSPEC_LIVE_METADATA: ${{ steps.live_fixture.outputs.metadata }}
+          ERRSPEC_LIVE_CACHE_HIT: ${{ steps.live_service_restore.outputs.cache-hit }}
+          ERRSPEC_LIVE_MATCHED_KEY: ${{ steps.live_service_restore.outputs.cache-matched-key }}
+      - name: Revalidate restored evidence through the composite
+        id: live_rerun
+        uses: ./
+        with:
+          working-directory: ${{ steps.live_fixture.outputs.project }}
+          native-binary: ${{ steps.live_fixture.outputs.binary }}
+          since: ${{ steps.live_fixture.outputs.base }}
+          options: ${{ steps.live_fixture.outputs.options }}
+          cache: 'true'
+          report-directory: ${{ steps.live_fixture.outputs.second-report }}
+      - name: Verify current baseline and changed verdict
+        run: node scripts/action-live-acceptance.mjs verify-rerun
+        env:
+          ERRSPEC_LIVE_METADATA: ${{ steps.live_fixture.outputs.metadata }}
+          ERRSPEC_LIVE_OUTCOME: ${{ steps.live_rerun.outcome }}
+          ERRSPEC_LIVE_EXIT_CODE: ${{ steps.live_rerun.outputs.exit-code }}
+          ERRSPEC_LIVE_RUN_COMPLETE: ${{ steps.live_rerun.outputs.run-complete }}
+          ERRSPEC_LIVE_REPORT_DIRECTORY: ${{ steps.live_rerun.outputs.report-directory }}
+      - name: Retain live Action acceptance evidence
+        if: always() && steps.live_fixture.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: errspec-live-action-${{ matrix.target }}
+          path: |
+            ${{ steps.live_fixture.outputs.first-report }}/
+            ${{ steps.live_fixture.outputs.second-report }}/
+            ${{ steps.live_fixture.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: errspec-${{ matrix.target }}
