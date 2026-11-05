@@ -2,9 +2,9 @@
 
 These specifications record errspec's purpose, behavior and implementation
 boundaries. The full implementation plan and capability scope are approved;
-completion still depends on executable acceptance, all required distribution
-platforms and the practical trial. See [implementation status](products/errspec/implementation-status.md)
-for locally verified work, blocked CI and outstanding evidence.
+local implementation and practical-trial evidence are recorded separately from
+required remote validation. See [implementation status](products/errspec/implementation-status.md)
+for verified work, blocked CI and remaining acceptance.
 
 Read [the Product](products/errspec/product.md) first, then the feature's
 Requirements for observable behavior and Design for the implementation choices.
@@ -32,10 +32,14 @@ functional inclusion does not require copying mutator's public interface.
 - [Rust ownership and snapshot tests](engineering/guidelines/rust-code.md)
 - [Mutation execution and change boundaries](engineering/mutation-flow.md)
 - [Preparing distribution packages](engineering/guidelines/distribution.md)
+- [Failure-scenario testkit](../packages/testkit/README.md)
 - [Core API and mutation configuration](../packages/core/README.md)
+- [Vitest entry](../packages/vitest/README.md), [Jest entry](../packages/jest/README.md), and [Playwright fixtures](../packages/playwright/README.md)
+- [Independent compiler facts and worker API](../packages/typecheck/README.md)
 - [GitHub Action](integrations/github-action.md)
 - [Bundled Agent Skills and initialization](integrations/agent-skills.md)
 - [KARTE source-free failure-verification trial](products/errspec/practical-failure-trial.md)
+- [Journey full/repeat comparison](engineering/benchmarks/journey-2026-11-05.md) and [scope/test-improvement trial](products/errspec/practical-mutation-trial.md)
 
 English is the maintained documentation language. Git and PRs retain earlier
 wording, decisions and validation history. No specification bootstrap is required.
