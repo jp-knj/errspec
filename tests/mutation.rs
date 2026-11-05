@@ -859,6 +859,7 @@ fn score_and_gate_depend_on_completion() {
         reused: false,
         critical: false,
         infected_by: None,
+        matrix: None,
     });
     report.finish();
     assert!(report.summary.score.is_none());

@@ -2,7 +2,7 @@
 use errspec::mutation::selection::{Changes, Lines, hunks};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Read,
     os::unix::fs::OpenOptionsExt,
@@ -80,6 +80,7 @@ pub(crate) fn acquire(
         signal,
     )?;
     let mut files = BTreeMap::new();
+    let mut removals = BTreeSet::new();
     for name in paths(&names)? {
         if managed_cache_file(root, name, cache_directory) {
             continue;
@@ -103,7 +104,19 @@ pub(crate) fn acquire(
         )?;
         fingerprint(&mut hash, name.as_bytes());
         fingerprint(&mut hash, &patch);
-        let ranges = hunks(std::str::from_utf8(&patch).map_err(|_| "Git patch must be UTF-8")?)?;
+        let patch = std::str::from_utf8(&patch).map_err(|_| "Git patch must be UTF-8")?;
+        let ranges = hunks(patch)?;
+        if patch
+            .lines()
+            .filter(|line| line.starts_with("@@ "))
+            .any(|line| {
+                line.split_whitespace()
+                    .nth(2)
+                    .is_some_and(|new| new.ends_with(",0"))
+            })
+        {
+            removals.insert(name.to_owned());
+        }
         files.insert(name.to_owned(), ranges);
     }
     let untracked = git(
@@ -180,6 +193,7 @@ pub(crate) fn acquire(
         base,
         fingerprint: format!("{:x}", hash.finalize()),
         files,
+        removals,
     })
 }
 

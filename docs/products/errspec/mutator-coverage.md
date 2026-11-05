@@ -61,8 +61,8 @@
 | `not detected`／`not infected`／`not reached`の分類、子プロセス内で実行された可能性の警告 | レポートで3区分を表示。実際のNode子プロセス起動をテストへ関連付け、相対script依存のAST閉包に警告。raw argv/envは公開しない。動的な依存名・package/alias・shell展開は推測しない |
 | `--reporter agent`の不足・関数本文・到達テスト・修正案、stdoutとstderrの分離 | `--reporter agent` / `formatReport`で未検出区分、ASTの関数本文、到達テスト、修正案を単一JSONへ出力。GitHub環境でもannotationを混在させない |
 | `--reporter simplify`で削除してもテストが失敗しないコードを一覧化 | 到達済みの生存削除変異を、位置・関数・変異ID・削除内容とともに提示。未到達・Ignoredは含めない |
-| `select-tests`で変更に関係するテストを順位付けし、files／JSONで出力 | 未実装 |
-| `--kill-matrix`による全検出テスト、検出なし・包含・重複テストの一覧、各実行方式での結果再利用 | 未実装 |
+| `select-tests`で変更に関係するテストを順位付けし、files／JSONで出力 | `select-tests --since`と公開`selectTests`。現在のbaseline／probeによるcoverageを取得し、過去のkillは明示したhintとして順位付け。変更test・削除code・観測不足・helper/module変更は全収集fileへ戻し、削除testと最後のinventory変更も検査。CLI／API／filesとinstalled-coreで検証 |
+| `--kill-matrix`による全検出テスト、検出なし・包含・重複テストの一覧、各実行方式での結果再利用 | 全covering testを実行し、complete rowだけで関係を判定。遅いkiller・weak mode・matching stampのfirst-detection排除・未実行予算・retry/timeoutを実fixtureで検証。結果rowは毎回再実行し、照合済みprobeだけ再利用。installed-coreも検証 |
 | high／low／breakの閾値、`--fail-on-survived`、baseline失敗とquality gate失敗の区別 | `--threshold-high/low/break`と`--fail-on-survived`を提供。quality gateは終了1、基準実行の異常は終了2 |
 | critical領域のglob／コメント指定、全mutantの検出または承認の要求 | `--critical`と直前の`// errspec-critical` / `// mutator-critical`で提供 |
 | GitHub Actionsの差分上のwarning annotation | 未実装 |

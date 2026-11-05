@@ -40,7 +40,7 @@ fn main() -> ExitCode {
         explicit_config,
         matches
             .subcommand()
-            .filter(|(name, _)| *name == "mutate")
+            .filter(|(name, _)| matches!(*name, "mutate" | "select-tests"))
             .map(|(_, cmd)| {
                 cmd.ids()
                     .filter(|id| {

@@ -53,6 +53,7 @@ fn mutant(status: Status) -> Mutant {
         critical: false,
         reused: false,
         infected_by: None,
+        matrix: None,
     }
 }
 fn selected() -> Vec<String> {

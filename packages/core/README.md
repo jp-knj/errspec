@@ -67,9 +67,59 @@ the CLI/API `node` option (or `node` on PATH), before a file can supply its own
 execution option. Loader logs go to stderr, with a 10-second deadline and 1 MiB
 output limits. Configuration scripts run as local project code.
 
-`selectTests` and additional runner packages are subsequent implementation stages.
+Additional runner packages are a subsequent implementation stage.
 `formatReport` shares the native presentation with the CLI; `defineMutator`,
 `defineIgnorer` and `definePlugin` define module plugins.
+
+## Selecting tests for a change
+
+```js
+import { selectTests } from "@errspec/core";
+const { exitCode, report } = await selectTests({ since: "HEAD", cache: true });
+console.log(report.files);
+```
+
+`errspec select-tests --since HEAD` prints one test file per line.
+`--format files` is equivalent; `--format json` returns an
+`errspec/test-selection` report. A Git base is required. The API sends the same
+native request used by the CLI. It runs the ordinary baseline and a current
+instrumented probe, using a previous probe only after current-input validation;
+it does not execute mutation trials. Runner/source/configuration options apply.
+Mutation quality gates, trial budgets, typecheck, weak filtering and shards do
+not limit recommendations.
+
+Files are ordered by historical kill hints, current coverage of changed function
+scopes, then changed test files. Historical hints are explicitly labelled and
+must match currently collected covering test IDs; they do not assert that a test
+still kills a mutant. Removing a test removes its recommendation. Changed tests,
+helpers/configuration outside the mutation inventory, removed source lines,
+module effects and changed functions without an observed candidate conservatively
+include every currently collected test file. Uncollected or deleted changed tests
+remain visible in `warnings`. Failed acquisition returns exit code 2 and no file
+recommendations. The report distinguishes a current probe from validated probe
+reuse; an empty successful list means no related changes were found.
+
+## Complete kill matrix
+
+`errspec mutate --kill-matrix` or `runMutation({ killMatrix: true })` runs every
+covering test for each selected mutant. It forces runner bail and global retries
+to zero and keeps late failures. Weak infection filtering does not omit covering
+tests in this mode. `--no-kill-matrix` overrides configured true.
+
+`report.killMatrix` includes every row's `selected`, `executed`, `killedBy`,
+`complete` and optional `incompleteReason`. Complete rows require an ordinary
+result from every selected test, with no module/runner errors, timeout, native
+retry, or observed per-test retry/repeat. Skipped, sampled, budget-limited and
+uncovered candidates cannot establish complete cells. Failure to finish input
+validation invalidates all row completeness claims.
+
+`noKills`, strict `subsumed` sets and nonempty `duplicates` are computed over
+complete rows only, within the requested Git/ID/shard population. They describe
+the observed mutants and are not advice to delete test cases. `mutants.full`,
+`timeout` and `incomplete` expose the excluded population. Matrix trials always
+run afresh: ordinary first-detection and scope-cache outcomes cannot supply cells,
+even with matching input stamps. Validated probe reuse is retained; `cache.reused`
+and `cache.saved` for result rows stay zero in matrix mode.
 
 ## Git selection
 

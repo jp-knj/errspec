@@ -271,6 +271,7 @@ fn record_reach(
 
 /// Results crossing the execution/output boundary contain no compiler handles.
 pub(crate) enum Outcome {
+    TestSelection(Box<errspec::mutation::test_selection::Report>),
     MutationAction(crate::mutation_actions::ActionOutput),
     Mutation(Box<errspec::mutation::Report>),
     Contract(Report),
@@ -297,6 +298,9 @@ pub(crate) fn execute(request: Request) -> Outcome {
         )),
         Request::Mutation(request) => {
             Outcome::Mutation(Box::new(crate::mutation_config::run(*request)))
+        }
+        Request::SelectTests(request) => {
+            Outcome::TestSelection(Box::new(crate::mutation_config::select_tests(*request)))
         }
         Request::MutationSource
         | Request::MutationApi

@@ -16,7 +16,7 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
     let output = match format {
         Format::Json => serde_json::to_string_pretty(report)
             .expect("report serialization uses only JSON primitives"),
-        Format::Text | Format::Markdown => {
+        Format::Text | Format::Markdown | Format::Files => {
             let mut lines = vec![format!(
                 "{}: {} (analysis complete: {}, tests executed: {})",
                 report.mode,
@@ -94,10 +94,29 @@ fn write_contract(report: &Report, format: Format) -> ExitCode {
 
 pub(crate) fn write(outcome: Outcome, format: Format) -> ExitCode {
     match outcome {
+        Outcome::TestSelection(report) => {
+            if matches!(format, Format::Json) {
+                println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            } else {
+                for file in &report.selection.files {
+                    println!("{file}");
+                }
+                for diagnostic in &report.diagnostics {
+                    eprintln!("{}: {}", diagnostic.code, diagnostic.message);
+                }
+                for warning in &report.selection.warnings {
+                    eprintln!(
+                        "warning {} {}: {}",
+                        warning.code, warning.file, warning.message
+                    );
+                }
+            }
+            ExitCode::from(report.exit_code())
+        }
         Outcome::MutationAction(result) => {
             match format {
                 Format::Json => println!("{}", serde_json::to_string_pretty(&result.json).unwrap()),
-                Format::Text | Format::Markdown => {
+                Format::Text | Format::Markdown | Format::Files => {
                     if result.code == 0 {
                         println!("{}", result.text);
                     } else {
@@ -127,7 +146,7 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
     }
     let output = match format {
         Format::Json => serde_json::to_string_pretty(report).unwrap(),
-        Format::Text | Format::Markdown => {
+        Format::Text | Format::Markdown | Format::Files => {
             let mut lines = vec![format!(
                 "mutate: {} (complete: {}, tests executed: {})",
                 if report.ok { "pass" } else { "fail" },
@@ -202,6 +221,37 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                     lines.push(format!("  warning: {warning}"));
                 }
             }
+            if let Some(matrix) = &report.kill_matrix {
+                lines.push(format!(
+                    "kill matrix: {} complete, {} timeout, {} incomplete rows; {} observed tests",
+                    matrix.mutants.full,
+                    matrix.mutants.timeout,
+                    matrix.mutants.incomplete,
+                    matrix.tests
+                ));
+                lines.push(
+                    "  relationships use complete rows within the selected mutant population"
+                        .into(),
+                );
+                for test in &matrix.no_kills {
+                    lines.push(format!("  no kills: {test}"));
+                }
+                for row in &matrix.subsumed {
+                    lines.push(format!(
+                        "  subsumed: {} ({} kills) by {}",
+                        row.test,
+                        row.kills,
+                        row.by.join(", ")
+                    ));
+                }
+                for group in &matrix.duplicates {
+                    lines.push(format!(
+                        "  duplicate kill sets ({} kills): {}",
+                        group.kills,
+                        group.tests.join(", ")
+                    ));
+                }
+            }
             for m in &report.mutants {
                 lines.push(format!(
                     "{}:{} {} {:?}: {} -> {}",
@@ -220,6 +270,16 @@ fn write_mutation(report: &errspec::mutation::Report, format: Format) -> ExitCod
                 }
                 if m.reused {
                     lines.push("  reused result (matching inputs)".into());
+                }
+                if let Some(row) = &m.matrix
+                    && !row.complete
+                {
+                    lines.push(format!(
+                        "  matrix incomplete: {}",
+                        row.incomplete_reason
+                            .as_deref()
+                            .unwrap_or("unknown acquisition")
+                    ));
                 }
                 if !m.covered_by.is_empty() {
                     lines.push(format!("  covered by: {}", m.covered_by.join(", ")));
@@ -270,7 +330,7 @@ fn write_init(result: Result<InitReport, crate::onboard::InitError>, format: For
                     "{}",
                     serde_json::to_string_pretty(&serde_json::to_value(&report).unwrap()).unwrap()
                 ),
-                Format::Text | Format::Markdown => {
+                Format::Text | Format::Markdown | Format::Files => {
                     if let Some(info) = &report.analysis {
                         println!("{}", analysis_line(info));
                     }
@@ -294,7 +354,7 @@ fn write_init(result: Result<InitReport, crate::onboard::InitError>, format: For
                     }
                     println!("{report}");
                 }
-                Format::Text | Format::Markdown => {
+                Format::Text | Format::Markdown | Format::Files => {
                     if let Some(info) = &error.analysis {
                         eprintln!("{}", analysis_line(info));
                     }
@@ -320,7 +380,7 @@ fn write_scan(
     };
     match format {
         Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
-        Format::Text | Format::Markdown => {
+        Format::Text | Format::Markdown | Format::Files => {
             if let Some(info) = &report.analysis {
                 println!("{}", analysis_line(info));
             }
@@ -410,7 +470,7 @@ fn write_coverage(
     match format {
         Format::Json => println!("{}", serde_json::to_string_pretty(report).unwrap()),
         Format::Markdown => print!("{}", coverage_markdown(report)),
-        Format::Text => {
+        Format::Text | Format::Files => {
             if let Some(info) = &report.analysis {
                 println!("{}", analysis_line(info));
             }

@@ -40,6 +40,7 @@ pub(crate) enum Format {
     Text,
     /// GitHub-flavored Markdown; coverage only.
     Markdown,
+    Files,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -169,6 +170,11 @@ struct MutationArgs {
     runner_project: Option<String>,
     #[arg(long)]
     runner_package: Option<PathBuf>,
+    /// Run every covering test and report complete per-test kill relationships.
+    #[arg(long)]
+    kill_matrix: bool,
+    #[arg(long)]
+    no_kill_matrix: bool,
     #[arg(long)]
     vitest_config: Option<PathBuf>,
     #[arg(long)]
@@ -246,6 +252,8 @@ enum Action {
     },
     /// Generate mutations, run Vitest, and report detected and undetected changes.
     Mutate(Box<MutationArgs>),
+    /// Rank tests related to a Git base from current baseline/probe evidence.
+    SelectTests(Box<MutationArgs>),
     #[command(name = "__mutation-source", hide = true)]
     MutationSource,
     #[command(name = "__mutation-api", hide = true)]
@@ -341,6 +349,9 @@ impl Cli {
         explicit_config: bool,
         overrides: std::collections::BTreeSet<String>,
     ) -> Result<(Request, Format), String> {
+        if matches!(self.format, Format::Files) && !matches!(self.command, Action::SelectTests(_)) {
+            return Err("--format files is supported only by select-tests".into());
+        }
         if matches!(self.format, Format::Markdown)
             && !matches!(self.command, Action::Coverage { .. })
         {
@@ -387,7 +398,12 @@ impl Cli {
             Action::MutationSupervisor { configuration } => {
                 return Ok((Request::MutationSupervisor(configuration), self.format));
             }
-            Action::Mutate(args) => {
+            action @ (Action::Mutate(_) | Action::SelectTests(_)) => {
+                let selecting = matches!(action, Action::SelectTests(_));
+                let args = match action {
+                    Action::Mutate(args) | Action::SelectTests(args) => args,
+                    _ => unreachable!(),
+                };
                 let MutationArgs {
                     reporter,
                     report_dir,
@@ -408,6 +424,8 @@ impl Cli {
                     runner_config,
                     runner_project,
                     runner_package,
+                    kill_matrix,
+                    no_kill_matrix,
                     vitest_config,
                     vitest_project,
                     vitest_package,
@@ -445,49 +463,58 @@ impl Cli {
                     );
                 }
                 return Ok((
-                    Request::Mutation(Box::new(MutationRequest {
-                        config_file,
-                        overrides,
-                        options: errspec::mutation::options::Options {
-                            reporters: reporter,
-                            report_dir,
-                            since,
-                            diff_unit: diff_unit.map(Into::into),
-                            shard,
-                            concurrency,
-                            arid: arid && !no_arid,
-                            arid_callees: (!arid_callee.is_empty()).then_some(arid_callee),
-                            root,
-                            include,
-                            exclude,
-                            exclude_mutator,
-                            plugins: plugins
-                                .into_iter()
-                                .map(errspec::mutation::options::Plugin::Module)
-                                .collect(),
-                            runner,
-                            runner_config,
-                            runner_project,
-                            runner_package,
-                            vitest_config,
-                            vitest_project,
-                            vitest_package,
-                            node,
-                            fail_on_undetected,
-                            typecheck,
-                            weak_mutation,
-                            reuse_session,
-                            cache,
-                            cache_relocation,
-                            cache_scope,
-                            experimental_callgraph,
-                            cache_dir,
-                            full_dry_run,
-                            typecheck_project,
-                            typecheck_package,
-                            policy: (*policy).into(),
-                        },
-                    })),
+                    {
+                        let request = Box::new(MutationRequest {
+                            config_file,
+                            overrides,
+                            options: errspec::mutation::options::Options {
+                                reporters: reporter,
+                                report_dir,
+                                runner,
+                                runner_config,
+                                runner_project,
+                                runner_package,
+                                experimental_callgraph: experimental_callgraph
+                                    && !no_experimental_callgraph,
+                                since,
+                                diff_unit: diff_unit.map(Into::into),
+                                shard,
+                                concurrency,
+                                arid: arid && !no_arid,
+                                arid_callees: (!arid_callee.is_empty()).then_some(arid_callee),
+                                root,
+                                include,
+                                exclude,
+                                exclude_mutator,
+                                plugins: plugins
+                                    .into_iter()
+                                    .map(errspec::mutation::options::Plugin::Module)
+                                    .collect(),
+                                kill_matrix: kill_matrix && !no_kill_matrix,
+                                vitest_config,
+                                vitest_project,
+                                vitest_package,
+                                node,
+                                fail_on_undetected,
+                                typecheck,
+                                weak_mutation,
+                                reuse_session,
+                                cache,
+                                cache_relocation,
+                                cache_scope,
+                                cache_dir,
+                                full_dry_run,
+                                typecheck_project,
+                                typecheck_package,
+                                policy: (*policy).into(),
+                            },
+                        });
+                        if selecting {
+                            Request::SelectTests(request)
+                        } else {
+                            Request::Mutation(request)
+                        }
+                    },
                     self.format,
                 ));
             }

@@ -600,6 +600,12 @@ pub(crate) fn load(directory: PathBuf, stamp: Stamp, info: &mut cache::Info) -> 
         scope: None,
     }
 }
+
+pub(crate) fn historical(options: &Options) -> Option<cache::File> {
+    read_document(&directory(options).join("results-v1.json"))
+        .ok()
+        .flatten()
+}
 pub(crate) fn save(store: &Store) -> Result<(), std::io::Error> {
     save_document(
         &store.directory,

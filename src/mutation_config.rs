@@ -33,6 +33,18 @@ pub(crate) fn run(request: MutationRequest) -> Report {
         }
     }
 }
+pub(crate) fn select_tests(request: MutationRequest) -> errspec::mutation::test_selection::Report {
+    match resolve(request) {
+        Ok(options) => crate::mutate::select_tests(options),
+        Err(error) => {
+            let mut report = Report::new(false);
+            report.interrupted = error.interrupted;
+            report.error("EC_MUTATION_CONFIG", error.message);
+            report.finish();
+            errspec::mutation::test_selection::Report::from_mutation(report)
+        }
+    }
+}
 
 struct ConfigFailure {
     message: String,
@@ -170,6 +182,8 @@ pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) 
         ("runner_config", "runnerConfig"),
         ("runner_project", "runnerProject"),
         ("runner_package", "runnerPackage"),
+        ("kill_matrix", "killMatrix"),
+        ("no_kill_matrix", "killMatrix"),
         ("vitest_config", "vitestConfig"),
         ("vitest_project", "vitestProject"),
         ("vitest_package", "vitestPackage"),

@@ -1,0 +1,113 @@
+---
+source: tests/mutation_matrix.rs
+expression: analysis
+---
+{
+  "acquisition": "all_covering_tests",
+  "rows": [
+    {
+      "key": "one",
+      "status": "Killed",
+      "complete": true,
+      "selected": [
+        "t#a",
+        "t#b",
+        "t#c",
+        "t#d"
+      ],
+      "executed": [
+        "t#a",
+        "t#b",
+        "t#c",
+        "t#d"
+      ],
+      "killedBy": [
+        "t#a",
+        "t#b",
+        "t#c"
+      ]
+    },
+    {
+      "key": "two",
+      "status": "Killed",
+      "complete": true,
+      "selected": [
+        "t#a",
+        "t#b",
+        "t#c",
+        "t#d"
+      ],
+      "executed": [
+        "t#a",
+        "t#b",
+        "t#c",
+        "t#d"
+      ],
+      "killedBy": [
+        "t#a",
+        "t#b"
+      ]
+    },
+    {
+      "key": "timeout",
+      "status": "Timeout",
+      "complete": false,
+      "selected": [
+        "t#timeout"
+      ],
+      "executed": [],
+      "killedBy": [],
+      "incompleteReason": "No complete acquisition for Timeout"
+    },
+    {
+      "key": "partial",
+      "status": "RuntimeError",
+      "complete": false,
+      "selected": [
+        "t#module"
+      ],
+      "executed": [],
+      "killedBy": [],
+      "incompleteReason": "No complete acquisition for RuntimeError"
+    },
+    {
+      "key": "budget",
+      "status": "Pending",
+      "complete": false,
+      "selected": [
+        "t#pending"
+      ],
+      "executed": [],
+      "killedBy": [],
+      "incompleteReason": "Time budget exhausted before execution"
+    }
+  ],
+  "mutants": {
+    "full": 2,
+    "timeout": 1,
+    "incomplete": 2
+  },
+  "tests": 4,
+  "noKills": [
+    "t#d"
+  ],
+  "subsumed": [
+    {
+      "test": "t#c",
+      "kills": 1,
+      "by": [
+        "t#a",
+        "t#b"
+      ]
+    }
+  ],
+  "duplicates": [
+    {
+      "tests": [
+        "t#a",
+        "t#b"
+      ],
+      "kills": 2
+    }
+  ]
+}

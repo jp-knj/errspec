@@ -12,6 +12,7 @@ export interface MutationPolicy {
 export interface MutationOptions {
   reporters?: MutationReporter[];
   reportDir?: string | null;
+  killMatrix?: boolean;
   plugins?: (string | { module: string; settings?: JsonValue })[];
   since?: string | null;
   diffUnit?: "node" | "scope" | null;
@@ -83,6 +84,35 @@ export function defineMutator<T extends MutatorDefinition>(definition: T): T;
 export function defineIgnorer<T extends IgnorerDefinition>(definition: T): T;
 export function definePlugin<T extends MutationPlugin>(definition: T): T;
 export type MutationConfig = MutationOptions & { $schema?: string };
+export interface MatrixObservation {
+  complete: boolean; selected: string[]; executed: string[]; killedBy: string[];
+  incompleteReason?: string;
+}
+export interface KillMatrixReport {
+  acquisition: "all_covering_tests";
+  rows: (MatrixObservation & {key: string; status: MutationStatus})[];
+  mutants: {full: number; timeout: number; incomplete: number};
+  tests: number; noKills: string[];
+  subsumed: {test: string; kills: number; by: string[]}[];
+  duplicates: {tests: string[]; kills: number}[];
+}
+export interface SelectedTest {
+  test?: string; file: string; kills: number; covers: number;
+  evidence: "historical_kill_hint" | "current_coverage" | "changed_test" | "conservative";
+  reason: string;
+}
+export interface TestSelectionReport {
+  kind: "errspec/test-selection"; schemaVersion: 1;
+  runComplete: boolean; ok: boolean; testsExecuted: boolean;
+  coverage: "current_probe" | "validated_probe_cache";
+  since: string; base: string; changedFiles: string[]; currentTests: number;
+  observedMutants: number; files: string[];
+  warnings: {code: string; file: string; message: string}[];
+  killers: SelectedTest[]; covering: SelectedTest[]; changedTests: SelectedTest[];
+  fallbackReason?: string;
+  diagnostics: {code: string; message: string}[];
+}
+export function selectTests(options: MutationOptions & {since: string}, transport?: MutationTransport): Promise<{exitCode: number; report: TestSelectionReport}>;
 export type MutationStatus = "Killed" | "Survived" | "NoCoverage" | "Timeout" |
   "RuntimeError" | "CompileError" | "Ignored" | "Pending";
 export interface MutationTest {
@@ -105,6 +135,7 @@ export interface MutationAttempt {
   failedModules: string[];
 }
 export interface Mutant {
+  matrix?: MatrixObservation;
   key: string;
   file: string;
   line: number;
@@ -130,6 +161,7 @@ export interface Mutant {
   infectedBy?: string[];
 }
 export interface MutationReport {
+  killMatrix?: KillMatrixReport;
   kind: "errspec/mutation";
   schemaVersion: 1;
   engine: {

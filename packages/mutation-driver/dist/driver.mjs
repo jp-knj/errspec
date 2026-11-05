@@ -2890,6 +2890,8 @@ function recordModule(module, execution, request) {
     if (meta && (meta.runId !== runId || meta.requestId !== request.requestId))
       throw failure("EC_MUTATION_PROTOCOL", "Stale test metadata");
     const result = test.result();
+    if (options.killMatrix && (test.diagnostic()?.retryCount > 0 || test.diagnostic()?.repeatCount > 0))
+      execution.acquisitionIncomplete = `Complete acquisition included a retried or repeated test: ${id}`;
     execution.tests.push({
       id,
       taskId: test.id,
@@ -3093,8 +3095,8 @@ async function execute(phase, request) {
           testNamePattern: config.testNamePattern,
           testTimeout: timeouts.test,
           hookTimeout: timeouts.hook,
-          retry: config.retry,
-          bail: config.bail,
+          retry: options.killMatrix ? 0 : config.retry,
+          bail: options.killMatrix ? 0 : config.bail,
           sequence,
           setupFiles: config.setupFiles.filter((f) => f !== options.setup).map(relocatedPath),
           globalSetup: config.globalSetup,
@@ -3116,6 +3118,12 @@ async function execute(phase, request) {
     config.watch = false;
     config.update = false;
     config.snapshotOptions = { ...config.snapshotOptions, updateSnapshot: "none" };
+    if (options.killMatrix || request.complete) {
+      config.bail = 0;
+      config.retry = 0;
+      ctx.config.bail = 0;
+      ctx.config.retry = 0;
+    }
     ctx.config.snapshotOptions.updateSnapshot = "none";
     ctx.snapshot.options.updateSnapshot = "none";
     config.pool = "forks";
@@ -3431,7 +3439,7 @@ async function handle(request) {
   }
   if (request.op === "close") {
     verifyInputs();
-    if ((options.cache || options.concurrency > 1) && baseline)
+    if ((options.cache || options.concurrency > 1 || options.killMatrix || options.selectionOnly) && baseline)
       await execute("inspect", request);
     if (warmContext) {
       const saved = warmContext;

@@ -16,6 +16,7 @@ pub struct Options {
     pub runner_config: Option<PathBuf>,
     pub runner_project: Option<String>,
     pub runner_package: Option<PathBuf>,
+    pub kill_matrix: bool,
     pub vitest_config: Option<PathBuf>,
     pub vitest_project: Option<String>,
     pub vitest_package: Option<PathBuf>,
@@ -54,6 +55,7 @@ impl Default for Options {
             runner_config: None,
             runner_project: None,
             runner_package: None,
+            kill_matrix: false,
             vitest_config: None,
             vitest_project: None,
             vitest_package: None,
@@ -84,6 +86,9 @@ impl Options {
     pub fn validate(&self) -> Result<(), String> {
         self.policy.validate()?;
         super::reporting::validate_reporters(&self.reporters)?;
+        if self.kill_matrix && self.experimental_callgraph {
+            return Err("killMatrix cannot use experimentalCallgraph".into());
+        }
         if self.experimental_callgraph && (!self.cache || !self.cache_scope) {
             return Err("experimentalCallgraph requires cache and cacheScope".into());
         }

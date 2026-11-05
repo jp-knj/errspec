@@ -33,6 +33,7 @@ fn mutant(key: &str, family: &str, status: Status) -> Mutant {
         reused: false,
         critical: false,
         infected_by: None,
+        matrix: None,
     }
 }
 
