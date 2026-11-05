@@ -2,7 +2,7 @@
 import { readFileSync as readFileSync6, writeFileSync as writeFileSync3, realpathSync as realpathSync6, existsSync as existsSync6, globSync, statSync } from "node:fs";
 import { basename, dirname as dirname5, resolve as resolve5, relative as relative2, join as join6, isAbsolute as isAbsolute2, matchesGlob } from "node:path";
 import { pathToFileURL as pathToFileURL4 } from "node:url";
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { format } from "node:util";
@@ -2273,6 +2273,7 @@ function detectRunner(root, options = {}) {
 import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync4, mkdirSync, rmSync, realpathSync as realpathSync4 } from "node:fs";
 import { join as join4, resolve as resolve3 } from "node:path";
 import { createRequire as createRequire4 } from "node:module";
+import { createHash } from "node:crypto";
 
 // process-runner.mjs
 import { spawn } from "node:child_process";
@@ -2340,6 +2341,7 @@ function transformer(load) {
 function environment(Base, attachWeakBinary, load) {
   const { readFileSync, writeFileSync } = load("node:fs");
   const { join, relative } = load("node:path");
+  const { createHash } = load("node:crypto");
   return class extends Base {
     constructor(config, context) {
       super(config, context);
@@ -2348,7 +2350,7 @@ function environment(Base, attachWeakBinary, load) {
     async setup() {
       await super.setup();
       this.state = JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE, "utf8"));
-      this.data = { file: this.file, tests: [], hits: {}, staticHits: {} };
+      this.data = { runId: this.state.context.runId, requestId: this.state.context.requestId, phase: this.state.phase, file: this.file, tests: [], hits: {}, staticHits: {} };
       const self = this, ctx = this.state.context;
       const record = this.global[Symbol.for(`errspec.mutation.${ctx.runId}`)] = (key) => {
         const count = self.data.hits[key] = (self.data.hits[key] || 0) + 1;
@@ -2422,7 +2424,7 @@ function environment(Base, attachWeakBinary, load) {
     }
     async teardown() {
       try {
-        writeFileSync(join(this.state.output, Buffer.from(this.file).toString("hex") + ".json"), JSON.stringify(this.data));
+        writeFileSync(join(this.state.output, createHash("sha256").update(this.file).digest("hex") + ".json"), JSON.stringify(this.data));
       } finally {
         await super.teardown();
       }
@@ -2485,11 +2487,13 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
       if (normalized.transformIgnorePatterns.some((pattern) => new RegExp(pattern).test(file)))
         throw failure("EC_MUTATION_CONFIG", `Mutation target is excluded from Jest transforms: ${file}; exclude the target or adjust transformIgnorePatterns`);
     const output = join4(directory, `results-${request.requestId}`);
+    rmSync(output, { recursive: true, force: true });
     mkdirSync(output, { recursive: true });
     const stateFile = join4(directory, "state.json"), reportFile = join4(directory, "report.json");
     rmSync(reportFile, { force: true });
     writeFileSync(stateFile, JSON.stringify({
       root,
+      phase,
       toolTemp: realpathSync4(options.toolTemp),
       transforms: normalized.transform,
       output,
@@ -2509,10 +2513,12 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
     const report = JSON.parse(readFileSync4(reportFile, "utf8"));
     const execution = { selected: request.selected || [], tests: [], failedModules: [], errors: [], hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
     for (const fileResult of report.testResults) {
-      const file = fileResult.name, name = ctx.rel(file), metadata = join4(output, Buffer.from(file).toString("hex") + ".json");
+      const file = fileResult.name, name = ctx.rel(file), metadata = join4(output, createHash("sha256").update(file).digest("hex") + ".json");
       execution.moduleDurations[name] = (fileResult.endTime || 0) - (fileResult.startTime || 0);
       if (existsSync4(metadata)) {
         const data = JSON.parse(readFileSync4(metadata, "utf8"));
+        if (data.runId !== ctx.runId || data.requestId !== request.requestId || data.phase !== phase || data.file !== file)
+          throw failure("EC_MUTATION_PROTOCOL", `Stale Jest worker metadata: ${name}`);
         if (data.acquisitionIncomplete)
           execution.acquisitionIncomplete = data.acquisitionIncomplete;
         for (const test of data.tests.sort((a, b) => a.order - b.order)) {
@@ -2760,7 +2766,7 @@ var pendingGenerated = new Map;
 var mutationPlugins;
 var normalize = (s) => s.replaceAll("\\", "/");
 var rel = (file) => normalize(relative2(root, file));
-var hash = (data) => createHash("sha256").update(data).digest("hex");
+var hash = (data) => createHash2("sha256").update(data).digest("hex");
 var relocatedPath = (path) => {
   if (!options.cacheRelocation || !isAbsolute2(path))
     return path;

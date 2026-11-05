@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { runChild } from "./process-runner.mjs";
 // These helpers execute inside the project's Jest process. They acquire facts;
 // native Rust alone decides whether a mutation was detected.
@@ -41,12 +42,13 @@ function transformer(load) {
 function environment(Base,attachWeakBinary,load) {
   const {readFileSync,writeFileSync}=load("node:fs");
   const {join,relative}=load("node:path");
+  const {createHash}=load("node:crypto");
   return class extends Base {
     constructor(config,context){super(config,context);this.file=context.testPath;}
     async setup(){
       await super.setup();
       this.state=JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE,"utf8"));
-      this.data={file:this.file,tests:[],hits:{},staticHits:{}};
+      this.data={runId:this.state.context.runId,requestId:this.state.context.requestId,phase:this.state.phase,file:this.file,tests:[],hits:{},staticHits:{}};
       const self=this,ctx=this.state.context;
       const record=this.global[Symbol.for(`errspec.mutation.${ctx.runId}`)]=key=>{
         const count=self.data.hits[key]=(self.data.hits[key]||0)+1;
@@ -90,7 +92,7 @@ function environment(Base,attachWeakBinary,load) {
       }
     }
     async teardown(){
-      try{writeFileSync(join(this.state.output,Buffer.from(this.file).toString("hex")+".json"),JSON.stringify(this.data));}
+      try{writeFileSync(join(this.state.output,createHash("sha256").update(this.file).digest("hex")+".json"),JSON.stringify(this.data));}
       finally{await super.teardown();}
     }
   };
@@ -125,10 +127,10 @@ export async function createJestAdapter(ctx) {
     const specs=files.map(file=>({file,project:""}));
     if(phase==="inspect")return {specs,excluded:[...configFiles,...files]};
     for(const file of inventory.keys())if(normalized.transformIgnorePatterns.some(pattern=>new RegExp(pattern).test(file)))throw failure("EC_MUTATION_CONFIG",`Mutation target is excluded from Jest transforms: ${file}; exclude the target or adjust transformIgnorePatterns`);
-    const output=join(directory,`results-${request.requestId}`);mkdirSync(output,{recursive:true});
+    const output=join(directory,`results-${request.requestId}`);rmSync(output,{recursive:true,force:true});mkdirSync(output,{recursive:true});
     const stateFile=join(directory,"state.json"),reportFile=join(directory,"report.json");
     rmSync(reportFile,{force:true});
-    writeFileSync(stateFile,JSON.stringify({root,toolTemp:realpathSync(options.toolTemp),transforms:normalized.transform,output,selected:request.selected||[],
+    writeFileSync(stateFile,JSON.stringify({root,phase,toolTemp:realpathSync(options.toolTemp),transforms:normalized.transform,output,selected:request.selected||[],
       context:{runId:ctx.runId,requestId:request.requestId,activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER,weakMutation:options.weakMutation,complete:!!request.complete},
       inventory:Object.fromEntries([...inventory].map(([file,entry])=>[file,{source:entry.source,code:phase==="plain"?entry.source:entry.emitted.code}]))}));
     const selectedFiles=request.selected?.length?[...new Set(request.selected.map(id=>{const test=baseline.tests.find(t=>t.id===id);if(!test)throw failure("EC_MUTATION_PROTOCOL",`Unknown test ID: ${id}`);return resolve(root,test.file);}))]:files;
@@ -138,10 +140,11 @@ export async function createJestAdapter(ctx) {
     const report=JSON.parse(readFileSync(reportFile,"utf8"));
     const execution={selected:request.selected||[],tests:[],failedModules:[],errors:[],hits:{},staticHits:{},moduleDurations:{},wallTimeout:false};
     for(const fileResult of report.testResults){
-      const file=fileResult.name,name=ctx.rel(file),metadata=join(output,Buffer.from(file).toString("hex")+".json");
+      const file=fileResult.name,name=ctx.rel(file),metadata=join(output,createHash("sha256").update(file).digest("hex")+".json");
       execution.moduleDurations[name]=(fileResult.endTime||0)-(fileResult.startTime||0);
       if(existsSync(metadata)){
         const data=JSON.parse(readFileSync(metadata,"utf8"));
+        if(data.runId!==ctx.runId||data.requestId!==request.requestId||data.phase!==phase||data.file!==file)throw failure("EC_MUTATION_PROTOCOL",`Stale Jest worker metadata: ${name}`);
         if(data.acquisitionIncomplete)execution.acquisitionIncomplete=data.acquisitionIncomplete;
         for(const test of data.tests.sort((a,b)=>a.order-b.order)){delete test.order;execution.tests.push({...test,taskId:test.id,file:name});}
         for(const [key,count]of Object.entries(data.hits))execution.hits[key]=(execution.hits[key]||0)+count;
