@@ -177,3 +177,11 @@ test("Playwright expected failures preserve the project's successful baseline se
   const report=run(root,["--runner","playwright"]);assert.equal(report.runComplete,true);assert.equal(report.baseline[0].status,"passed");
   assert.ok(report.mutants.some(m=>m.mutator==="BooleanLiteral"&&m.status==="Killed"));
 });
+for(const runner of ['jest','playwright'])test(`${runner} custom plugin acquisition shares native generation and excludes plugin modules`,t=>{
+  const root=runner==='playwright'?browserProject(t,{projects:false}):project(t);
+  writeFileSync(join(root,'src/custom-plugin.mjs'),"export default {name:'ConfiguredNumber',cache:'deterministic',visit(node){if(node.kind==='NumericLiteral'&&node.text==='1')return [{replacement:'2'}]}};");
+  const result=run(root,['--runner',runner,'--plugin','./src/custom-plugin.mjs']);
+  assert.equal(result.runComplete,true);
+  const custom=result.mutants.filter(m=>m.mutator==='ConfiguredNumber');assert.equal(custom.length,1);assert.equal(custom[0].status,'Killed');
+  assert.ok(result.mutants.every(m=>m.file!=='src/custom-plugin.mjs'));
+});

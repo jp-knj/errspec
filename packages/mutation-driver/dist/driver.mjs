@@ -2456,10 +2456,10 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
   };
   writeFileSync(configFile, JSON.stringify(config));
   const configFiles = [configPath, ...normalized.setupFiles, ...normalized.setupFilesAfterEnv, normalized.globalSetup, normalized.globalTeardown, ...normalized.transform.map((t) => t[1])].filter(Boolean);
-  configFiles.forEach(remember);
+  configFiles.forEach((file) => remember(file));
   const cli = join4(packageDir, "bin/jest.js");
   return { async execute(phase, request, inventory, baseline) {
-    configFiles.forEach(remember);
+    configFiles.forEach((file) => remember(file));
     writeFileSync(configFile, JSON.stringify({ ...config, ...request.complete ? { bail: 0 } : {} }));
     const list = await runChild(["--experimental-vm-modules", cli, "--config", configFile, "--listTests", "--json"], { root, onProgress: () => {}, capture: true });
     if (list.code !== 0)
@@ -2685,7 +2685,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
         throw failure("EC_MUTATION_CONFIG", `Playwright failed before providing test results (${outcome.code ?? outcome.signal}); inspect stderr`);
       const report = JSON.parse(readFileSync5(reportFile, "utf8"));
       const files = [...new Set(report.tests.map((t) => resolve4(root, t.file)))];
-      files.forEach(remember);
+      files.forEach((file) => remember(file));
       const specs = report.tests.map((t) => ({ file: t.file, project: JSON.parse(t.id)[0], id: t.id }));
       if (nextPhase === "inspect") {
         if (outcome.code !== 0 || report.errors.length)

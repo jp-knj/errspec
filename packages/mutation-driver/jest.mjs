@@ -111,10 +111,10 @@ export async function createJestAdapter(ctx) {
     cache:false,watch:false,watchman:false,collectCoverage:false,updateSnapshot:false,reporters:[],maxWorkers:1};
   writeFileSync(configFile,JSON.stringify(config));
   const configFiles=[configPath,...normalized.setupFiles,...normalized.setupFilesAfterEnv,normalized.globalSetup,normalized.globalTeardown,...normalized.transform.map(t=>t[1])].filter(Boolean);
-  configFiles.forEach(remember);
+  configFiles.forEach(file=>remember(file));
   const cli=join(packageDir,"bin/jest.js");
   return {async execute(phase,request,inventory,baseline){
-    configFiles.forEach(remember);
+    configFiles.forEach(file=>remember(file));
     writeFileSync(configFile,JSON.stringify({...config,...(request.complete?{bail:0}:{})}));
     const list=await runChild(["--experimental-vm-modules",cli,"--config",configFile,"--listTests","--json"],{root,onProgress:()=>{},capture:true});
     if(list.code!==0)throw failure("EC_MUTATION_CONFIG","Jest test discovery failed");
