@@ -40,6 +40,54 @@ test("public compiler validates source identity and cancels worker acquisition",
   await assert.rejects(checkMutants(options,[mutants[0]],()=>writeFileSync(join(root,"value.ts"),source.replace("42","41"))),/input changed during acquisition/);
   writeFileSync(join(root,"value.ts"),source);
 });
+for(const major of [6,7])test(`public TS${major} optional-chain equivalence accepts only one unchanged access or call`,async t=>{
+  const root=temporary(t),source=[
+    '// UTF-8 ranges: 🧪',
+    'export const property=(x:{n:number;other:number})=>x?.n;',
+    'export const element=(xs:readonly[number,number],i:0|1)=>xs?.[i];',
+    'export const call=(fn:(n:number)=>number)=>fn?.(1);',
+    'export const nested=(value:{inner:{n:number;other:number}})=>value?.inner?.n;',
+    'export const nullable=(maybe:{n:number}|undefined)=>maybe?.n;',
+    'const xn=0;',
+  ].join('\n');
+  writeFileSync(join(root,'value.ts'),source);
+  writeFileSync(join(root,'tsconfig.json'),JSON.stringify({compilerOptions:{strict:true,noUncheckedIndexedAccess:true,skipLibCheck:true},files:['value.ts']}));
+  const candidate=(key,original,replacement)=>{
+    const start=source.indexOf(original);assert.ok(start>=0);
+    return {key,file:'value.ts',mutator:'OptionalChaining',original,replacement,byteOffset:Buffer.byteLength(source.slice(0,start)),end:Buffer.byteLength(source.slice(0,start+original.length))};
+  };
+  const valid=[
+    candidate('property','x?.n','x.n'),
+    candidate('element','xs?.[i]','xs[i]'),
+    candidate('call','fn?.(1)','fn(1)'),
+    candidate('nested-first','value?.inner?.n','value.inner?.n'),
+    candidate('nested-last','value?.inner?.n','value?.inner.n'),
+  ];
+  const changed=[
+    candidate('other-property','x?.n','x.other'),
+    candidate('missing-property','x?.n','x.missing'),
+    candidate('suffix','x?.n','x.n+1'),
+    candidate('property-dot','x?.n','xn'),
+    candidate('index','xs?.[i]','xs[0]'),
+    candidate('argument','fn?.(1)','fn(2)'),
+    candidate('call-form','fn?.(1)','fn.call(undefined,1)'),
+    candidate('two-tokens','value?.inner?.n','value.inner.n'),
+    candidate('nested-property','value?.inner?.n','value.inner?.other'),
+    candidate('nullable','maybe?.n','maybe.n'),
+  ];
+  const options={root,typescriptPackage:realpathSync(join(repo,`packages/analysis-driver/node_modules/typescript${major}`))};
+  const ordinary=await checkMutants(options,changed.map(c=>({...c,mutator:'Custom'})));
+  for(const acquire of [checkMutants,checkMutantsInWorker]){
+    const facts=await acquire(options,[...valid,...changed]);
+    assert.equal(facts.info.equivalent,valid.length);
+    for(const outcome of facts.outcomes.slice(0,valid.length)){
+      assert.equal(outcome.diagnostic,null);assert.match(outcome.equivalentReason,/equivalent:/);
+    }
+    assert.deepEqual(facts.outcomes.slice(valid.length),ordinary.outcomes,'a family label must not suppress ordinary compiler facts for another edit');
+    assert.match(facts.outcomes.find(o=>o.key==='missing-property').diagnostic,/TS2339/);
+    assert.equal(readFileSync(join(root,'value.ts'),'utf8'),source);
+  }
+});
 function copyPackages(root){
   for(const name of ["core","vitest","jest","typecheck","playwright"]){const target=join(root,"node_modules/@errspec",name);mkdirSync(dirname(target),{recursive:true});cpSync(join(repo,"packages",name),target,{recursive:true});}
 }

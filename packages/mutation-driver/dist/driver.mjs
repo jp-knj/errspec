@@ -1887,7 +1887,10 @@ function equivalents(checker, file, source, candidates) {
   const chains = new Map;
   const visit = (node) => {
     if (node.questionDotToken && node.expression)
-      chains.set(node.questionDotToken.getStart(ast), node.expression);
+      chains.set(node.questionDotToken.getStart(ast), {
+        expression: node.expression,
+        replacement: node.name ? "." : ""
+      });
     node.forEachChild((child) => {
       visit(child);
     });
@@ -1925,8 +1928,11 @@ function equivalents(checker, file, source, candidates) {
       prefix++;
     if (candidate.original.slice(prefix, prefix + 2) !== "?.")
       continue;
-    const target = chains.get(indices.get(candidate.byteOffset) + prefix - (source.startsWith("\uFEFF") ? 1 : 0));
-    if (target && excludesNull(types.getTypeAtLocation(target)))
+    const chain = chains.get(indices.get(candidate.byteOffset) + prefix - (source.startsWith("\uFEFF") ? 1 : 0));
+    if (!chain || candidate.replacement !== candidate.original.slice(0, prefix) + chain.replacement + candidate.original.slice(prefix + 2))
+      continue;
+    const target = chain.expression;
+    if (excludesNull(types.getTypeAtLocation(target)))
       result.set(candidate.key, `equivalent: ${target.getText(ast)} excludes null and undefined`);
   }
   return result;
@@ -2378,11 +2384,12 @@ function environment(Base, attachWeakBinary, load) {
       if (event.name === "run_start") {
         if (this.state.context.complete) {
           this.global[Symbol.for("RETRY_TIMES")] = 0;
-          state.describeRetryOptions?.clear();
         }
         const counts = new Map, selected = this.state.selected;
         const file = relative(this.state.root, this.file).replaceAll("\\", "/");
         const walk = (node) => {
+          if (this.state.context.complete)
+            state.describeRetryOptions?.delete(node);
           for (const child of node.children || []) {
             if (child.type === "test") {
               const names = [];

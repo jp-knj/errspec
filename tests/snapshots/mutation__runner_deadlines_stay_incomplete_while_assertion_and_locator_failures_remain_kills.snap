@@ -1,0 +1,141 @@
+---
+source: tests/mutation.rs
+expression: results
+---
+[
+  {
+    "attempt": {
+      "failedModules": [],
+      "killedBy": [],
+      "number": 1,
+      "reason": "Execution exceeded a timeout",
+      "status": "Timeout"
+    },
+    "error": "Error: Exceeded timeout of 40 ms for a test.",
+    "matrix": {
+      "complete": false,
+      "executed": [
+        "test"
+      ],
+      "incompleteReason": "Timeout or hit limit leaves unknown test outcomes",
+      "killedBy": [],
+      "selected": [
+        "test"
+      ]
+    }
+  },
+  {
+    "attempt": {
+      "failedModules": [],
+      "killedBy": [],
+      "number": 1,
+      "reason": "Execution exceeded a timeout",
+      "status": "Timeout"
+    },
+    "error": "Error: Exceeded timeout of 40 ms for a hook.",
+    "matrix": {
+      "complete": false,
+      "executed": [
+        "test"
+      ],
+      "incompleteReason": "Timeout or hit limit leaves unknown test outcomes",
+      "killedBy": [],
+      "selected": [
+        "test"
+      ]
+    }
+  },
+  {
+    "attempt": {
+      "failedModules": [],
+      "killedBy": [],
+      "number": 1,
+      "reason": "Execution exceeded a timeout",
+      "status": "Timeout"
+    },
+    "error": "Test timeout of 1500ms exceeded.",
+    "matrix": {
+      "complete": false,
+      "executed": [
+        "test"
+      ],
+      "incompleteReason": "Timeout or hit limit leaves unknown test outcomes",
+      "killedBy": [],
+      "selected": [
+        "test"
+      ]
+    }
+  },
+  {
+    "attempt": {
+      "failedModules": [],
+      "killedBy": [
+        "test"
+      ],
+      "number": 1,
+      "reason": "Selected test failed",
+      "status": "Killed"
+    },
+    "error": "Error: Timed out 5000ms waiting for expect(locator).toHaveText",
+    "matrix": {
+      "complete": true,
+      "executed": [
+        "test"
+      ],
+      "killedBy": [
+        "test"
+      ],
+      "selected": [
+        "test"
+      ]
+    }
+  },
+  {
+    "attempt": {
+      "failedModules": [],
+      "killedBy": [
+        "test"
+      ],
+      "number": 1,
+      "reason": "Selected test failed",
+      "status": "Killed"
+    },
+    "error": "TimeoutError: locator.click: Timeout 30ms exceeded.",
+    "matrix": {
+      "complete": true,
+      "executed": [
+        "test"
+      ],
+      "killedBy": [
+        "test"
+      ],
+      "selected": [
+        "test"
+      ]
+    }
+  },
+  {
+    "attempt": {
+      "failedModules": [],
+      "killedBy": [
+        "test"
+      ],
+      "number": 1,
+      "reason": "Selected test failed",
+      "status": "Killed"
+    },
+    "error": "AssertionError: timeout value was incorrect",
+    "matrix": {
+      "complete": true,
+      "executed": [
+        "test"
+      ],
+      "killedBy": [
+        "test"
+      ],
+      "selected": [
+        "test"
+      ]
+    }
+  }
+]

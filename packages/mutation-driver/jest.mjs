@@ -65,11 +65,10 @@ function environment(Base,attachWeakBinary,load) {
       if(event.name==="run_start"){
         if(this.state.context.complete){
           this.global[Symbol.for("RETRY_TIMES")]=0;
-          state.describeRetryOptions?.clear();
         }
         const counts=new Map(),selected=this.state.selected;
         const file=relative(this.state.root,this.file).replaceAll("\\","/");
-        const walk=node=>{for(const child of node.children||[]){if(child.type==="test"){
+        const walk=node=>{if(this.state.context.complete)state.describeRetryOptions?.delete(node);for(const child of node.children||[]){if(child.type==="test"){
           const names=[];for(let n=child;n&&n.name!=="ROOT_DESCRIBE_BLOCK";n=n.parent)names.unshift(n.name);
           const name=names.join(" "),occurrence=counts.get(name)||0;counts.set(name,occurrence+1);
           child.errspec={id:JSON.stringify(["",file,name,occurrence]),order:counts.size};

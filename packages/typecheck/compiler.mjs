@@ -210,7 +210,11 @@ function equivalents(checker, file, source, candidates) {
   const chains = new Map();
   const visit = (node) => {
     if (node.questionDotToken && node.expression)
-      chains.set(node.questionDotToken.getStart(ast), node.expression);
+      chains.set(node.questionDotToken.getStart(ast), {
+        expression: node.expression,
+        // Property access retains its dot; element access and calls do not.
+        replacement: node.name ? "." : "",
+      });
     node.forEachChild((child) => {
       visit(child);
     });
@@ -255,12 +259,21 @@ function equivalents(checker, file, source, candidates) {
     )
       prefix++;
     if (candidate.original.slice(prefix, prefix + 2) !== "?.") continue;
-    const target = chains.get(
+    const chain = chains.get(
       indices.get(candidate.byteOffset) +
         prefix -
         (source.startsWith("\uFEFF") ? 1 : 0),
     );
-    if (target && excludesNull(types.getTypeAtLocation(target)))
+    if (
+      !chain ||
+      candidate.replacement !==
+        candidate.original.slice(0, prefix) +
+          chain.replacement +
+          candidate.original.slice(prefix + 2)
+    )
+      continue;
+    const target = chain.expression;
+    if (excludesNull(types.getTypeAtLocation(target)))
       result.set(
         candidate.key,
         `equivalent: ${target.getText(ast)} excludes null and undefined`,
