@@ -5,7 +5,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {spawnSync} from "node:child_process";
-import {runMutation,selectTests} from "../packages/core/index.mjs";
+import {runMutation,selectTests,formatReport} from "../packages/core/index.mjs";
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=process.env.ERRSPEC_BIN||join(repo,'target/debug/errspec');
 function git(root,args){const r=spawnSync('git',args,{cwd:root,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout;}
 function fixture(t){
@@ -48,6 +48,8 @@ test('complete matrix runs late killers despite configured bail/retries, analyze
  assert.equal(complete.killMatrix.noKills.length,1);assert.ok(complete.killMatrix.noKills[0].includes('observes without assertion'));
  assert.ok(complete.killMatrix.duplicates.some(group=>group.tests.some(id=>id.includes('early'))&&group.tests.some(id=>id.includes('later'))));
  assert.ok(complete.killMatrix.subsumed.some(row=>row.test.includes('early')&&row.by.some(id=>id.includes('wide'))));
+ const formatted=JSON.parse(await formatReport(complete,{reporter:'agent'},{binary,cwd:root}));
+ assert.deepEqual(formatted.killMatrix,complete.killMatrix,'formatting preserves the actually acquired complete relationships');
  // Even a compatible input stamp cannot turn first-detection acquisition into a full matrix.
  firstDetection.fingerprint=complete.cache.fingerprint;writeFileSync(resultCache,JSON.stringify(firstDetection));
  const before=readFileSync(tracker,'utf8').split('\n').length;

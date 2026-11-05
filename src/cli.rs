@@ -474,8 +474,7 @@ impl Cli {
                                 runner_config,
                                 runner_project,
                                 runner_package,
-                                experimental_callgraph: experimental_callgraph
-                                    && !no_experimental_callgraph,
+                                experimental_callgraph,
                                 since,
                                 diff_unit: diff_unit.map(Into::into),
                                 shard,
