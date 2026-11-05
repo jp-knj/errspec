@@ -113,9 +113,10 @@ for (const compiler of compilers) {
     );
     assert.equal(result.info.checked, 2);
     assert.equal(result.info.compileErrors, 1);
-    assert.equal(result.outcomes[0].status, "CompileError");
-    assert.match(result.outcomes[0].reason, /TS2322/);
-    assert.equal(result.outcomes[1].status, "checked");
+    assert.ok(result.outcomes[0].diagnostic);
+    assert.match(result.outcomes[0].diagnostic, /TS2322/);
+    assert.equal(result.outcomes[1].diagnostic, null);
+    assert.equal(result.outcomes[1].equivalentReason, null);
     assert.equal(readFileSync(join(root, "src/value.ts"), "utf8"), source);
   });
 
@@ -149,16 +150,16 @@ for (const compiler of compilers) {
         compiler,
       );
       assert.equal(
-        result.outcomes[0].status,
-        honest ? "Ignored" : "checked",
+        result.outcomes[0].equivalentReason !== null,
+        honest,
         JSON.stringify(result),
       );
       assert.equal(
-        result.outcomes[1].status,
-        honest ? "CompileError" : "checked",
+        result.outcomes[1].diagnostic !== null,
+        honest,
         JSON.stringify(result),
       );
-      if (honest) assert.match(result.outcomes[0].reason, /equivalent:/);
+      if (honest) assert.match(result.outcomes[0].equivalentReason, /equivalent:/);
     }
   });
 

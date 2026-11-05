@@ -31,6 +31,10 @@ jobs:
         working-directory: packages/analysis-driver
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: examples/checkout
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: tests/fixtures/runners
+      - run: node node_modules/@playwright/test/cli.js install --with-deps chromium
+        working-directory: tests/fixtures/runners
       - run: cargo build --release --locked
       - run: node --test tests/package.test.mjs
       - run: node scripts/pack.mjs ${{ matrix.target }} target/release/errspec
@@ -43,6 +47,10 @@ jobs:
       - run: node scripts/action-package-smoke.mjs artifacts/npm/manifest-${{ matrix.target }}.json
         env:
           ERRSPEC_VITEST_PACKAGE: '${{ github.workspace }}/examples/checkout/node_modules/vitest'
+      - run: node scripts/runner-package-smoke.mjs artifacts/npm/manifest-${{ matrix.target }}.json
+        env:
+          ERRSPEC_RUNNER_DEPENDENCIES: '${{ github.workspace }}/tests/fixtures/runners/node_modules'
+          ERRSPEC_TYPESCRIPT_PACKAGES: '["${{ github.workspace }}/packages/analysis-driver/node_modules/typescript6","${{ github.workspace }}/packages/analysis-driver/node_modules/typescript7"]'
       - uses: actions/upload-artifact@v4
         with:
           name: errspec-${{ matrix.target }}

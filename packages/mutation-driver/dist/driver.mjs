@@ -1623,7 +1623,7 @@ var MagicString = class MagicString {
   }
 };
 
-// emitter.mjs
+// ../typecheck/ranges.mjs
 function byteIndices(source) {
   const map = new Map([[0, 0]]);
   let bytes = 0, units = 0;
@@ -1634,6 +1634,8 @@ function byteIndices(source) {
   }
   return map;
 }
+
+// emitter.mjs
 function instrument(source, candidates, file, runId) {
   const indices = byteIndices(source);
   const root = { start: 0, end: source.length, children: [], candidates: [] };
@@ -1717,7 +1719,7 @@ if(${check}){${branch}}${original.slice(prefixLength)}`;
   return { code: magic.toString(), map: magic.generateMap({ source: file, includeContent: true, hires: true }) };
 }
 
-// typecheck.mjs
+// ../typecheck/compiler.mjs
 import { createRequire } from "node:module";
 import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, relative } from "node:path";
@@ -1929,7 +1931,7 @@ function equivalents(checker, file, source, candidates) {
   }
   return result;
 }
-async function typecheckMutants(options, inventory, progress = () => {}) {
+async function typecheckInventory(options, inventory, progress = () => {}) {
   const root = options.root;
   const project = realpathSync(options.typecheckProject || join(root, "tsconfig.json"));
   const packageDir = packageDirectory(root, options.typecheckPackage);
@@ -1946,18 +1948,17 @@ async function typecheckMutants(options, inventory, progress = () => {}) {
         throw new Error(`Typecheck source is outside the project: ${file}`);
       const equivalent = equivalents(checker, file, entry.source, candidates);
       for (const candidate of candidates) {
-        let reason = equivalent.get(candidate.key), status = reason ? "Ignored" : "checked";
-        if (!reason) {
+        const equivalentReason = equivalent.get(candidate.key) ?? null;
+        let diagnostic = null;
+        if (!equivalentReason) {
           try {
             checker.change(file, applyCandidate(entry.source, candidate));
-            reason = newDiagnostic(baseline, checker.diagnose());
+            diagnostic = newDiagnostic(baseline, checker.diagnose()) ?? null;
           } finally {
             checker.change(file, undefined);
           }
-          if (reason)
-            status = "CompileError";
         }
-        outcomes.push({ key: candidate.key, status, reason: reason ?? null });
+        outcomes.push({ key: candidate.key, diagnostic, equivalentReason });
         progress(candidate.key);
       }
     }
@@ -1967,8 +1968,8 @@ async function typecheckMutants(options, inventory, progress = () => {}) {
         package: packageDir,
         project,
         checked: outcomes.length,
-        compileErrors: outcomes.filter((r) => r.status === "CompileError").length,
-        equivalent: outcomes.filter((r) => r.status === "Ignored").length
+        compileErrors: outcomes.filter((r) => r.diagnostic !== null).length,
+        equivalent: outcomes.filter((r) => r.equivalentReason !== null).length
       },
       outcomes
     };
@@ -1976,7 +1977,6 @@ async function typecheckMutants(options, inventory, progress = () => {}) {
     checker.close();
   }
 }
-
 // cache-inputs.mjs
 var builtinCompilationPlugins = new Set(`
 errspec-mutation alias vite:optimized-deps vite:pre-alias vitest:resolve-builtin
@@ -2409,7 +2409,14 @@ function environment(Base, attachWeakBinary, load) {
         for (let n = t;n && n.name !== "ROOT_DESCRIBE_BLOCK"; n = n.parent)
           names.unshift(n.name);
         const meta = this.active?.test === t ? this.active : { hits: {}, infected: {} };
-        this.data.tests.push({ id: t.errspec.id, order: t.errspec.order, name: names.join(" "), status: event.name === "test_skip" ? "skipped" : event.name === "test_todo" ? "pending" : t.errors.length ? "failed" : "passed", started: event.name === "test_done", duration: t.duration || 0, errors: t.errors.map((e) => String(e?.[0]?.stack || e?.stack || e)), hits: meta.hits, infected: Object.keys(meta.infected) });
+        if (this.state.context.complete && (t.invocations > 1 || t.repeatCount > 0))
+          this.data.acquisitionIncomplete = "Jest repeated or retried a selected test";
+        const result = { id: t.errspec.id, order: t.errspec.order, name: names.join(" "), status: event.name === "test_skip" ? "skipped" : event.name === "test_todo" ? "pending" : t.errors.length ? "failed" : "passed", started: event.name === "test_done", duration: t.duration || 0, errors: t.errors.map((e) => String(e?.[0]?.stack || e?.stack || e)), hits: meta.hits, infected: Object.keys(meta.infected) };
+        const index = this.data.tests.findIndex((t) => t.id === result.id);
+        if (index >= 0)
+          this.data.tests[index] = result;
+        else
+          this.data.tests.push(result);
         this.active = undefined;
       }
     }
@@ -2447,6 +2454,7 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
     extensionsToTreatAsEsm: [...new Set([...normalized.extensionsToTreatAsEsm, ".ts", ".mts"])],
     transformIgnorePatterns: [...normalized.transformIgnorePatterns, realpathSync4(options.temp).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/"],
     cache: false,
+    cacheDirectory: join4(options.temp, "jest-cache"),
     watch: false,
     watchman: false,
     collectCoverage: false,
@@ -2505,6 +2513,8 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
       execution.moduleDurations[name] = (fileResult.endTime || 0) - (fileResult.startTime || 0);
       if (existsSync4(metadata)) {
         const data = JSON.parse(readFileSync4(metadata, "utf8"));
+        if (data.acquisitionIncomplete)
+          execution.acquisitionIncomplete = data.acquisitionIncomplete;
         for (const test of data.tests.sort((a, b) => a.order - b.order)) {
           delete test.order;
           execution.tests.push({ ...test, taskId: test.id, file: name });
@@ -2578,6 +2588,8 @@ function reporter(load) {
     }
     onTestEnd(test, result) {
       const item = this.tests.get(test.id);
+      if (this.state.complete && (result.retry > 0 || test.repeatEachIndex > 0))
+        this.acquisitionIncomplete = "Playwright repeated or retried a selected test";
       item.status = result.status === "skipped" ? "skipped" : result.status === test.expectedStatus ? "passed" : "failed";
       item.started = result.status !== "skipped";
       item.duration = result.duration;
@@ -2600,7 +2612,7 @@ function reporter(load) {
       this.errors.push(error.stack || error.message || String(error));
     }
     onEnd() {
-      writeFileSync(this.state.report, JSON.stringify({ tests: [...this.tests.values()], errors: this.errors }));
+      writeFileSync(this.state.report, JSON.stringify({ tests: [...this.tests.values()], errors: this.errors, ...this.acquisitionIncomplete ? { acquisitionIncomplete: this.acquisitionIncomplete } : {} }));
     }
   };
 }
@@ -2627,7 +2639,7 @@ const base=${JSON.stringify(configRoot)};
 const absolute=value=>value?resolve(base,value):undefined;
 const servers=[original.webServer||[]].flat();
 if(servers.some(server=>server.command&&!/^(?:vite|vp dev)(?:\\s|$)/.test(server.command)))throw new Error("errspec Playwright supports a Vite app; custom webServer commands are unsupported");
-const project=p=>({...p,timeout:(p.timeout??original.timeout??30000)*Number(process.env.ERRSPEC_TIMEOUT_MULTIPLIER||1),testDir:absolute(p.testDir||original.testDir||"."),snapshotDir:absolute(p.snapshotDir||original.snapshotDir),use:{...original.use,...p.use,baseURL:process.env.ERRSPEC_VITE_URL}});
+const project=p=>({...p,retries:0,repeatEach:1,timeout:(p.timeout??original.timeout??30000)*Number(process.env.ERRSPEC_TIMEOUT_MULTIPLIER||1),testDir:absolute(p.testDir||original.testDir||"."),snapshotDir:absolute(p.snapshotDir||original.snapshotDir),use:{...original.use,...p.use,baseURL:process.env.ERRSPEC_VITE_URL}});
 export default {...original,...project(original),globalSetup:[original.globalSetup||[]].flat().map(absolute),globalTeardown:[original.globalTeardown||[]].flat().map(absolute),webServer:undefined,workers:1,retries:0,repeatEach:1,fullyParallel:false,maxFailures:process.env.ERRSPEC_COMPLETE==="1"?0:original.maxFailures,updateSnapshots:"none",outputDir:${JSON.stringify(join5(directory, "test-results"))},reporter:[[${JSON.stringify(reporterFile)}]],projects:original.projects?.map(project)};`);
   const vite = await import(pathToFileURL3(join5(viteDir, "dist/node/index.js")).href);
   let phase = "plain";
@@ -2658,7 +2670,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
     }
     let url = "http://127.0.0.1";
     if (nextPhase !== "inspect") {
-      server = await vite.createServer({ root, plugins: [plugin], server: { host: "127.0.0.1", port: 0, strictPort: true, open: false } });
+      server = await vite.createServer({ root, cacheDir: join5(options.temp, "vite-cache"), plugins: [plugin], server: { host: "127.0.0.1", port: 0, strictPort: true, open: false } });
       await server.listen();
       url = `http://127.0.0.1:${server.httpServer.address().port}`;
     }
@@ -2673,6 +2685,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
       root,
       report: reportFile,
       context,
+      complete: !!request.complete,
       selectedTaskIds,
       runtime: `(()=>{${weakRuntime}
 (${browserRuntime.toString()})(${JSON.stringify(context)},attachWeakBinary);})();`
@@ -2693,7 +2706,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
 `) || "Playwright test discovery failed");
         return { specs, excluded: [configFile, ...files] };
       }
-      const execution = { selected: request.selected || [], tests: report.tests, failedModules: [], errors: report.errors, hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
+      const execution = { ...report.acquisitionIncomplete ? { acquisitionIncomplete: report.acquisitionIncomplete } : {}, selected: request.selected || [], tests: report.tests, failedModules: [], errors: report.errors, hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
       for (const test of report.tests) {
         for (const [key, count] of Object.entries(test.hits))
           execution.hits[key] = (execution.hits[key] || 0) + count;
@@ -3428,7 +3441,7 @@ async function handle(request) {
     try {
       const keys = new Set(request.keys);
       const selected = new Map([...inventory].map(([file, entry]) => [file, { ...entry, candidates: entry.candidates.filter((c) => keys.has(c.key)) }]));
-      const result = await typecheckMutants(options, selected, (key) => send(request, "progress", { event: "typecheck", key }));
+      const result = await typecheckInventory(options, selected, (key) => send(request, "progress", { event: "typecheck", key }));
       verifyInputs();
       send(request, "typechecked", result);
       send(request, "done", { count: result.outcomes.length });

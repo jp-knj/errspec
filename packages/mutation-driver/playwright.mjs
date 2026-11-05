@@ -35,6 +35,7 @@ function reporter(load){
     onTestBegin(){if(process.send)process.send({errspec:"testStart"});}
     onTestEnd(test,result){
       const item=this.tests.get(test.id);
+      if(this.state.complete&&(result.retry>0||test.repeatEachIndex>0))this.acquisitionIncomplete="Playwright repeated or retried a selected test";
       item.status=result.status==="skipped"?"skipped":result.status===test.expectedStatus?"passed":"failed";
       item.started=result.status!=="skipped";item.duration=result.duration;
       item.errors=item.status==="passed"?[]:result.errors.map(e=>e.stack||e.message||String(e));
@@ -47,7 +48,7 @@ function reporter(load){
       }else if(item.started){item.started=false;this.errors.push(`Missing errspec Playwright fixture metadata: ${item.file}: ${item.name}. Import test from @errspec/playwright or extend mutationFixtures.`);}
     }
     onError(error){this.errors.push(error.stack||error.message||String(error));}
-    onEnd(){writeFileSync(this.state.report,JSON.stringify({tests:[...this.tests.values()],errors:this.errors}));}
+    onEnd(){writeFileSync(this.state.report,JSON.stringify({tests:[...this.tests.values()],errors:this.errors,...(this.acquisitionIncomplete?{acquisitionIncomplete:this.acquisitionIncomplete}:{})}));}
   };
 }
 export async function createPlaywrightAdapter(ctx){
@@ -65,7 +66,7 @@ export async function createPlaywrightAdapter(ctx){
   const weakRuntime=readFileSync(join(options.toolTemp,"weak-runtime.mjs"),"utf8").replace("export function attachWeakBinary","function attachWeakBinary");
   // Preserve the user's fixture/project/config loading. Our Vite server chooses
   // a private port per owned worker; relative config paths keep their old base.
-  writeFileSync(wrapper,`import original from ${JSON.stringify(pathToFileURL(configFile).href)};\nimport {resolve} from "node:path";\nconst base=${JSON.stringify(configRoot)};\nconst absolute=value=>value?resolve(base,value):undefined;\nconst servers=[original.webServer||[]].flat();\nif(servers.some(server=>server.command&&!/^(?:vite|vp dev)(?:\\s|$)/.test(server.command)))throw new Error("errspec Playwright supports a Vite app; custom webServer commands are unsupported");\nconst project=p=>({...p,timeout:(p.timeout??original.timeout??30000)*Number(process.env.ERRSPEC_TIMEOUT_MULTIPLIER||1),testDir:absolute(p.testDir||original.testDir||"."),snapshotDir:absolute(p.snapshotDir||original.snapshotDir),use:{...original.use,...p.use,baseURL:process.env.ERRSPEC_VITE_URL}});\nexport default {...original,...project(original),globalSetup:[original.globalSetup||[]].flat().map(absolute),globalTeardown:[original.globalTeardown||[]].flat().map(absolute),webServer:undefined,workers:1,retries:0,repeatEach:1,fullyParallel:false,maxFailures:process.env.ERRSPEC_COMPLETE==="1"?0:original.maxFailures,updateSnapshots:"none",outputDir:${JSON.stringify(join(directory,"test-results"))},reporter:[[${JSON.stringify(reporterFile)}]],projects:original.projects?.map(project)};`);
+  writeFileSync(wrapper,`import original from ${JSON.stringify(pathToFileURL(configFile).href)};\nimport {resolve} from "node:path";\nconst base=${JSON.stringify(configRoot)};\nconst absolute=value=>value?resolve(base,value):undefined;\nconst servers=[original.webServer||[]].flat();\nif(servers.some(server=>server.command&&!/^(?:vite|vp dev)(?:\\s|$)/.test(server.command)))throw new Error("errspec Playwright supports a Vite app; custom webServer commands are unsupported");\nconst project=p=>({...p,retries:0,repeatEach:1,timeout:(p.timeout??original.timeout??30000)*Number(process.env.ERRSPEC_TIMEOUT_MULTIPLIER||1),testDir:absolute(p.testDir||original.testDir||"."),snapshotDir:absolute(p.snapshotDir||original.snapshotDir),use:{...original.use,...p.use,baseURL:process.env.ERRSPEC_VITE_URL}});\nexport default {...original,...project(original),globalSetup:[original.globalSetup||[]].flat().map(absolute),globalTeardown:[original.globalTeardown||[]].flat().map(absolute),webServer:undefined,workers:1,retries:0,repeatEach:1,fullyParallel:false,maxFailures:process.env.ERRSPEC_COMPLETE==="1"?0:original.maxFailures,updateSnapshots:"none",outputDir:${JSON.stringify(join(directory,"test-results"))},reporter:[[${JSON.stringify(reporterFile)}]],projects:original.projects?.map(project)};`);
   const vite=await import(pathToFileURL(join(viteDir,"dist/node/index.js")).href);
   let phase="plain";
   const plugin={name:"errspec-mutation",enforce:"pre",configResolved(config){
@@ -84,12 +85,12 @@ export async function createPlaywrightAdapter(ctx){
     if(server){await server.close();server=undefined;}
     let url="http://127.0.0.1";
     if(nextPhase!=="inspect"){
-      server=await vite.createServer({root,plugins:[plugin],server:{host:"127.0.0.1",port:0,strictPort:true,open:false}});
+      server=await vite.createServer({root,cacheDir:join(options.temp,"vite-cache"),plugins:[plugin],server:{host:"127.0.0.1",port:0,strictPort:true,open:false}});
       await server.listen();url=`http://127.0.0.1:${server.httpServer.address().port}`;
     }
     const context={runId:ctx.runId,requestId:request.requestId,activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER,weakMutation:options.weakMutation};
     const selectedTaskIds=(request.selected||[]).map(id=>{const test=baseline.tests.find(t=>t.id===id);if(!test)throw failure("EC_MUTATION_PROTOCOL",`Unknown test ID: ${id}`);return test.taskId;});
-    writeFileSync(stateFile,JSON.stringify({root,report:reportFile,context,selectedTaskIds,
+    writeFileSync(stateFile,JSON.stringify({root,report:reportFile,context,complete:!!request.complete,selectedTaskIds,
       runtime:`(()=>{${weakRuntime}\n(${browserRuntime.toString()})(${JSON.stringify(context)},attachWeakBinary);})();`}));
     rmSync(reportFile,{force:true});
     const args=[cli,"test","--config",wrapper,...(nextPhase==="inspect"?["--list"]:[]),...(options.runnerProject?["--project",options.runnerProject]:[])];
@@ -103,7 +104,7 @@ export async function createPlaywrightAdapter(ctx){
         if(outcome.code!==0||report.errors.length)throw failure("EC_MUTATION_CONFIG",report.errors.join("\n")||"Playwright test discovery failed");
         return {specs,excluded:[configFile,...files]};
       }
-      const execution={selected:request.selected||[],tests:report.tests,failedModules:[],errors:report.errors,hits:{},staticHits:{},moduleDurations:{},wallTimeout:false};
+      const execution={...(report.acquisitionIncomplete?{acquisitionIncomplete:report.acquisitionIncomplete}:{}),selected:request.selected||[],tests:report.tests,failedModules:[],errors:report.errors,hits:{},staticHits:{},moduleDurations:{},wallTimeout:false};
       for(const test of report.tests){
         for(const [key,count]of Object.entries(test.hits))execution.hits[key]=(execution.hits[key]||0)+count;
         execution.moduleDurations[test.file]=(execution.moduleDurations[test.file]||0)+test.duration;

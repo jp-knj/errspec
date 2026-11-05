@@ -82,7 +82,10 @@ function environment(Base,attachWeakBinary,load) {
       if(["test_done","test_skip","test_todo"].includes(event.name)){
         const names=[];for(let n=t;n&&n.name!=="ROOT_DESCRIBE_BLOCK";n=n.parent)names.unshift(n.name);
         const meta=this.active?.test===t?this.active:{hits:{},infected:{}};
-        this.data.tests.push({id:t.errspec.id,order:t.errspec.order,name:names.join(" "),status:event.name==="test_skip"?"skipped":event.name==="test_todo"?"pending":t.errors.length?"failed":"passed",started:event.name==="test_done",duration:t.duration||0,errors:t.errors.map(e=>String(e?.[0]?.stack||e?.stack||e)),hits:meta.hits,infected:Object.keys(meta.infected)});
+        if(this.state.context.complete&&(t.invocations>1||t.repeatCount>0))this.data.acquisitionIncomplete="Jest repeated or retried a selected test";
+        const result={id:t.errspec.id,order:t.errspec.order,name:names.join(" "),status:event.name==="test_skip"?"skipped":event.name==="test_todo"?"pending":t.errors.length?"failed":"passed",started:event.name==="test_done",duration:t.duration||0,errors:t.errors.map(e=>String(e?.[0]?.stack||e?.stack||e)),hits:meta.hits,infected:Object.keys(meta.infected)};
+        const index=this.data.tests.findIndex(t=>t.id===result.id);
+        if(index>=0)this.data.tests[index]=result;else this.data.tests.push(result);
         this.active=undefined;
       }
     }
@@ -108,7 +111,7 @@ export async function createJestAdapter(ctx) {
   const config={...raw,rootDir:normalized.rootDir,testEnvironment:environmentFile,
     transform:{"\\.[cm]?[jt]sx?$":transformFile},extensionsToTreatAsEsm:[...new Set([...normalized.extensionsToTreatAsEsm,".ts",".mts"])],
     transformIgnorePatterns:[...normalized.transformIgnorePatterns,realpathSync(options.temp).replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"/"],
-    cache:false,watch:false,watchman:false,collectCoverage:false,updateSnapshot:false,reporters:[],maxWorkers:1};
+    cache:false,cacheDirectory:join(options.temp,"jest-cache"),watch:false,watchman:false,collectCoverage:false,updateSnapshot:false,reporters:[],maxWorkers:1};
   writeFileSync(configFile,JSON.stringify(config));
   const configFiles=[configPath,...normalized.setupFiles,...normalized.setupFilesAfterEnv,normalized.globalSetup,normalized.globalTeardown,...normalized.transform.map(t=>t[1])].filter(Boolean);
   configFiles.forEach(file=>remember(file));
@@ -139,6 +142,7 @@ export async function createJestAdapter(ctx) {
       execution.moduleDurations[name]=(fileResult.endTime||0)-(fileResult.startTime||0);
       if(existsSync(metadata)){
         const data=JSON.parse(readFileSync(metadata,"utf8"));
+        if(data.acquisitionIncomplete)execution.acquisitionIncomplete=data.acquisitionIncomplete;
         for(const test of data.tests.sort((a,b)=>a.order-b.order)){delete test.order;execution.tests.push({...test,taskId:test.id,file:name});}
         for(const [key,count]of Object.entries(data.hits))execution.hits[key]=(execution.hits[key]||0)+count;
         for(const key of Object.keys(data.staticHits))(execution.staticHits[key]||=[]).push(name);

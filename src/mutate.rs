@@ -943,20 +943,23 @@ fn run_inner(
                 .iter_mut()
                 .find(|m| m.candidate.key == key)
                 .unwrap();
-            let reason = outcome["reason"].as_str();
-            match outcome["status"].as_str() {
-                Some("checked") if outcome["reason"].is_null() => (),
-                Some("CompileError") if reason.is_some_and(|r| !r.is_empty()) => {
+            let diagnostic = outcome.get("diagnostic");
+            let equivalent_reason = outcome.get("equivalentReason");
+            match (diagnostic, equivalent_reason) {
+                (Some(Value::Null), Some(Value::Null)) => (),
+                (Some(Value::String(reason)), Some(Value::Null)) if !reason.is_empty() => {
                     mutant.status = Status::CompileError;
-                    mutant.reason = reason.map(String::from);
+                    mutant.reason = Some(reason.clone());
                     errors += 1;
                 }
-                Some("Ignored") if reason.is_some_and(|r| r.starts_with("equivalent:")) => {
+                (Some(Value::Null), Some(Value::String(reason)))
+                    if reason.starts_with("equivalent:") =>
+                {
                     mutant.status = Status::Ignored;
-                    mutant.reason = reason.map(String::from);
+                    mutant.reason = Some(reason.clone());
                     equivalent += 1;
                 }
-                _ => return Err(Failure::protocol("Invalid typecheck outcome")),
+                _ => return Err(Failure::protocol("Invalid typecheck compiler facts")),
             }
         }
         if wanted != seen

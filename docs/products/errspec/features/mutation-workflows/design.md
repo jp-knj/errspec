@@ -110,6 +110,10 @@ Native supervisorをgroup leaderとし、Nodeは同じgroupとstdioを継承し�
 
 ### レポート・API・配布
 
+`@errspec/vitest`と`@errspec/jest`はrunnerを固定してcoreの同じ内部要求へ委譲し、引数列の再構築や別の判定loopは持ちません。`@errspec/playwright`は既存testを拡張できるfixtureを独立配布し、Playwright本体は利用先が導入します。`@errspec/typecheck`へ実際のcompiler・overlay取得を配置し、埋込driverも同じ実装を使います。公開APIは元の本文とUTF-8範囲を確認してdiagnostic・型によるequivalenceの事実だけを返し、CompileErrorやIgnoredへの分類はRustが担当します。worker threadでの同じ取得と中断も提供します。
+
+JestとViteのscratch cacheは各owned workerのprivate temp下へ置き、projectの既定cacheを共有しません。孤立回収はrun identity、所有UID、private modeとcanonicalなdirectory identityを確認し、既知の内部directoryだけをnofollowで削除します。rootのkeep.txtなど未知のproject生成物を再帰削除せず、外部へ向くsymlinkを辿りません。
+
 Rustの結果からtext、mutation-testing-elements形式、agent、simplify、テスト選択、kill matrixを生成します。表示とquality gateは別の判定にし、保存先とstdoutを区別します。追加のnpm APIは機械可読の内部要求を使い、CLI引数の解析を実装の契約に含めません。
 
 Actionは基準の取得と履歴の復元・保存を行い、失敗時も保存します。ActionのNode coordinatorはJSON optionsを既存のrunMutationへ直接渡し、判定・cache同一性・終了コードを再実装しません。差分baseはPRのbase SHAを既定とし、shallow checkoutで不足するcommitをoriginから取得します。GitHub公式cacheのrestore/saveを分け、失敗時もalwaysで専用mutation historyを保存します。既存のplatform配布物のnative executable、またはprojectへ導入済みのCLIを利用し、未公開npmへfallbackしません。native/agent/MTE JSON、offline HTML、summaryとdiff annotationは共通formatterから取得します。環境の指紋を緩めず、restored cacheの再利用可否はnative判定へ委ねます。

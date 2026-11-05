@@ -185,3 +185,13 @@ for(const runner of ['jest','playwright'])test(`${runner} custom plugin acquisit
   const custom=result.mutants.filter(m=>m.mutator==='ConfiguredNumber');assert.equal(custom.length,1);assert.equal(custom[0].status,'Killed');
   assert.ok(result.mutants.every(m=>m.file!=='src/custom-plugin.mjs'));
 });
+test("runner scratch caches stay in the owned worker workspace",t=>{
+  const jest=project(t);
+  writeFileSync(join(jest,"jest.config.mjs"),'export default {testEnvironment:"node",transform:{},testMatch:["**/*.test.ts"],cacheDirectory:"<rootDir>/user-cache"};');
+  assert.equal(run(jest,["--runner","jest"]).runComplete,true);
+  assert.equal(existsSync(join(jest,"user-cache")),false);
+  const browser=browserProject(t,{projects:false});
+  writeFileSync(join(browser,"vite.config.mjs"),'export default {cacheDir:"./user-cache"};');
+  assert.equal(run(browser,["--runner","playwright"]).runComplete,true);
+  assert.equal(existsSync(join(browser,"user-cache")),false);
+});
