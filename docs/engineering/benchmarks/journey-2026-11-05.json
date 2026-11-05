@@ -1,0 +1,64 @@
+{
+  "kind": "errspec/exact-mutator-comparison",
+  "schemaVersion": 1,
+  "method": "Exact file, UTF-8 range, family, original and raw replacement; no semantic normalization",
+  "native": {
+    "candidates": 818,
+    "statuses": {
+      "Survived": 78,
+      "Killed": 675,
+      "NoCoverage": 62,
+      "Ignored": 2,
+      "Timeout": 1
+    },
+    "elapsedMs": 243460.902042,
+    "runComplete": true
+  },
+  "reference": {
+    "candidates": 778,
+    "statuses": {
+      "Killed": 639,
+      "Survived": 76,
+      "NoCoverage": 62,
+      "Timeout": 1
+    },
+    "elapsedMs": 122964.946708
+  },
+  "common": 582,
+  "sameVerdict": 582,
+  "differences": [],
+  "commonByMutator": {
+    "ArrayDeclaration": 30,
+    "ObjectLiteral": 94,
+    "ArrowFunction": 25,
+    "ConditionalExpression": 173,
+    "BlockStatement": 115,
+    "FnValue": 25,
+    "MethodExpression": 5,
+    "BooleanLiteral": 42,
+    "CallExpression": 10,
+    "EqualityOperator": 62,
+    "UpdateOperator": 1
+  },
+  "nativeOnly": 236,
+  "referenceOnly": 196,
+  "nativeOnlyByMutator": {
+    "StringLiteral": 122,
+    "MethodExpression": 7,
+    "CallExpression": 6,
+    "ConditionalExpression": 32,
+    "LogicalOperator": 20,
+    "BooleanLiteral": 25,
+    "BlockStatement": 2,
+    "ArrayDeclaration": 16,
+    "OptionalChaining": 6
+  },
+  "referenceOnlyByMutator": {
+    "StringLiteral": 122,
+    "BooleanLiteral": 25,
+    "OptionalChaining": 6,
+    "LogicalOperator": 20,
+    "ArrayDeclaration": 16,
+    "MethodExpression": 7
+  }
+}
