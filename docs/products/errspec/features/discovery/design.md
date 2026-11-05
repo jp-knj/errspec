@@ -1,79 +1,104 @@
-# エラー候補と伝播経路の解析設計
+# Error discovery and propagation design
 
-## このドキュメントについて
+## About this document
 
-[Requirements](requirements.md)と[Product](../../product.md)に基づき、tsrsで解決した型・シンボルと有限のグラフ解析を組み合わせます。
+This implements the [Requirements](requirements.md) under the [Product](../../product.md)
+with resolved compiler types/symbols and a finite graph analysis. Maintainers need
+to distinguish types from runtime values and understand conservative analysis.
+Test execution/observation matching remains a separate feature.
 
-### 対象読者
+## Acquisition and ownership
 
-解析器を実装・変更する開発者とAI。
+Share AST positions, text and recursive traversal through the tsrs adapter.
+Function-body traversal and propagation rules belong to discovery. Define
+`Location` in the common model and retain `discovery::Location` as a re-export,
+following [Rust ownership and snapshot standards](../../../../engineering/guidelines/rust-code.md).
 
-### 前提知識
+Open tsconfig with the existing adapter and traverse compiler source files/ASTs.
+Resolve actual function declarations and const initializers through symbols,
+not regexes or matching names. Matching signatures do not imply the same
+implementation: parameters and mutable aliases remain unresolved. Link member
+calls to the signature's implementation candidate while also recording dynamic-
+dispatch uncertainty.
 
-型と実行時の値の違い、保守的な静的解析。
+Extract finite string discriminator values from exported type aliases, interfaces
+and classes. Group public names by resolved declaration position and discriminator.
+Prefer an export from the declaring file; otherwise choose the first ordered path.
+List the remaining names in `reexports`. Inspect each union member's discriminator
+symbol declaration. If every declaration is in node_modules or outside tsconfig's
+directory, mark `external: true`; this includes adapted dependency types such as
+`Omit<SdkIssue, 'at'>`. Members without identified declarations count as local.
 
-### このドキュメントで扱わないこと
+At failure sources, collect error aliases/symbols and union-member declaration
+positions. Match candidate declarations by position and deduplicate their channels
+in `flows`; equal names in different files do not link. Intermediate union aliases
+may disappear during type expansion and therefore be absent from `flows`.
 
-テスト実行による観測の照合は既存機能に委ねます。
+Recognize `Promise.reject` only after checking the standard-library declaration
+and the receiver's value binding. A parameter typed PromiseConstructor is not the
+built-in Promise value. Report the assumption that declarations and built-in
+globals are not replaced at runtime. Track Promise aliases through await/return
+only for const bindings.
 
-## 実装方針
+## Propagation
 
-ASTの位置・本文・再帰走査は、複数機能が同じ規則を使うためtsrs adapterに集約します。関数本体の走査と伝播規則はこの機能が担当します。`Location`は共通モデルで定義し、`discovery::Location`も再公開します。配置と互換性の確認は[Rustコードとsnaptestの基準](../../../../engineering/guidelines/rust-code.md)に従います。
+Acquire direct throws, rejections and error-valued returns per function. Propagate
+possibilities over call edges to a fixed point on the finite set of origins, so
+recursion terminates. Distinguish synchronous throw, async rejection and Result
+values, recording await, return and catch conditions on edges. Keep unresolved
+calls separately: an empty error set cannot prove completeness.
 
-既存のtsrs adapterでtsconfigを開き、コンパイラのソース一覧とASTを走査します。正規表現や名前の一致で呼出先を決めず、シンボルから実際の関数宣言とconstの初期化式をたどります。型のsignatureが一致しても同じ実装とは扱わず、引数や可変の別名は未解決として残します。メンバー呼出ではsignatureに対応する実装を候補として結び、動的dispatchの不明も必ず記録します。型候補は公開type alias/interface/classについて識別プロパティの有限文字列を抽出します。別名をたどった先の宣言の位置と識別プロパティが同じ公開名は1件の候補にまとめ、宣言したファイルが公開していればその名前を、なければ並び順で最初の経路を代表にして、残りを`reexports`に並べます。共用体の各メンバーについて識別プロパティのシンボルの宣言ファイルを調べ、すべてがnode_modules内またはtsconfigのディレクトリ外なら`external: true`とします。`Omit<SdkIssue, 'at'>`のように依存先の型を加工しただけの型が該当します。宣言を特定できないメンバーはプロジェクト内として扱います。失敗箇所を記録するときに、エラー型の別名・シンボルと共用体の各メンバーの宣言位置を集め、型候補の宣言位置と一致した失敗箇所の経路を候補の`flows`に重複なく並べます。名前ではなく宣言位置で照合するため、別ファイルの同名の型とは結び付けません。共用体の途中の別名は型解決で展開されるため、`flows`に現れないことがあります。
+Separate a caught original failure from failures created inside the catch.
+Conservatively retain the original when rethrow is possible. Always state the
+scope and unresolved reasons for dynamic dispatch and callback execution.
 
-Promise.rejectは標準ライブラリの宣言と受信側の値の束縛を確認します。PromiseConstructor型の引数は組み込みPromiseとみなしません。関数宣言と組み込みグローバルが実行中に差し替えられない前提をレポートへ明記します。Promiseのawait・returnへの別名追跡もconstだけを対象にします。
+AST acquisition returns owned function identities, origins, call edges and unknown
+sites in `ScanFacts`; it does not store computed `effects` or `hasUnknown` in its
+collection records. Pure propagation borrows those facts and returns summaries in
+input function order without compiler/filesystem access or input/report mutation.
 
-関数ごとに直接のthrow・rejection・error戻り値を記録し、呼出辺で可能性を伝播します。再帰は有限の発生元集合に対する固定点で停止します。同期throw、非同期rejection、Resultの値を区別し、awaitとreturn、catch境界を辺に記録します。未解決の呼出先は別の記録として保持し、空のエラー集合を完全性の証明にしません。
+After a successful scan, move acquired facts and computed summaries into the
+report. Sort/deduplicate file lists and sort type candidates at this assembly
+boundary. Retain function, edge, origin and unresolved-site order, fixed-point
+iteration order and the first discovered propagation path. Do not silently replace
+it with a shortest path or a new analysis rule. Configuration/type failures still
+return incomplete reports.
 
-catchで捕捉された元の失敗と、catch内で新しく発生した失敗を分けます。再throwの可能性があれば元の失敗も保守的に残します。動的dispatchやcallbackの実行は完全には解決できないため、解析範囲と未解決理由を必ず出します。
+## Flow and data
 
-収集した事実と伝播結果を別の値で扱います。ASTの走査は、関数の識別情報・発生元・呼出辺・未解決箇所を所有可能なデータへ変換します。収集用の関数には、計算後のeffectsやhasUnknownを持たせません。伝播計算はこれらの事実を読み取り、入力の関数順に要約を返します。コンパイラやファイルへアクセスせず、入力や出力用レポートを変更しません。
+A single CLI request crosses the shared analysis-thread boundary, then performs
+type analysis, AST acquisition, callee resolution, fixed point and report assembly.
+The output boundary chooses presentation and exit status; no separate sequence
+diagram is needed. Do not share a whole mutable report as work state or pass
+compiler handles into the fixed-point calculation.
 
-成功した走査では、事実と計算結果を合わせて最後にレポートを組み立てます。ファイル一覧のソートと重複除去、型候補のソートはこの段階で行い、関数・辺・発生元・未解決箇所の順序は保持します。固定点の反復順と最初に見つかった伝播経路も維持し、最短経路への変更や新しい解析規則は含めません。設定・型解析の失敗は、従来どおり未完了のレポートを返します。
+File/position identifies functions and origins. An edge carries caller, callee,
+position and handling conditions. Function summaries reference origin IDs. Position
+changes alter these IDs, so scan output is not a persistent baseline.
 
-## アーキテクチャ・シーケンス図
+## Interfaces and compatibility
 
-単一CLI内の順次処理のため図は省略します。CLIがパーサーに依存しない走査リクエストを作り、共通の解析スレッド境界を経由して実行します。型解析、AST収集、呼出先解決、固定点、レポートの順に処理し、表示と終了コードの決定は結果を受け取った出力側が行います。
+`scan --project tsconfig.json --format json` produces `errspec/scan`.
+`--discriminant` defaults to `_tag`, `kind`, `type`, `code`. Normal completion exits
+0; `--fail-on-unknown` exits 1 when unresolved sites remain; configuration/analysis
+failure exits 2. Completion does not establish runtime exhaustiveness.
 
-収集側はScanFactsを作り、固定点の計算は事実を借用して関数ごとの結果を返します。ScanFactsからレポートへの変換で、収集した値を移動して出力を組み立てます。全レポートを作業状態として共有することや、コンパイラ内部の型を計算へ渡すことを避けます。
+Retain Rust `propagate` as a compatibility entry that calls the same calculation
+and updates only function summaries in a report. CLI acquisition assembles reports
+from facts. Preserve JSON shape/field order, diagnostics and exit codes.
 
-## データモデル・ER 図
+## Integration and data handling
 
-ファイルと位置で関数・発生元を識別します。辺は呼出側・呼出先・位置と処理条件を持ち、関数の要約は発生元IDを参照します。位置が変わればIDも変わるため、走査結果は永続baselineとして扱いません。
+Use fixed tsrs or installed official TS 6/7 APIs under the
+[TypeScript compatibility requirements](../typescript-compatibility/requirements.md).
+Every backend returns owned facts and shares Rust propagation. Read source into
+memory and return stdout results without caching or changing code. Use local file
+permissions. Do not execute external config JS or source; convert compiler panics
+to diagnostics at the CLI boundary. This is an additive independent command with
+no special deployment procedure.
 
-## API・インターフェース
+## Alternative and future decisions
 
-`scan --project tsconfig.json --format json`で独立した`errspec/scan`レポートを出します。`--discriminant`で識別プロパティを選び、既定は`_tag`, `kind`, `type`, `code`です。`--fail-on-unknown`では未解決箇所が残る場合に終了コード1、設定・解析失敗は2にします。通常の走査成功は0ですが、実行時の完全性を意味しません。
-
-既存のRust関数propagateは、同じ計算を呼び出してレポートの関数要約だけを更新する互換入口として維持します。CLIの収集処理は事実からレポートを生成する経路を使います。JSONの形式・フィールド順・診断・終了コードは変更しません。
-
-## 外部サービスとの連携方式
-
-固定したtsrs、または導入済みのTS 6・7の公式APIを選びます。選択条件は[TypeScript互換機能のRequirements](../typescript-compatibility/requirements.md)に定めます。各backendは所有可能な事実を返し、伝播の判定は共通のRustで行います。
-
-## データの取り扱い設計
-
-対象ソースを読んでメモリ内で解析し、stdoutへ結果を返します。キャッシュやコードの変更は行いません。
-
-## 認証認可に関する特記事項
-
-なし。呼出元のローカルファイル権限を使います。
-
-## セキュリティ上の留意事項
-
-外部の設定JSやソースを実行せず、コンパイラpanicはCLI境界で診断へ変換します。
-
-## デプロイに関する特記事項
-
-なし。既存コマンドと独立した追加コマンドです。
-
-## 検討した代替手段
-
-### 名前だけの呼出グラフ
-
-同名のローカル変数や別名importを誤って結ぶため採用しません。既存tsrsのシンボル・signatureを利用します。
-
-## 未決事項
-
-外部ライブラリ別の意味解析を追加する際は、認識条件と未解決条件を仕様化します。
+A name-only call graph would wrongly connect shadowed locals or import aliases;
+use compiler symbols/signatures instead. Additional library semantics must define
+both recognition and unresolved conditions.

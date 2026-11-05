@@ -1,248 +1,85 @@
-# 失敗シナリオの登録と実行の検証
+# Failure scenario registration and execution verification
 
-## このドキュメントについて
+This feature implements the correspondence between declared error variants and failure scenarios in [Product](../../product.md). Its guarantees are limited to the registrations and evidence described here.
 
-[errspec Product](../../product.md)に基づき、宣言されたエラー種別と失敗シナリオの対応を確認する機能を定めます。
-既存の試作の振る舞いを整理した仕様案です。この整理自体は、knjによる仕様の確認や保証範囲の拡大を意味しません。
+## Scope
 
-### スコープ
+For explicitly selected TypeScript error types, check variant registrations, scenario execution with Bun/Vitest, required fault observations and assertions, and changes from a saved scenario inventory. Multiple scenarios may represent one variant.
 
-利用者が指定したTypeScriptのエラー型について、失敗種別の登録、Bun/Vitestでのシナリオ実行、必須の観測と比較、保存済みのシナリオ一覧との差分を確認します。
-一つの失敗種別に複数のシナリオを登録できます。
+[Discovery](../discovery/requirements.md) separately handles error candidates and propagation. This feature does not enumerate every input, order, or timing combination; judge whether expectations are correct; execute natural-language specifications; or resist malicious test code. Mutation testing is specified separately.
 
-### スコープ外
+## User stories and acceptance
 
-エラー候補と関数間の伝播は[別機能の走査](../discovery/requirements.md)で扱います。この検証機能では、すべての入力・順序・時間の組合せの列挙や期待値の正しさの判定は行いません。
-自然言語の仕様の自動実行、mutation testingとの連携、任意のテストコードによる偽装への耐性も保証しません。
+### Detect missing registrations
 
-## ユーザーストーリー
+Developers need to see when an error-type change introduces an unregistered failure variant.
 
-### エラー種別に対応するケースの不足を見つける
+- Adding a variant without a case reports that variant and fails registration checking.
+- Valid registrations alone can pass `check`, but tests and observations remain unexecuted.
+- An unconstrained discriminator that cannot yield a finite tag set reports incomplete analysis rather than success.
 
-開発者として、エラー型の変更時に、対応するケースが登録されているか確認したい。それによって、新しい失敗種別の検証漏れに気づけます。
+### Verify required observations and assertions
 
-**受け入れ条件:**
+Developers need current execution evidence even when the runner itself reports success.
 
-Scenario: エラー種別を追加してケースを登録しない場合、不足を報告する
+- Separate first-attempt and post-retry scenarios for the same tag each pass only when their uniquely matched current test, required completed fault calls, and mandatory assertions pass.
+- An input-only scenario may pass without fault observations only when configuration explicitly declares an empty fault list and the test explicitly declares that it uses no faults. Mandatory assertions remain required.
+- A no-fault declaration on only one side fails: configuration-only causes test failure; test-only leaves required faults unobserved.
+- Removing a mandatory assertion fails observation verification even if the test passes.
+- Preparing a fault function without calling it does not count as an observed fault.
+- Skipped tests do not establish verified scenarios.
+- Evidence from another run cannot establish current success.
+- A scenario inside one or more `describe` blocks matches despite suite prefixes. Registering the same scenario in multiple suites is ambiguous and fails.
+- An optional human-readable description after the stable test identity does not change scenario identity or baseline comparison. Having both described and undescribed versions in the same file is ambiguous and fails.
 
-- Given: 登録済みのエラー型に新しい失敗種別が追加され、対応するケースがない。
-- When: 利用者が登録の検査を実行する。
-- Then: 不足している失敗種別を示し、検査を不合格とする。
+### Detect scenario removal and change
 
-Scenario: 登録だけが揃っている場合、テストの実行済みとは報告しない
+Developers compare with a saved inventory to distinguish an intentional specification change from lost verification.
 
-- Given: すべての失敗種別に有効なケース登録がある。
-- When: 利用者がテストを起動せずに登録の検査を実行する。
-- Then: 登録の検査は成功し、テストと観測は未実行と表示する。
+- Removing one of two scenarios for a tag fails even when the tag remains covered by the other scenario.
+- Changing expected behavior or required observations appears in the diff. The default comparison does not fail solely for this change.
+- Strict comparison fails a changed scenario, including deletion of a mandatory assertion from both configuration and test, even when the test still passes.
+- Adding scenarios while preserving existing ones does not itself fail strict comparison.
+- Strict comparison without a baseline, with an old format, or with missing scenario history fails with an error instead of reporting no change.
 
-Scenario: エラー種別を有限に列挙できない場合、解析できないことを報告する
+Strict comparison applies to observation-enabled registration checking and verification. Combining it with inventory generation is rejected before creating a file. It compares expected behavior, tag, test reference, and mandatory observations, including observation-ID order under the existing comparison rules. It does not determine whether a change semantically weakens verification.
 
-- Given: 対象の識別子が任意の文字列を許可し、失敗種別を限定できない。
-- When: 利用者が登録の検査を実行する。
-- Then: 解析不能の理由を示し、検査を成功として扱わない。
+An intentional change requires diff review and an updated inventory. The tool does not record or prove human approval. CI supplies a comparison baseline separate from the proposed change.
 
-### 失敗時に必要な比較が実行されたことを確認する
+## Functional requirements
 
-開発者として、登録した障害と比較が今回の実行で成立したか確認したい。それによって、テストが成功していても検証が抜けているケースを見つけられます。
+Inputs are the exported error type, cases, test references, required faults/assertions, and optional baseline. Outputs include verdicts and reasons in text and structured form, with test execution status separate from observation status.
 
-**受け入れ条件:**
+The selected public type must expose finite string discriminator values. Verification requires exactly one current successful test per scenario, all required observations/assertions, and a successful overall runner execution. A fault observation establishes that a developer-selected function was called and completed. It does not establish that its value represents a meaningful business fault or that an assertion is sufficient.
 
-Scenario: 同じ失敗種別の複数ケースで必須の観測と比較が成功した場合、各ケースを合格とする
+Legacy registrations retain their existing test matching and are visibly distinguished from the newer observation-enabled format.
 
-- Given: 同じ失敗種別に、初回で停止するケースと再試行後に停止するケースが別々に登録されている。
-- When: 利用者がシナリオの検証を実行する。
-- Then: 各ケースのテスト、登録された障害用関数の完了、必須の比較が今回の実行で成功していれば、各ケースを合格とする。
+Invalid configuration, type errors, runner startup failures, corrupt records, ambiguous duplicates, and unfinished observations cannot pass. A known runner version that omits test-file identities is rejected before tests start. Partial test success does not override overall runner failure. Old execution results are not reused to pass current scenario verification. Inventory creation never overwrites an existing file.
 
-Scenario: 入力だけで決まる失敗種別を、障害なしと明示して登録した場合、比較だけで合格とする
+For Bun 1.2.18 or earlier, which omits JUnit suite file attributes, report the detected and required version and stop before execution.
 
-- Given: 入力チェックで返る失敗種別のケースが、設定で障害の一覧を空と明示し、テストでも障害を使わないと宣言している。
-- When: 利用者がシナリオの検証を実行する。
-- Then: テストと必須の比較が今回の実行で成功していれば、障害の観測なしでケースを合格とする。
+### Static checks before execution
 
-Scenario: 障害なしの明示が片方だけの場合、ケースを合格にしない
+When registered test files belong to the analyzed project, check their declarations against configuration before running tests. Report only mismatches that necessarily fail at runtime; leave unresolved values to runtime matching.
 
-- Given: 設定かテストの一方だけが障害を使わないことを明示している。
-- When: 利用者がシナリオの検証を実行する。
-- Then: 設定だけの場合はテストの失敗を、テストだけの場合は障害の未観測を示し、ケースを合格にしない。
+- A scenario ID resolved to concrete values, including an unregistered value, reports the scenario and source location and fails checking.
+- Concrete fault/assertion IDs directly used in the scenario body must belong to the configured required IDs.
+- An arbitrary string or helper API used outside the directly inspected scenario body does not fail static checking merely because its value cannot be established.
 
-Scenario: テストが成功しても必須の比較がない場合、ケースを不合格とする
+### Explicit selection of registered test files
 
-- Given: ケースに必須の結果比較が登録されているが、対応するテストからその比較が削除されている。
-- When: 利用者がシナリオの検証を実行する。
-- Then: テストの成功状態とは別に、欠けた比較を示してケースを不合格とする。
+`verify --only-contract-tests` runs only files referenced by registered cases. The default continues to execute all tests. An empty selection is a configuration error; it must not silently expand to all tests. Unselected tests are not reported as passed.
 
-Scenario: 障害用関数が実行されていない場合、観測済みとして扱わない
+When registered tests pass and unrelated tests fail, explicit selection judges the selected execution and evidence. Default full execution still fails for the unrelated runner failure.
 
-- Given: 障害用関数を準備したが、テスト中に呼び出していない。
-- When: 利用者がシナリオの検証を実行する。
-- Then: 障害の実行を確認できないことを示し、ケースを合格にしない。
+## Data and trust
 
-Scenario: 対応するテストがスキップされた場合、検証済みとして扱わない
+Type identity locates the type and variants. Case registration supplies scenario identity, expected behavior, test reference, and required observations. Execution supplies test state, fault call/completion counts, and assertion results. The saved inventory supplies historical tags and scenarios. One type has multiple variants, each variant may have multiple scenarios, and each scenario requires unique current test/evidence matching.
 
-- Given: ケースに対応するテストがスキップ対象になっている。
-- When: 利用者がシナリオの検証を実行する。
-- Then: スキップされたことを示し、ケースを不合格とする。
+There is no required external service. User tests may connect to services or incur their own costs. Identifiers, paths, descriptions, and logs can contain personal data; users review them before sharing.
 
-Scenario: 観測の記録が別の実行のものの場合、合格の根拠に使わない
+Tests and the observation helper are trusted executable code. The tool prevents accidental stale or unregistered evidence from establishing success; it is not a hostile-code sandbox.
 
-- Given: 今回の実行と異なる識別情報を持つ観測記録がある。
-- When: 利用者がシナリオの検証を実行する。
-- Then: 記録の不一致を報告し、検証を成功として扱わない。
+## Evidence and deferred decisions
 
-Scenario: シナリオのテストをdescribeの中に登録した場合も、同じシナリオとして検証する
-
-- Given: シナリオのテストが一つ以上の`describe`の中に登録され、ランナーがその題名を前に付けた完全名を報告する。
-- When: 利用者がシナリオの検証を実行する。
-- Then: 題名の有無によらず同じシナリオとして照合する。同じシナリオが複数の`describe`に登録されていれば、曖昧として不合格とする。
-
-Scenario: テスト名に説明を付けた場合も、同じシナリオとして検証する
-
-- Given: シナリオのテストが、固定の識別名の後ろに人が読む説明を付けて登録されている。
-- When: 利用者がシナリオの検証や、保存済み一覧との厳密な比較を実行する。
-- Then: 説明の有無や内容によらず同じシナリオとして照合し、説明の変更をシナリオの変更として扱わない。識別名だけのテストと説明付きのテストが同じファイルに両方あれば、曖昧として不合格とする。
-
-### シナリオの削除と変更を確認する
-
-開発者として、以前の失敗シナリオが変更で失われていないか確認したい。それによって、意図した仕様変更か、検証漏れかを判断できます。
-
-**受け入れ条件:**
-
-Scenario: 失敗種別を残したまま一つのシナリオを削除した場合、削除を報告する
-
-- Given: 保存済み一覧に、同じ失敗種別のシナリオが二つある。
-- When: 一方を削除した状態で、保存済み一覧との比較を実行する。
-- Then: 削除されたシナリオを示して不合格とする。
-
-Scenario: 同じシナリオの期待動作を変更した場合、変更を表示する
-
-- Given: 保存済み一覧と同じシナリオの期待動作や必須の観測項目が変更されている。
-- When: 利用者が変更を不合格にするモードを指定せず、保存済み一覧との比較を実行する。
-- Then: 変更されたシナリオを差分として表示する。変更そのものを自動で不合格にはしない。
-
-Scenario: 変更を不合格にするモードでは、必須比較を減らした変更を報告する
-
-- Given: 保存済み一覧にあるシナリオから、設定とテストの両方で必須の比較を削除している。
-- When: 利用者が変更を不合格にするモードで保存済み一覧と比較する。
-- Then: テスト自体が成功しても、変更したシナリオを示し、検査を不合格とする。
-
-Scenario: 変更を不合格にするモードでも、既存シナリオを保った追加は許容する
-
-- Given: 保存済み一覧にあるシナリオを維持し、新しいシナリオだけを追加している。
-- When: 利用者が変更を不合格にするモードで比較する。
-- Then: 追加を理由に不合格にはせず、通常の登録・実行の条件で判定する。
-
-Scenario: 比較に必要な履歴がない場合、変更なしとは判定しない
-
-- Given: 保存済み一覧が未指定、従来形式、またはシナリオ履歴を欠いている。
-- When: 利用者が変更を不合格にするモードを指定する。
-- Then: 比較条件の不足をエラーとして報告し、成功として扱わない。
-
-変更を不合格にするモードは、観測付きの登録を用いた登録検査・実行検証に適用します。一覧の生成との同時指定は拒否し、ファイルを作成しません。
-既存シナリオの期待動作・タグ・テスト参照・必須観測の変更を対象にし、変更が検証を弱めたかどうかの意味判断は行いません。現在の比較に合わせ、観測IDの並び順の変更も対象にします。
-意図した変更は差分をレビューしたうえで新しい一覧を作り、比較元を更新します。ツールは人が承認した事実を記録・証明しません。CIはレビュー対象の変更で置き換えられていない比較元を用意します。
-
-## KPI
-
-利用者の修正時間や検証漏れの削減率は未計測です。数値目標と計測期間は、最初の導入先をknjと決める際に設定します。
-テストの成功数を、利用者にとっての効果の測定値として扱いません。
-
-## 機能要件
-
-### 登録・実行・差分の照合
-
-**概要:** 検証対象、ケース登録、今回の実行結果、任意の保存済み一覧を照合します。
-
-**入力:** 対象エラー型、失敗ケース、対応するテスト、必須の障害観測と結果比較、および任意の保存済み一覧。
-
-**出力:** 合否と理由。テストの実行状態と観測の状態を区別し、AIが読み取れる構造化出力も提供します。
-
-#### 適用する条件
-
-対象の型は、公開された型の有限な文字列の識別子で失敗種別を区別できることを条件とします。
-実行の検証では、対応するテストが今回一意に成功し、登録された観測と比較が揃い、実行全体が成功している必要があります。
-障害用関数が呼ばれて完了した事実を検証します。その戻り値が業務上の障害であることや、比較が有意義であることは利用者が判断します。
-入力だけで結果が決まる失敗種別は、設定とテストの両方で障害を使わないことを明示した場合に限り、障害の観測なしで登録できます。必須の比較は省略できません。
-従来形式の登録はテストとの対応を確認しますが、障害や比較の観測を要求した新形式とは結果上も区別します。
-
-#### 例外ケースでの振る舞い
-
-設定の不備、型エラー、ランナー起動失敗、壊れた記録、重複して対応が曖昧な実行、未完了の観測は成功として扱いません。
-レポートにテストファイルを出力しないと分かっている版のランナーは、テストを起動する前に必要な版を示して停止します。
-一部のテストが成功していても、ランナー全体が失敗していれば検証を不合格とします。
-過去の実行結果を流用して今回の実行を合格にする機能は提供しません。
-保存済み一覧を新規に作成する際は、既存のファイルを上書きしません。
-
-Scenario: テストファイルを報告しない版のBunでは、実行前に必要な版を示す
-
-- Given: PATHまたは指定したBunの版が、JUnitレポートにテストファイルを出力しない1.2.18以前である。
-- When: 利用者がBunでシナリオの検証を実行する。
-- Then: テストを起動せず、検出した版と必要な版を示して検証を成功として扱わない。
-
-### テストを実行する前の食い違いの検出
-
-登録したテストファイルが型解析の対象に含まれる場合、テストを実行せずに設定とテストの記述を照合します。
-報告するのは、実行すれば必ず不合格になる食い違いに限ります。値を静的に確定できない記述は、実行時の照合に任せます。
-
-Scenario: テストが設定にないシナリオを登録している場合、実行前に報告する
-
-- Given: テストが登録するシナリオの識別子が、型から一つ以上の具体的な値として分かり、そのいずれかが設定にない。
-- When: 利用者がテストを起動せずに登録の検査を実行する。
-- Then: 設定にないシナリオとテストの位置を示し、検査を不合格とする。
-
-Scenario: シナリオ本体が設定にない障害や比較の識別子を使っている場合、実行前に報告する
-
-- Given: シナリオ本体で、障害用関数や比較の識別子が具体的な値として書かれ、その値が設定の必須項目にない。
-- When: 利用者が登録の検査を実行する。
-- Then: 食い違う識別子を示し、検査を不合格とする。
-
-Scenario: 値が静的に確定しない場合、実行前の照合では不合格にしない
-
-- Given: シナリオの識別子が任意の文字列の型であるか、補助APIをシナリオ本体の外の関数で使っている。
-- When: 利用者が登録の検査を実行する。
-- Then: その部分を実行前の照合の対象にせず、実行時の観測の照合で判定する。
-
-### 段階的な導入のための選択実行
-
-明示的に選択した場合、登録済みケースが参照するテストファイルだけを実行します。既定の全テスト実行は維持します。
-選択対象が空なら設定エラーとし、全テストへ暗黙に切り替えません。選ばなかったテストを成功したと報告しません。
-
-Scenario: 選択実行を指定した場合、登録済みテストだけを検証する
-
-- Given: 登録済みのテストは成功し、無関係のテストは失敗する。
-- When: 登録済みファイルだけの実行を明示的に選択する。
-- Then: 登録済みの実行・観測で判定する。既定の全実行では無関係の失敗も実行全体の失敗として扱う。
-
-
-## データ要件
-
-### 必要なデータ
-
-- **型の識別情報:** 対象の型と失敗種別を特定する。
-- **ケース登録:** シナリオの識別子、期待動作、対応するテスト、必須の観測項目を表す。
-- **実行結果:** 今回のテスト結果、障害用関数の呼出と完了、比較結果を表す。
-- **保存済み一覧:** 過去に登録された失敗種別とシナリオを比較する基準にする。
-
-### データ間の関係
-
-一つの検証対象は複数の失敗種別を持ち、一つの失敗種別は複数のシナリオを持てます。
-各シナリオは、一意なテストと今回の観測記録に対応します。
-
-### 個人情報
-
-個人情報の収集を目的としません。利用者が設定した説明・識別子・ファイル名や、テストが出すログには個人情報が含まれ得ます。
-外部へ共有する検証結果とログの内容は、利用者が確認します。
-
-## 依存する外部サービス
-
-検証自体に、errspecが契約を要求する外部サービスはありません。
-利用者が実行するテストの接続先や費用は、そのテストの条件に従います。
-
-## セキュリティ上の留意事項
-
-検証では利用者のテストコードを実行します。テストと観測を記録する補助APIは信頼対象であり、悪意あるコードを隔離する機能ではありません。
-登録されていない観測や古い実行結果を、偶然の混入で合格の根拠にしないことを条件とします。
-
-## 未決事項
-
-シナリオごとの部分的な変更承認や、変更の意味を分類する機能は今回の範囲外です。実際の導入で必要性を確認します。
-新しいモードの受け入れ条件は実装PRのレビュー対象です。既定の比較動作は維持します。
+Developer time savings and reductions in missed verification have not been measured. Product KPIs require a real adoption trial; test counts are not product-impact measurements. Partial acceptance of individual scenario changes and semantic classification of changes remain outside this scope. Default comparison behavior remains compatible.

@@ -1,112 +1,105 @@
-# 障害を差し込んだ操作の状態検査
+# Check operation state under injected faults
 
-## このドキュメントについて
+## About this document
 
-[Product](../../product.md)に基づき、開発者が指定した障害を依存呼び出しへ順番に差し込み、失敗を返した操作が業務状態を部分更新していないか検査します。
+Under the [Product](../../product.md), inject developer-specified faults into
+dependency calls in turn, checking whether an operation that returns failure has
+left business state partially updated.
 
-### スコープ
+### Scope
 
-正常系で実行された依存呼び出しごとに単一の障害を差し込み、独立したfixtureで操作前後のスナップショットを比較します。既存のテストランナーから呼び出します。
+Inject one fault at each dependency call observed during the successful run.
+Compare before/after snapshots using an independent fixture for every case.
+The consumer calls this from its existing test runner.
 
-### スコープ外
+### Outside scope
 
-型から任意のエラー値や業務上の期待動作を生成しません。複数障害の組合せ、並行実行の全順序、外部システムのロールバックを保証しません。
+Do not synthesize arbitrary error values or business expectations from types.
+Do not promise combinations of faults, every concurrent ordering or rollback in
+external systems.
 
-## ユーザーストーリー
+## User story: reproduce partial updates with one operation definition
 
-### 一つの操作定義で失敗時の部分更新を再現する
+**Scenario: a failed operation that changes state reports a counterexample.**
 
-開発者として、依存が失敗したときに残る不正な状態を、再実行できる条件とともに見つけたい。
+- Given the normal run succeeds but a dependency failure leaves a partial update.
+- When state is checked under injected faults.
+- Then fail with fault ID, dependency, call ordinal and before/after state.
 
-**受け入れ条件:**
+**Scenario: rollback is judged by final state rather than intermediate writes.**
 
-Scenario: 失敗を返した操作が状態を変えた場合、再現条件付きで失敗する
+- Given the operation writes state and restores it on failure.
+- When a fault is injected.
+- Then report preserved state when the final snapshot matches the initial one.
 
-- Given: 正常系は成功するが、途中の依存が失敗すると部分更新が残る。
-- When: 障害を差し込んで状態を検査する。
-- Then: 障害ID、依存名、呼び出し回数、変更前後の状態を持つ失敗を返す。
+**Scenario: repeated calls are checked independently.**
 
-Scenario: ロールバックした場合、途中の書き込みを理由に失敗させない
+- Given the normal run calls the same dependency twice.
+- When one fault is registered.
+- Then return two cases, injecting once at each ordinal in a fresh fixture.
 
-- Given: 操作は途中で状態を書き換えるが、失敗時に元へ戻す。
-- When: 障害を差し込んで状態を検査する。
-- Then: 操作後の状態が操作前と同じなら、状態を維持したと報告する。
+**Scenario: recovery success differs from failure-state preservation.**
 
-Scenario: 同じ依存を複数回呼ぶ場合、各回を独立して検査する
+- Given a retry succeeds after the injected fault.
+- When state is checked.
+- Then report recovery, without claiming that failure-state preservation was
+  verified.
 
-- Given: 正常系が同じ依存を二回呼ぶ。
-- When: 一つの障害を登録して検査する。
-- Then: 各回に一度だけ差し込んだ二つの結果を返し、それぞれ新しいfixtureを使う。
+**Scenario: an unreached dependency or call is not an empty success.**
 
-Scenario: 障害から回復して成功した場合、状態維持の証拠と区別する
+- Given the normal run never calls the named dependency, or a fault run does not
+  reach the requested ordinal.
+- When checked.
+- Then fail and identify the unexecuted fault.
 
-- Given: 障害後の再試行で操作が成功する。
-- When: 状態を検査する。
-- Then: 回復成功と報告し、失敗時の状態維持を確認したとは報告しない。
+**Scenario: an unexpected exception is not a pass merely because state matches.**
 
-Scenario: 指定した依存を通らない場合、空の成功にしない
+- Given the operation should return a failure value but throws.
+- When checked.
+- Then report the exception and reproduction conditions and clean up all fixtures.
 
-- Given: 正常系が指定した依存を呼ばない、または障害実行が指定した呼び出し回数に届かない。
-- When: 検査する。
-- Then: 障害が未実行であることを示して失敗する。
+## Success measure
 
-Scenario: 操作が予期せず例外を投げた場合、状態維持だけでは合格にしない
+Effectiveness on real projects is not yet measured. The acceptance target is a
+counterexample for an operation that leaves a partial update and success for the
+repaired operation under the same inputs/faults. Compare faulty and repaired
+operations during acceptance; superiority over other tools requires separate
+measurement.
 
-- Given: 操作は失敗値を返す想定だが例外を投げる。
-- When: 検査する。
-- Then: 例外と障害の再現条件を報告し、全fixtureの後処理を実行する。
+## Functional requirements
 
-## KPI
+### Normal execution and single-fault cases
 
-### 実装に残る不具合の検出
+**Input:** fixture creation, operation, state acquisition, failure-value predicate,
+named executable faults, and optional selection of one case.
 
-- **現状値:** 実プロジェクトでの比較効果は未計測。
-- **目標値:** 部分更新を残す例で反例を返し、修正した同じ例で成功する。
-- **計測方法:** 不具合あり・修正済みの操作を同じ入力・障害で実行する。
-- **計測期間:** この機能の受け入れ検証時。競合を上回る効果は別途実測する。
+**Output:** normal-run call observations and each fault's preserved state,
+recovery or violation. Violations include reproduction conditions and snapshots.
 
-## 機能要件
+The user chooses the protected business state and valid fault values. Initialize
+the fixture per run and await the operation and dependency calls. Run optional
+cleanup after success and failure. Store an unchanged copy of acquired state.
 
-### 正常系と単一障害の検査
+A failed normal run, empty/duplicate fault IDs, unobserved dependency, incomplete
+call or unreachable replay condition is a failure. Never report uncheckable state
+as preserved.
 
-**概要:** 正常系で観測した呼び出し回数から有限の障害実行を作ります。
+## Data
 
-**入力:** fixture生成、操作、状態取得、失敗値の判定、依存名と実行可能な障害、任意の単一ケース指定。
+- Reproduction: fault ID, dependency and call ordinal.
+- State: the user-selected business state before and after the operation.
+- Result: operation outcome, violation reasons and cleanup failures.
 
-**出力:** 正常系の呼び出し記録と各障害の状態維持・回復成功・違反。違反には再実行する条件とスナップショットを添えます。
+One successful run defines several single-fault cases. Cases share neither fixture
+nor state. User-selected values can appear in diagnostics; they are not sent to an
+external service.
 
-#### 適用する条件
+## Dependencies and safety
 
-利用者は保護すべき業務状態の範囲と有効な障害値を指定します。fixtureは実行ごとに初期化し、操作と依存呼び出しをawaitします。後処理を指定した場合は成功・失敗ともに実行します。状態取得は変更されないコピーとして保存します。
+No additional external service is required; use the consumer's runner. Operations
+and dependencies are supplied by the user. This does not isolate real side effects:
+the fixture must supply that isolation.
 
-#### 例外ケースでの振る舞い
+## Unresolved decisions
 
-正常系の失敗、空や重複の障害ID、未観測の依存、未完了の呼び出し、到達しない再実行条件は失敗です。検査できない状態を維持済みと報告しません。
-
-## データ要件
-
-### 必要なデータ
-
-- **再現条件:** 障害ID、依存名、何回目の呼び出しか。
-- **状態:** 操作前後に利用者が選んだ業務状態。
-- **結果:** 操作結果、違反理由、後処理の失敗。
-
-### データ間の関係
-
-一つの正常系から複数の単一障害実行を作ります。各実行のfixtureと状態は共有しません。
-
-### 個人情報
-
-利用者が状態へ含めた値を診断で扱います。外部へ送信しません。
-
-## 依存する外部サービス
-
-なし。利用者のテストランナーで実行します。
-
-## セキュリティ上の留意事項
-
-実行する操作と依存は利用者が用意します。実環境への副作用を隔離する機能ではなく、fixtureによる隔離が必要です。
-
-## 未決事項
-
-なし。
+None for this feature's accepted scope.

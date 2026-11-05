@@ -1,276 +1,91 @@
-# Vitestによる変異の生成・実行・判定
+# Mutation generation, execution, and judgment with Vitest
 
-## このドキュメントについて
+[Product](../../product.md) requires checking whether existing tests detect code changes. This document defines the initial `mutate` capability: 18 built-in mutator families, baseline and per-mutant execution, text/native JSON, and an optional gate for undetected mutants. The broader approved scope is in the [workflow requirements](../mutation-workflows/requirements.md) and [capability matrix](../../mutator-coverage.md).
 
-[Product](../../product.md)に基づき、既存のVitestテストがコードの変更を検出できるかを調べる機能を定めます。[機能対応表](../../mutator-coverage.md)にある全機能提供へ向けた、最初の提供単位です。
+## Scope and boundaries
 
-18種の組み込みmutatorと、既定では結果を表示し、厳格な指定時に未検出の変異を不合格にする方式を用います。この範囲は`mutate`として実装しています。実装とテストの成功を、文面全体についての利用者の確認とは扱いません。
+The initial adapter targets one selected Vitest 5 Node project and JS/TS modules transformed through Vite. It does not require exported error types, `errspec.json`, or rewriting tests to `scenarioTest`. It includes source/family selection, per-test reach, module-initialization reach, and explicit execution evidence.
 
-### スコープ
+Git selection, persistent cache, weak mutation, compiler typechecking, arid/comment/plugin exclusions, acceptance, parallelism/budgets, Jest/Playwright/Vite+, richer reports, matrices, and thresholds belong to the separate workflow specification. They are not missing from the product merely because this foundational document isolates their design. Bun, Vitest Browser Mode, Vue/Svelte single-file components, native require outside the transform path, and propagation into arbitrary subprocesses are not guaranteed by this Vitest adapter.
 
-利用先のVitestのNode workerでVite変換を経由するTypeScript / JavaScriptのモジュールを対象に、変異候補の生成、変更前コードでの基準実行、変異を一つずつ有効にした実行、結果と根拠の表示を扱います。エラー型の公開、`errspec.json`、`scenarioTest`への書き換えは利用の前提にしません。
+[Failure verification](../failure-verification/requirements.md) and [tag coverage](../test-coverage/requirements.md) remain independent. Mutation verdicts do not establish mandatory fault observations, assertion sufficiency, or correct business expectations.
 
-対象はVitest 5系のNode上で実行する一つのテストプロジェクトです。複数のプロジェクトがある場合は、一つを選択して実行できます。対象ソースの選択、変異種別の除外、テスト単位の到達記録、モジュール初期化時の到達、text / JSON出力を含めます。
+## User stories and acceptance
 
-### スコープ外
+### Find changes existing tests miss
 
-Git差分による実行範囲の限定、実行間のキャッシュ、weak mutation、利用先のTypeScriptによる変異後の型検査、同値性の証明、arid判定、disableコメント、plugin、理由付きの承認、kill matrix、スコア閾値、critical領域、HTML・agent専用レポートは後続の機能です。複数の変異の並列実行、標本選択、実行全体の時間予算もこの機能では扱いません。
+- Each of the 18 families produces candidates for inputs where a safe inactive switch is possible; an entire safely applicable family cannot be omitted for implementation convenience.
+- Given passing boundary tests for `age >= 18`, changing `>=` to `>` is `Killed` when the test with 18 fails. Report original location, edit, and failing test.
+- If only 19 is tested and all selected tests pass, the reached edit is `Survived`. This says nothing about whether the original business rule is correct.
+- A candidate with no baseline reach is `NoCoverage`, with its skipped trial visible. It is not a successful mutant execution.
+- Runtime strings can be mutated while type literals/import specifiers remain intact. Unsafe placements have explicit exclusion reasons.
 
-Bun、Jest、Playwright、Vitest Browser Mode、Vite+固有の互換性、Vue / Svelteなどの単一ファイルコンポーネントは対象外です。Vite変換を経由しないnative requireや別の子プロセスへの変異の反映も保証しません。これらの除外によって、全機能提供という製品目標を変更しません。
+### Establish a valid baseline
 
-[失敗シナリオ検証](../failure-verification/requirements.md)と[既存テストのエラータグ集計](../test-coverage/requirements.md)は独立した機能です。本機能の結果から、必須の障害用関数や比較の成立、業務上の期待値の正しさを推定しません。
+- Failure of an ordinary unmodified test run prevents mutant trials, produces an incomplete result/nonzero exit, and does not count as a kill.
+- No runnable tests, including an all-skip/todo suite, produces no score and a nonzero exit.
+- An inactive instrumented probe must preserve the ordinary baseline's test inventory and outcomes. A mismatch prevents trials.
 
-## ユーザーストーリー
+### Explain failures and incompletion
 
-### 既存テストが検出できないコード変更を知る
+- A reproducible mutant-induced module initialization failure is `RuntimeError`, attributed to the module and distinguished from assertion detection.
+- A mutant exceeding its deadline is retried once with an extended deadline. Repeated expiry is `Timeout`; a completed retry supplies the verdict.
+- A selected test disappearing, becoming skipped, or lacking a success record cannot establish `Survived`. Reproducible mutant effects are distinguished from runner/protocol failures.
+- Changed inputs, stale records, or broken communication retain established partial results and leave unresolved candidates incomplete. They cannot produce a passing gate or full completion.
 
-開発者として、既存テストをそのまま使い、どのコード変更を検出できないかと、その場所を知りたい。
+### Apply strict detection only when requested
 
-**受け入れ条件:**
+- A fully completed run with survivors/unreached mutants exits successfully by default while showing those states separately from execution completion.
+- `--fail-on-undetected` fails a completed run with `Survived` or `NoCoverage`, separately from configuration/baseline/runner errors.
+- Zero candidates produces a count of zero and no score, never a claim of 100% detection.
 
-Scenario: 組み込み18種を適用できる入力がある場合、各種の候補を生成する
+### Preserve existing work
 
-- Given: 18種それぞれに、非有効状態の意味を維持して切替を配置できる入力がある。
-- When: 種別を除外せずに候補を生成する。
-- Then: 各種に対応する変更内容を候補として得られる。安全な配置が可能な種別を、実装上の都合で一括して除外しない。
+- Duplicate names and concurrent tests are not substituted for one another. If reach cannot be isolated by test, expand execution and disclose its precision.
+- Completion/interruption does not save mutated bytes into source, tests, configuration, or scenario history. Interruptions stop only owned processes and report incompletion.
+- JSON stdout remains one result, including partial results; configuration/test logs go to stderr.
+- Existing CLI, exit-code, configuration, JSON, and testkit contracts remain compatible.
 
-Scenario: 境界値の変更をテストが検出する場合、失敗したテストと変異を示す
+## Candidate requirements
 
-- Given: `age >= 18`を使う関数と、18を与えるとtrueになることを確かめるテストが成功している。
-- When: 比較演算子の変異を検証する。
-- Then: `>=`を`>`に変えた変異を検出済みとし、元の位置・変更内容・失敗したテストを示す。
+Inputs are project, include/exclude patterns, and excluded families. Output contains stable ID, family, original location, original/replacement text, and exclusion reason where applicable.
 
-Scenario: 到達した変異をテストが検出しない場合、生存として示す
+Supported source extensions are JS/JSX/TS/TSX and their module variants: `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`. Exclude dependencies, declaration-only files, test bodies, and collected Vitest configuration/setup/globalSetup. Enumerate even unimported selected files.
 
-- Given: 同じ関数について、19を与えるとtrueになることだけを確かめるテストが成功している。
-- When: 比較演算子の変異を検証する。
-- Then: `>=`を`>`に変えた変異について、対象テストが成功したことと生存の状態を示す。元の業務仕様が正しいという判定にはしない。
+The 18 families are `ArithmeticOperator`, `ArrayDeclaration`, `ArrowFunction`, `AssignmentOperator`, `BlockStatement`, `BooleanLiteral`, `CallExpression`, `ConditionalExpression`, `EqualityOperator`, `FnValue`, `LogicalOperator`, `MethodExpression`, `ObjectLiteral`, `OptionalChaining`, `Regex`, `StringLiteral`, `UnaryOperator`, and `UpdateOperator`. Users can exclude individual families.
 
-Scenario: 対象ソースへテストが到達しない場合、生存と区別する
+Candidates are runtime expressions/statements. They must not change type syntax, import/export specifiers, or directive semantics. Deduplicate identical range/replacement edits. Exclude with a reason any placement whose inactive state cannot preserve evaluation count, short-circuiting, or call semantics. The same input/configuration/rule version yields the same candidate identities and order. Positions refer to original text and remain correct for Unicode and emoji.
 
-- Given: 選択したソースに変異候補があるが、基準実行でどの対象テストもその実行単位へ到達しない。
-- When: 変異を検証する。
-- Then: その候補を未到達とし、変異実行を省略したことを示す。テストが成功した変異として数えない。
+Invalid patterns/families, outside-root paths, zero selected files, unreadable source, and syntax failure are errors, distinct from selected files with zero candidates. Never execute a guessed replacement for unparsed source.
 
-Scenario: 型の宣言と実行時の式が併存する場合、実行時の式だけに変異を生成する
+## Execution requirements
 
-- Given: 文字列リテラル型、importの指定、関数本体の文字列が同じファイルにある。
-- When: 文字列の変異候補を生成する。
-- Then: 型の宣言とimportの指定を変更する候補は生成せず、実行時の文字列を対象にする。安全に配置できない候補には除外理由を示す。
+Perform an ordinary baseline and an inactive instrumented probe, matching runnable test inventory and outcomes before trials. Honor project aliases/environment/setup and disable snapshot updating. Prefer per-test reach; broaden initialization/concurrent/ambiguous observations to their file or all selected tests and expose the precision. A final test failure may end an ordinary mutant trial early.
 
-### 基準実行の失敗を変異の検出と混同しない
+`Survived` requires reach plus success of every selected runnable test. Skip/todo, missing registration, or absent evidence is not success. A timeout gets one extended retry; runtime/module failures get one same-condition confirmation. At most two attempts are allowed. A retry that only establishes a different failure class leaves the run unstable/incomplete. A measured hit-limit stop may be classified as timeout without retry.
 
-開発者として、元から失敗するテストや実行環境の不備を、変異を検出した実績から区別したい。
+Startup/communication failures are not mutant runtime errors. Changes to source, configuration, tests, or acquired dependencies during execution prevent completion against old reach records.
 
-**受け入れ条件:**
+## Results and gate
 
-Scenario: 変更前コードでテストが失敗する場合、変異実行を開始しない
+| State | Meaning | Score treatment |
+|---|---|---|
+| `Killed` | A selected test fails under the mutant | Detected |
+| `Survived` | Every selected test executes successfully | Undetected |
+| `NoCoverage` | No reach to the instrumented execution unit | Undetected |
+| `Timeout` | Confirmed deadline or hit-limit stop | Detected, separately identified |
+| `RuntimeError` | Confirmed non-test/module failure under the mutant | Detected, separately identified |
+| `Ignored` | Explicitly excluded, including unsafe placement | Outside denominator |
+| `Pending` | Interrupted or unconfirmed due to execution failure | No final score/gate |
 
-- Given: 選択したテストに、変更前コードでも失敗するものがある。
-- When: ミューテーションの検証を実行する。
-- Then: 基準実行の失敗を報告し、変異の検出数に含めず、未完了の結果と非ゼロ終了を返す。
+No denominator means no score. An exclusion is not an equivalence approval. Report whether compiler typechecking ran. The default displays evidence for investigation; a strict completed gate fails undetected mutants while preserving exclusion counts/reasons. Incomplete execution takes precedence over quality results.
 
-Scenario: 実行可能なテストがない場合、検出結果を成功としない
+Unsupported Vitest versions/APIs, Browser Mode, unselected multiple projects, or missing runtime dependencies fail with actionable reasons. Scenario snapshots must not be reinterpreted as mutation cache history.
 
-- Given: 対象テストがない、またはすべてskip / todoである。
-- When: ミューテーションの検証を実行する。
-- Then: 実行可能なテストがないことを報告し、スコアを算出せず、非ゼロで終了する。
+## Data, security, and evidence
 
-Scenario: 到達記録のための変換が基準実行を変える場合、変異の結果を確定しない
+One run owns source versions/fingerprints, candidate inventory, test identities, baseline reach/precision/timing, attempts, final judgments, and diagnostics. Multiple attempts still count as one mutant. Records from different runs cannot be mixed. This foundational path does not itself reuse earlier execution results; the [workflow design](../mutation-workflows/design.md) specifies opt-in reuse.
 
-- Given: 変更前コードの実行は成功するが、到達記録を加えた非有効状態ではテストの一覧または成否が異なる。
-- When: 変異実行の準備を行う。
-- Then: 非有効状態の不一致を報告し、変異実行を開始しない。
+Paths, source excerpts, test names, and errors may contain project information. There is no automatic external report upload or package download. Tests/configuration execute with local user permissions and remain responsible for their own filesystem/network effects. Temporary data and owned processes are cleaned without stopping unrelated runs.
 
-### テスト以外の失敗と未完了を把握する
-
-開発者として、時間切れ、テストファイルの読取時の失敗、検証ツールの異常を、それぞれの理由付きで把握したい。
-
-**受け入れ条件:**
-
-Scenario: 変異によってモジュールの初期化が失敗する場合、実行時エラーとして示す
-
-- Given: 基準実行は成功するが、変異を有効にするとテスト本体を開始する前に対象モジュールの初期化が失敗する。
-- When: 同じ変異の実行を再確認する。
-- Then: 再確認でも失敗すれば実行時エラーによる検出とし、失敗したモジュールを示す。テストのアサーションが検出したとは報告しない。
-
-Scenario: 変異の実行が期限を超える場合、時間切れとして示す
-
-- Given: 基準実行は成功し、変異を有効にした実行だけが期限を超える。
-- When: 期限を延長して一度再実行する。
-- Then: 再度期限を超えれば時間切れとし、その変異の実行を終了する。再実行が完了すれば、その結果を採用する。
-
-Scenario: 選んだテストの実行を確認できない場合、生存としない
-
-- Given: 基準実行にあった対象テストが、変異実行では登録されない、skipされる、または成功の記録を返さない。
-- When: 変異の実行結果を照合する。
-- Then: 記録の欠落を示し、全対象テストが成功したという生存判定を行わない。変異による再現可能な欠落と、実行器の異常を区別する。
-
-Scenario: 実行途中に入力や記録が不正になる場合、部分結果を未完了として返す
-
-- Given: 入力ソースが変わる、今回と異なる実行記録を受け取る、または実行器との通信が途切れる。
-- When: 変異を検証する。
-- Then: 確定済みの部分結果と異常の理由を返す。未実行の候補を未完了のまま示し、厳格判定の合格や全件完了を返さない。
-
-### 必要な場合に未検出の変異を不合格にする
-
-開発者として、調査時には結果を確認し、CIなどの厳格な検証では未検出の変異によって失敗させたい。
-
-**受け入れ条件:**
-
-Scenario: 生存・未到達があっても検証を完了した場合、既定では結果を表示して終了する
-
-- Given: 基準実行と全候補の判定が完了し、生存または未到達の候補がある。
-- When: 厳格な判定を指定せずに実行する。
-- Then: 状態と件数を表示し、コマンドは成功終了する。実行の完了と未検出の有無を別々に示す。
-
-Scenario: 厳格な判定を指定した場合、生存・未到達を不合格にする
-
-- Given: 同じ結果について、生存または未到達の候補がある。
-- When: 未検出を不合格にする指定で実行する。
-- Then: 未検出の候補を示し、検証を完了した状態で非ゼロ終了する。設定・基準実行・実行器の失敗とは区別する。
-
-Scenario: 変異候補が0件の場合、検出率100%とは表示しない
-
-- Given: 基準実行は成功するが、対象ソースに適用できる候補がない。
-- When: ミューテーションの検証を実行する。
-- Then: 候補0件とスコアなしを表示する。テストがすべてのコード変更を検出できたとは報告しない。
-
-### 既存の検証を維持したまま利用する
-
-開発者として、テストとソースを書き換えずに導入し、既存のerrspecの検証も継続したい。
-
-**受け入れ条件:**
-
-Scenario: テスト名が重複する場合や同時実行する場合も、別のテストの成功で代替しない
-
-- Given: 同名テスト、または`test.concurrent`で動作するテストがある。
-- When: 変異を検証する。
-- Then: 登録されたテストを区別して照合する。到達記録をテスト単位に分けられない場合は、より広い実行範囲を選択し、その精度を表示する。
-
-Scenario: 検証が終了・中断した場合、対象ファイルを変異後の内容にしない
-
-- Given: 既存のソース・テスト・設定・シナリオ履歴を使っている。
-- When: 検証が終了する、または利用者が中断する。
-- Then: errspecによる変更を対象ファイルへ保存しない。中断時は自分が起動した実行器を終了し、未完了であることを示す。既存コマンドとtestkit APIの意味を維持する。
-
-Scenario: 設定やテストがログを出力する場合、JSONの結果を単独で取得できる
-
-- Given: Vitestの設定またはテストがstdoutへログを出力する。
-- When: ミューテーションの検証をJSON形式で実行する。
-- Then: errspecのstdoutは一つのJSON結果だけを返し、ログはstderrへ出力する。部分結果を返す場合も同じ形式を維持する。
-
-## KPI
-
-### 未検出の理由から次のテスト変更を判断できること
-
-- **現状値:** 未実装のため未計測。
-- **目標値:** 初回導入先で、指摘した候補から利用者がテスト追加・比較の修正・同値性の検討へ進めること。割合や時間の数値目標は初回計測後にknjと設定する。
-- **計測方法:** 固定した版の実プロジェクトで、未検出の分類と、利用者が選んだ修正、その後の再検査結果を比較する。
-- **計測期間:** 最初の導入検証と、その修正後の再検査。
-
-## 機能要件
-
-### 対象の選択と変異候補の生成
-
-**概要:** 利用者が選択したソースから、組み込みmutatorに対応する変異候補を生成する。
-
-**入力:** プロジェクト、対象・除外のパターン、除外する変異種別。
-
-**出力:** 候補の識別子、種別、元の場所、変更前後の内容、除外した候補の理由。
-
-#### 適用する条件
-
-対象はプロジェクト内のJS / JSX / TS / TSXと、それらのmodule用拡張子とします。依存パッケージ、型宣言だけのファイル、テスト本体、Vitestの設定・setup・globalSetupは変異の対象にしません。未importのファイルも候補の一覧に含めます。
-
-18種は`ArithmeticOperator`、`ArrayDeclaration`、`ArrowFunction`、`AssignmentOperator`、`BlockStatement`、`BooleanLiteral`、`CallExpression`、`ConditionalExpression`、`EqualityOperator`、`FnValue`、`LogicalOperator`、`MethodExpression`、`ObjectLiteral`、`OptionalChaining`、`Regex`、`StringLiteral`、`UnaryOperator`、`UpdateOperator`です。種別を明示して除外できます。
-
-候補は実行時の式・文に限ります。型の宣言、import / exportの指定、directiveの意味を変更しません。同じ範囲と変更内容の候補は重複して実行しません。非有効状態で評価回数や短絡・呼出の意味を維持できない配置は、理由付きで除外します。
-
-同じ入力・設定・規則の版からは、同じ候補・識別子・順序を得られるようにします。位置は変更前のソースを指し、日本語や絵文字を含むソースでも対象箇所と一致させます。
-
-#### 例外ケースでの振る舞い
-
-不正なパターン、未知の変異種別、対象外のパス、対象ファイル0件、ソースの取得・構文解析の失敗は理由付きのエラーとします。対象ファイルはあるが候補0件の場合と区別します。推測したコードへ置き換えて実行しません。
-
-### 基準実行と変異の実行
-
-**概要:** 基準実行の成功と到達記録を前提に、変異を一つずつ有効にして実行する。
-
-**入力:** 候補、利用先のVitest設定と選択プロジェクト、今回の到達記録。
-
-**出力:** 基準実行の成否、各候補の実行状態、対象テスト、判定とその根拠。
-
-#### 適用する条件
-
-変更前コードの基準実行と、変異を有効にしない到達記録付きの基準実行を行い、実行可能なテストの一覧と成否を照合します。どちらも成功した後に変異実行を開始します。利用者のalias、環境、setupを利用し、自動のsnapshot更新は行いません。
-
-テスト単位の到達記録を優先し、初期化中や同時実行中などで記録を限定できない場合はファイル全体または選択した全テストへ実行範囲を広げます。その範囲は結果に示します。テストの失敗を検出した時点で、その変異の実行を終了できます。
-
-生存は、到達の根拠があり、選択した全テストの成功を確認できた場合に限ります。skip、todo、登録の消失、記録の欠落を成功の代わりにしません。
-
-#### 例外ケースでの振る舞い
-
-変異による時間切れとテスト外の実行時エラーは区別します。時間切れは期限を延長して一度、実行時エラーは同じ条件で一度、再実行して結果を確かめます。一候補につき試行は計2回までとし、再確認で別種の未確認の失敗へ変わった場合は、実行が安定しないという理由で未完了にします。計測した到達回数の制限によって停止したループは、再実行なしで時間切れとできます。
-
-異常な通信や実行器の起動失敗を、変異による実行時エラーとして数えません。実行中に対象の内容・設定・テストが変わった場合は、以前の到達記録を使った検証を完了しません。
-
-### 結果の表示と厳格な判定
-
-**概要:** 実行の完了と、変異が検出されたかを別々に報告する。
-
-**入力:** 基準実行、候補ごとの判定、厳格な判定の指定。
-
-**出力:** 人向けのtextとAIが利用できるJSON。テストやランナーのログはJSONと分ける。
-
-#### 適用する条件
-
-| 状態 | 意味 | 検出率の集計 |
-| --- | --- | --- |
-| テストによる検出 | 変異を有効にすると対象テストが失敗する | 検出済みに数える |
-| 生存 | 対象テストを実行し、すべて成功する | 未検出に数える |
-| 未到達 | 対象の実行単位への到達記録がない | 未検出に数える |
-| 時間切れ | 再確認後も期限を超える、または到達回数の制限で停止する | テストによる検出と区別して検出済みに数える |
-| 実行時エラー | 変異を有効にした実行で、テスト外の失敗が再現する | テストによる検出と区別して検出済みに数える |
-| 除外 | 安全な配置ができないなど、明示した理由で実行しない | 分母から除く |
-| 未完了 | 実行器の異常や中断によって確定できない | スコアと厳格判定を確定しない |
-
-集計対象が0件なら検出率を算出しません。除外は同値性の承認を意味しません。TypeScriptの型検査を行っていないことも結果に明示します。
-
-既定は調査用の結果表示です。厳格な指定では生存と未到達のいずれかがあれば不合格にします。除外を未検出に含めず、除外理由と件数を表示します。未完了なら、未検出の有無より実行の異常を優先して報告します。
-
-#### 例外ケースでの振る舞い
-
-非対応のVitest、Browser Mode、複数プロジェクトの未選択、必要な実行環境の不足は、理由と必要な指定を示して開始前に終了します。既存のシナリオ履歴をミューテーション実行の履歴として読み替えません。
-
-## データ要件
-
-### 必要なデータ
-
-- **入力ソース:** 選択したファイル、本文とその版、選択・除外の条件。変異と到達記録を同じ入力に対応付けるために使う。
-- **変異候補:** 識別子、種別、変更前の位置、変更内容、配置できない場合の理由。
-- **基準実行とテスト一覧:** 今回の実行識別子、テストを区別する情報、成否、到達記録とその精度、実行時間。
-- **変異の実行結果:** 有効にした候補、対象テスト、試行ごとの結果、再実行の理由、失敗したテストまたはモジュール。
-- **最終結果:** 完了の有無、状態別の件数、任意の検出率、厳格判定、診断。実行間の結果再利用は行わない。
-
-### データ間の関係
-
-一つの入力ファイルに複数の候補が属し、到達記録が候補とテストを対応付けます。一つの候補に複数回の試行がある場合も、最終結果では一つの候補として数えます。別の実行の記録を混在させません。
-
-### 個人情報
-
-ファイル名、ソースの一部、テスト名、エラーメッセージには利用先の情報が含まれます。結果を外部へ自動送信せず、保持するレポートは利用者が保存・削除します。
-
-## 依存する外部サービス
-
-なし。導入済みのVitestとローカルのファイルを利用します。検証中に依存パッケージを自動取得しません。
-
-## セキュリティ上の留意事項
-
-テストと設定は利用者のローカル権限で実行します。errspecは対象のソース・テスト・設定・シナリオ履歴を変異後の内容として保存しません。テスト自体が行うファイルや外部サービスへのアクセスは、テストの責任範囲です。
-
-一時的な実行データと、自分が起動したプロセスを管理します。利用者の中断時にも、他の検証や無関係のプロセスを終了しません。
-
-## 未決事項
-
-この提供単位の成立に必要な要件は本文で定めます。実プロジェクトでの性能目標は、KPIの初回計測後にknjと設定します。後続機能の範囲を、この文書の実装完了条件へ追加しません。
+Practical usefulness requires recording real missed-change classifications, developer-chosen test/assertion improvements, and the subsequent results at a fixed project revision. This KPI has not been established by passing fixtures. Performance targets follow measurement; [implementation status](../../implementation-status.md) separates existing evidence from remaining real-project acceptance.

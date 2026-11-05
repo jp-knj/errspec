@@ -1,138 +1,94 @@
-# TypeScript 6・7の解析backend選択
+# Select TypeScript 6/7 analysis backends
 
-## このドキュメントについて
+## About this document
 
-[Product](../../product.md)に基づき、利用先のTypeScriptの設定と型解釈を使って解析できるようにします。互換性を理由に利用先の設定を変更する必要を減らします。
+Under the [Product](../../product.md), analyze with the consumer's TypeScript
+configuration and type interpretation, reducing compatibility-driven config edits.
 
-### スコープ
+### Scope
 
-`scan`、`init`、`check`、`verify`、`snapshot`、`coverage`の型解析で、tsrsと利用先のTypeScript 6・7を選択します。タグ抽出、伝播の事実、実行前の静的照合を含めます。使用したengine・版・選択理由を結果に記録します。
+Select tsrs or installed TypeScript 6/7 for type analysis in `scan`, `init`, `check`,
+`verify`, `snapshot` and `coverage`. Include tag extraction, propagation facts and
+pre-execution static matching. Record engine, version and selection reason.
 
-### スコープ外
+### Outside scope
 
-`mutate`の変異後の型検査、追加の変異規則、他のランナー、設定の自動移行は含みません。`mutate`の構文解析と実行の契約は維持します。
+Mutant typechecking, new mutation rules, additional runners and automatic config
+migration belong elsewhere. Preserve `mutate` parsing/execution contracts.
 
-## ユーザーストーリー
+## User stories
 
-### 利用先の設定を維持して解析する
+### Preserve the consumer's configuration
 
-開発者として、TS 6で有効な設定を変更せずに、エラー型とテストを照合したい。
+**Scenario: use installed TS 6.** Given TS 6 accepts config containing `node10` or
+`baseUrl`, automatic analysis uses that TS 6 without editing config and reports
+tags and the selected engine.
 
-**受け入れ条件:**
+**Scenario: use installed TS 7.** Given TS 7 and its required APIs are available,
+automatic analysis uses its resolutions and reports version/selection reason.
 
-Scenario: TS 6が導入されている場合、その型解析でタグを得る
+**Scenario: retain tsrs when no TypeScript is installed.** Given no TypeScript in
+the project/parents and no explicit package, automatic selection preserves the
+existing tsrs analysis and result shape.
 
-- Given: `node10`または`baseUrl`を含む設定をTS 6が受理する。
-- When: backendを自動選択して解析する。
-- Then: 利用先のTS 6を使用し、設定を変更せずにタグと使用engineを報告する。
+### Preserve judgments across backends
 
-Scenario: TS 7が導入されている場合、その型解析でタグを得る
+**Scenario: type errors stop before execution.** Given the selected TypeScript
+reports errors, `check`/`verify` returns diagnostics and incomplete analysis, never
+switching to another engine to turn failure into success. `verify` starts no tests.
 
-- Given: TS 7と対応するAPIが利用できる。
-- When: backendを自動選択して解析する。
-- Then: 利用先のTS 7の解決結果を使い、使用版と選択理由を報告する。
+**Scenario: shared propagation.** Given direct calls, recursion, catch, async and
+dynamic calls, each backend supplies the same owned fact contract for common
+judgment and explicitly reports dynamic/unresolved calls.
 
-Scenario: TypeScriptが導入されていない場合、既存のtsrsを使う
+**Scenario: shared static mismatch rules.** Given included registration tests
+mismatch contract values or required IDs, official-API `check` applies the same
+`EC015`/`EC016` conditions as tsrs.
 
-- Given: 利用先とその親にTypeScriptがなく、明示指定もない。
-- When: backendを自動選択する。
-- Then: 従来のtsrs解析と結果形式を維持する。
+**Scenario: shared entry paths.** Given function declarations, const functions,
+re-exports, async returns, throws and rejections, each backend's check or Bun
+verification acquires the same return positions/tags for common `EC018`/`EC019`.
+Nested functions' returns do not count as entry returns.
 
-### 切替後も判定の条件を維持する
+**Scenario: unavailable APIs are incomplete.** Given an unknown version, missing
+API, startup failure or malformed response, report the cause instead of returning
+empty tags or an empty scan as success.
 
-開発者として、backendの違いによって未解析を成功と判定しないようにしたい。
+**Scenario: honor explicit selection.** Given explicit tsrs or TypeScript, use it
+and do not silently switch after failure.
 
-**受け入れ条件:**
+## Compatibility measurement
 
-Scenario: 利用先のソースに型エラーがある場合、実行前に失敗する
+Existing evidence covers TS 6.0.3/7.0.2 across the six semantic commands, comparison
+with existing propagation/static matching, API failures and interruption, using
+Node 22.21.1/24.8.0. The target is every scenario and same-input backend agreement.
+Measure actual APIs/CLI results against existing expectations for this change and
+each newly supported version.
 
-- Given: 選択した版のTypeScriptが型エラーを返す。
-- When: `check`または`verify`を実行する。
-- Then: 診断と未完了を返し、別のengineで成功へ変更しない。`verify`はテストを開始しない。
+## Functional requirements
 
-Scenario: 呼出・Promise・Resultの伝播を調べる場合、共通の規則を使う
+**Input:** project, requested analysis and optional engine/package/Node overrides.
 
-- Given: 直接呼出、再帰、catch、非同期呼出、動的な呼出がある。
-- When: 各backendで走査する。
-- Then: 同じ事実形式で伝播を判定し、動的な呼出や未解決箇所を明示する。
+**Output:** results, diagnostics, engine, version, package and selection reason.
 
-Scenario: 登録テストが契約と食い違う場合、静的照合で診断する
+Automatic selection uses installed TS 6/7 APIs when available: a fallback triggered
+only by failure cannot detect silent interpretation differences. Otherwise retain
+tsrs. Required APIs are validated on TS 6.0.3/7.0.2; other versions need capability
+checks and are not promised identical outcomes without comparison.
 
-- Given: 対象テストがプロジェクトに含まれ、登録内容や必須IDが契約と異なる。
-- When: 公式APIのbackendで`check`を実行する。
-- Then: tsrsの場合と同じ条件でEC015・EC016を判定する。
+Do not alter tsconfig, source, tests or dependencies. Continue rejecting `noCheck`.
+Compare tags, IDs, locations and ordering across backends. Do not download
+TypeScript automatically. Diagnose setup for missing packages/Node and do not
+claim that this semantic analysis typechecked mutations.
 
-Scenario: entryを指定した場合、同じ失敗経路と逸脱を判定する
+## Data and safety
 
-- Given: 宣言関数、const関数、再export、非同期return、throwやrejectionを含むentryがある。
-- When: 各backendでcheckまたはBunのverifyを実行する。
-- Then: 同じreturn位置とタグを取得し、共通のEC018・EC019を判定する。入れ子の関数のreturnはentryへ数えない。
+Record provenance; compiler-independent tags/functions/origins/edges/unresolved
+sites/registration facts; and original diagnostic codes, text and locations. One
+request uses one backend, without mixing native compiler handles or type facts
+from different engines. Source and paths remain local.
 
-Scenario: 選択したAPIが利用できない場合、未完了を返す
-
-- Given: 不明な版、必要なAPIの欠落、起動不能、壊れた応答のいずれかがある。
-- When: 解析を要求する。
-- Then: 原因を診断し、空のタグや空の走査を成功として返さない。
-
-Scenario: engineを明示した場合、その指定を維持する
-
-- Given: tsrsまたは利用先のTypeScriptを明示する。
-- When: 解析を実行する。
-- Then: 指定したengineを使う。失敗時に別のengineへ無断で切り替えない。
-
-## KPI
-
-### 版ごとの互換性
-
-- **現状値:** TS 6.0.3・7.0.2の六つの意味解析コマンド、既存の伝播・静的照合との比較、API失敗、割込みを確認済み。Node.js 22.21.1・24.8.0を使用。
-- **目標値:** 本文の全シナリオと、同じ入力に対するbackend間の照合が成功する。
-- **計測方法:** 各版の実APIとCLIの結果、既存の期待値との比較。
-- **計測期間:** この変更と、対応版の追加時。
-
-## 機能要件
-
-### 選択と失敗の扱い
-
-**概要:** 版と利用可能なAPIに応じて解析先を選択します。
-
-**入力:** プロジェクト、解析対象、任意のengine・パッケージ・Nodeの明示指定。
-
-**出力:** 解析結果、診断、使用engine・版・パッケージ・選択理由。
-
-#### 適用する条件
-
-自動選択では、利用先のTS 6・7があればその公式APIを使います。別の版の型解釈による不一致を、失敗時だけの切替では検出できないためです。未導入の場合は従来のtsrsを使います。対応APIはTS 6.0.3とTS 7.0.2で検証し、他の版は必要なAPIの有無を確認します。未確認の版まで同一の結果を保証しません。
-
-元のtsconfig、ソース、テスト、依存パッケージを変更しません。`noCheck`による型検査の省略は引き続き拒否します。タグ・ID・位置・順序をbackend間の比較対象にします。
-
-#### 例外ケースでの振る舞い
-
-TypeScriptの自動取得は行いません。パッケージやNodeが必要な場合は設定方法を診断に示します。変異後の型検査を行ったとは報告しません。
-
-## データ要件
-
-### 必要なデータ
-
-- **解析の出典:** engine、版、パッケージと選択理由。
-- **コンパイラに依存しない事実:** タグ、関数、発生元、呼出辺、未解決箇所、静的照合に必要な登録値。
-- **診断:** 元のコード、メッセージ、ファイル、位置。
-
-### データ間の関係
-
-一回の解析は一つのbackendの結果を使います。異なるengineの型情報を同じ事実へ混在させません。
-
-### 個人情報
-
-解析するローカルソースとパスを扱います。外部送信は行いません。
-
-## 依存する外部サービス
-
-なし。導入済みのローカルパッケージを利用します。
-
-## セキュリティ上の留意事項
-
-明示した実行ファイルとパッケージは利用者のコードとして実行します。解析用のファイルとプロセスを終了時に解放します。
-
-## 未決事項
-
-なし。TypeScript APIの対応版の拡大は、その版での比較結果を前提に行います。
+No external service is required. Execute explicitly selected packages/binaries as
+consumer code, releasing analysis files and processes at completion. Expanding
+version support requires API checks and comparison on that version; no other
+scope decision is unresolved.

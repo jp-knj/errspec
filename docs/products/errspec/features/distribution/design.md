@@ -1,71 +1,33 @@
-# npm配布と初期生成の設計
+# npm distribution and initial generation design
 
-## このドキュメントについて
+This design implements the [requirements](requirements.md) and [Product](../../product.md). It is for maintainers of the CLI and distribution. Developers still choose the meaning of an error and its expected business behavior.
 
-[Requirements](requirements.md)と[Product](../../product.md)に基づき、既存Rust CLIをnpmから起動し、型を選んで最小設定を作ります。
+## Launcher and artifacts
 
-### 対象読者
+A small Node launcher resolves the matching OS/CPU optional dependency and starts its native binary. There is no install/postinstall download or compilation. The prebuilt targets are Linux x64 glibc and macOS arm64/x64. Each target's CI builds, packs, installs, and executes artifacts; current evidence and pending checks are tracked in [implementation status](../../implementation-status.md).
 
-CLI・配布を保守する開発者とAI。
+The launcher and native packages share a version. Packaging includes required source, licenses, launchers, declarations, and binaries, excluding tests and temporary execution records. The [distribution guide](../../../../engineering/guidelines/distribution.md) describes artifact validation and the larger package set.
 
-### 前提知識
+## Initial generation
 
-npm optionalDependenciesとOS・CPUのパッケージ選択。
+Generation accepts an internal request independent of argument-parser types. It analyzes the exported type through the shared analysis boundary, obtains every finite tag, and builds a configuration/test pair. The generated configuration uses schemaVersion 2.
 
-### このドキュメントで扱わないこと
+I/O resolves paths and acquires the tags and configuration-relative paths. A pure assembly step builds one case-ID/tag list and derives both files from it. It accesses neither the compiler nor the filesystem. This keeps configuration and test identities aligned without duplicating decisions.
 
-エラー型の意味と期待動作の決定は利用者に委ねます。
+Both contents are complete before writing. Destination preflight precedes type analysis and writes, preserving existing validation order, JSON key order, and string escaping. `create_new` also rejects a race after preflight. On failure, cleanup removes only files newly created by that invocation. Existing files are never replaced.
 
-## 実装方針
+The result is a typed list of files, tags, and next steps, rendered through existing text/JSON output. Analysis uses the common one-shot analysis thread boundary.
 
-CLIの小さなNodeランチャーが、OS・CPUに合うoptional dependencyからバイナリを解決して起動します。install/postinstallスクリプトで取得やビルドを行いません。ビルド済みパッケージはLinux x64 glibc、macOS arm64/x64を対象とし、各環境のCIでpackと実行を確認します。
+## Interface
 
-初期生成はCLIの引数型から独立したリクエストを受け取り、tsrsで対象型を検証して全タグを取得し、設定とテストを組み立てます。出力先の衝突を先に確認し、create_newで競合も拒否します。書込失敗時はその呼出が新規作成したファイルだけを取り除きます。
+```sh
+errspec init --project tsconfig.json --source src/errors.ts --export Failure --discriminant _tag --runner bun
+```
 
-初期生成の結果はファイル一覧・タグ・次の手順を持つ型で返し、出力側が既存のtext/JSON形式へ変換します。解析は検証・走査と共通の単発スレッド境界で実行します。
+The defaults are `errspec.json` and `errspec.generated.test.ts`. `--test` selects the test destination, `--contract` the contract ID, and the existing `--config` the configuration destination. Generated tests throw a TODO error until developers provide expectations, so a scaffold cannot pass accidentally. Embedded strings use JSON escaping.
 
-生成内容の組み立ては、型解析とファイル書き込みから分離します。入出力側でパスを解決し、対象型から取得したタグと設定基準の相対パスを組み立て処理へ渡します。ケースIDとタグの一覧を一度作り、同じ一覧から設定とテストを生成することで、両者の対応を保ちます。組み立て処理はコンパイラやファイルへアクセスせず、完成した2つのファイル内容を返します。
+## Publication and security
 
-書き込みは両方の内容が完成してから行います。出力先の事前確認・型解析・書き込みの順序と、既存の生成内容・JSONキー順・文字列のescapeを維持します。ファイル作成の競合や書き込み失敗時の後片付けは、入出力側が引き続き担当します。
+npm performs ordinary integrity-checked package resolution. GitHub Actions produces native binaries and npm tarball artifacts. Packing requires no publication rights; credentials are not embedded in source. Before publication, locally install tarballs and identify them as unpublished artifacts.
 
-## アーキテクチャ・シーケンス図
-
-短い直列処理のため図は省略します。npmランチャー、ネイティブCLI、型解析、生成の順です。
-
-## データモデル・ER 図
-
-CLIと各native packageは同じversionを持ち、native packageのbinファイルをランチャーが解決します。生成設定は既存のschemaVersion 2を使います。
-
-## API・インターフェース
-
-`init --project tsconfig.json --source src/errors.ts --export Failure --discriminant _tag --runner bun`で、既定のerrspec.jsonとerrspec.generated.test.tsを生成します。`--test`でテスト先、`--contract`で契約ID、既存の`--config`で設定先を選びます。未完成のテストはTODOメッセージを伴う例外を投げ、誤って合格させません。
-
-## 外部サービスとの連携方式
-
-npmは通常のパッケージ解決に使います。GitHub Actionsでnative binaryとnpm tarballをartifactにします。公開用の認証情報はコードに埋め込みません。
-
-## データの取り扱い設計
-
-配布物にソース、ライセンス、必要なランチャー・型定義・バイナリだけを含めます。テストと一時実行結果は含めません。
-
-## 認証認可に関する特記事項
-
-packとartifact生成はpublish権限不要です。公開はnpm scope権限と認証を設定した後の操作です。
-
-## セキュリティ上の留意事項
-
-プラットフォームの照合と版の固定を行います。生成テストへ文字列を埋め込む場合はJSON文字列としてescapeします。
-
-## デプロイに関する特記事項
-
-未公開期間はtarballをローカルインストールして検証します。公開済みと同じnpm導入例を、公開前の即実行可能なコマンドとして案内しません。
-
-## 検討した代替手段
-
-### postinstallでバイナリをダウンロードする
-
-追加のネットワーク経路とinstall scriptsの許可が必要になるため採用せず、npmの整合性検証が効くプラットフォーム別パッケージを使います。
-
-## 未決事項
-
-npm scopeの所有権と初回公開認証は公開時に確認します。Linux musl・Windowsなどの追加は、実際にビルドと実行を確認した後に対応一覧へ載せます。
+A postinstall downloader was rejected because it adds another network path and requires install scripts. Platform-specific packages use npm's existing integrity checks. Linux musl, Windows, or other targets are added only after actual build and execution validation. Scope ownership and first publication authentication remain release-time work.

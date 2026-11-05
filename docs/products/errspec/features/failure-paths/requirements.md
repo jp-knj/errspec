@@ -1,83 +1,86 @@
-# 失敗の経路をコードからテストまでたどる
+# Follow failure paths from code to tests
 
-## このドキュメントについて
+## About this document
 
-[errspec Product](../../product.md)に基づき、[失敗シナリオの検証](../failure-verification/requirements.md)を、エラー型を返す関数のコードまで広げます。
-「コードの失敗 → エラー型 → シナリオ」の一続きの対応で、どこが抜けているかを一つのレポートで示します。
+Following the [Product](../../product.md), this extends
+[failure-scenario verification](../failure-verification/requirements.md) to the
+code of functions that return an error type. One report connects code failure,
+error variant and scenario, showing where the connection is missing.
 
-### スコープ
+### Scope
 
-利用者が契約に指定した入口の関数（エラー型を返す関数）について、次の二つの漏れを検出します。
+For an optional contract entry function, detect two omissions:
 
-- **エラー型の漏れ:** 入口の関数が、エラー型で表さない失敗（throwやPromiseのreject）を外へ出す。
-- **テストの漏れ:** 入口の関数がタグを返す`return`のうち、どのシナリオの実行でも到達しなかったものがある。
+- **Error-type omission:** the entry allows a throw or Promise rejection to escape
+  although the declared error type does not represent it.
+- **Test-path omission:** a direct `return` of a tagged value is reached by no
+  scenario execution, even when another path returns the same tag.
 
-型とシナリオの対応（タグの登録漏れ）は従来どおり[失敗シナリオの検証](../failure-verification/requirements.md)で扱います。
+Tag registration remains part of the failure-verification requirements.
 
-### スコープ外
+### Outside scope and limits
 
-到達の判定は行単位です。条件と`return`を1行に書いた経路は、条件の評価だけでも到達として数えるため、未到達を見逃すことがあります。
-到達したことは、そのシナリオが正しい期待値を確認したことを意味しません。
-エラー型の漏れは、プロジェクト内の明示的なthrowとPromise.rejectがcatchを通らずに外へ出る場合だけを報告します。外部ライブラリや実行時の暗黙の例外は対象外です。
-到達の記録は、まずBunだけに対応します。
+Reachability is line-based. If a condition and `return` occupy one line,
+evaluating the condition may count the line as reached and conceal the missed
+return. Reaching a line does not prove that the scenario asserted the right value.
+Only explicit project-local throws and `Promise.reject` paths that escape catches
+are reported as error-type omissions; library behavior and implicit runtime
+exceptions are outside scope. Reachability acquisition is supported with Bun.
 
-## ユーザーストーリー
+## User stories
 
-### 型に表れない失敗に気づく
+### Find failures absent from the error type
 
-開発者として、エラー型を返す関数が、型に無い失敗を投げていないか知りたい。それによって、呼び出し側が処理できない失敗を減らせます。
+**Scenario: report an explicit uncaught throw before executing tests.**
 
-**受け入れ条件:**
+- Given an entry or a project-local function it calls has an uncaught throw.
+- When registration is checked without launching tests.
+- Then report its source and the functions it traversed, and fail the check.
 
-Scenario: 入口の関数から明示的なthrowがcatchされずに外へ出る場合、実行前に報告する
+**Scenario: do not report a potentially caught failure as a confirmed omission.**
 
-- Given: 入口の関数、またはそこから呼ばれるプロジェクト内の関数に、catchされないthrowがある。
-- When: 利用者がテストを起動せずに登録の検査を実行する。
-- Then: 発生箇所と経由した関数を示し、検査を不合格とする。
+- Given a throw is enclosed by try/catch on its path to the entry.
+- When registration is checked.
+- Then do not treat the original throw as a confirmed escape, even if the catch
+  might rethrow. An explicit rethrow inside the catch is a new source in its own
+  right.
 
-Scenario: 失敗がcatchされる可能性がある場合、エラー型の漏れとしては報告しない
+### Find untested paths for the same tag
 
-- Given: throwが入口の関数までの途中でtry/catchに囲まれている。
-- When: 利用者が登録の検査を実行する。
-- Then: catchが再throwする可能性があっても、元のthrowを確定した漏れとしては報告しない。catchの中の再throwは、それ自体を新しい発生箇所として扱う。
+**Scenario: fail verification when no scenario reaches a tagged return.**
 
-### テストされていない失敗の経路に気づく
+- Given the entry has several returns for one tag and one is never reached.
+- When scenarios are verified with Bun.
+- Then report that return's position and tag, and fail verification.
 
-開発者として、同じタグを返す経路が複数あるとき、テストされていない経路を知りたい。それによって、タグの登録だけでは見つからない検証漏れを見つけられます。
+**Scenario: do not fail for path omissions when all returns are reached.**
 
-**受け入れ条件:**
+- Given every tagged return is reached by at least one scenario execution.
+- When scenarios are verified.
+- Then show the paths and their reachability without a path-omission failure.
 
-Scenario: どのシナリオも到達しないタグの経路がある場合、検証を不合格とする
+**Scenario: unsupported runners do not report paths as reached.**
 
-- Given: 入口の関数に同じタグを返す`return`が複数あり、そのうち一つにはどのシナリオの実行でも到達しない。
-- When: 利用者がBunでシナリオの検証を実行する。
-- Then: 到達しなかった`return`の位置とタグを示し、検証を不合格とする。
+- Given a contract with an entry is verified by a runner without this acquisition.
+- When verification runs.
+- Then list the paths and show reachability as unverified.
 
-Scenario: すべての経路にいずれかのシナリオが到達した場合、経路の漏れは報告しない
+## Functional requirements
 
-- Given: 入口の関数のタグを返す`return`すべてに、いずれかのシナリオの実行で到達する。
-- When: 利用者がシナリオの検証を実行する。
-- Then: 経路の一覧と到達の有無を出力し、経路の漏れを理由に不合格にはしない。
+### Entry function
 
-Scenario: 到達を記録できないランナーでは、到達済みとは表示しない
+A contract may identify the error-returning function by file and export name.
+Contracts without an entry do not receive these checks. An entry that cannot be
+resolved is a configuration failure.
 
-- Given: 入口の関数を指定した契約を、到達の記録に未対応のランナーで検証する。
-- When: 利用者がシナリオの検証を実行する。
-- Then: 経路の一覧は出力し、到達は未確認として表示する。
+### Path inventory
 
-## 機能要件
+A path is a `return` written directly in the entry body whose returned type reveals
+a discriminator value. Report its location and tags. Nested functions' returns
+are not returns of the entry and are excluded.
 
-### 入口の関数
+### Reachability
 
-契約に、エラー型を返す関数をファイルとexport名で任意に指定します。指定しない契約には、この機能の検査を行いません。
-入口の関数を解決できない場合は、設定の誤りとして検査を不合格にします。
-
-### 経路の一覧
-
-入口の関数の本体に直接書かれた`return`のうち、返す値の型から識別子の値が分かるものを経路とします。経路ごとに位置とタグを示します。
-入れ子の関数の`return`は入口の関数の戻り値ではないため含めません。
-
-### 到達の記録
-
-検証では、通常のテスト実行とは別に、errspecのシナリオだけをカバレッジ付きで1回実行します。どのシナリオも到達しなかった経路だけを報告します。
-この実行の成否は、通常の実行の判定には使いません。
+After the ordinary test execution, run only errspec scenarios once with coverage.
+Report paths reached by none of those executions. The success/failure of this
+additional acquisition does not replace the ordinary execution verdict.

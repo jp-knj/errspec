@@ -1,108 +1,60 @@
-# KARTE における既存テストと障害検証の実地記録
+# KARTE practical trial: existing tests and fault verification
 
-2026-11-05 に、Obel の VCS / AST VCS と Agent Studio backend の実コード・既存
-Vitest テストを隔離コピーで確認した。元リポジトリのソース・lockfile・依存は変更せず、
-実験設定、障害シナリオ、詳細レポートは一時ディレクトリだけに置いた。本書は集計のみを
-残し、非公開のコード、型名、タグ値、テスト本文、絶対パスを含めない。
+On 2026-11-05, isolated copies of Obel VCS/AST VCS and Agent Studio backend were used to exercise real implementation and existing Vitest tests. Original source, lockfiles, and dependencies were unchanged. Experimental configuration, scenarios, and detailed reports stayed in temporary directories. This document retains aggregates only: no private code, type names, tag values, test bodies, or absolute paths.
 
-## 条件と範囲
+## Conditions and scope
 
-errspec は `a642c2b488343c1b26603433294a07305b734f5e` の native 実装を使用した。
-macOS ARM64、Node 24.22.1、TypeScript 5.9.3、Obel の Vitest 4.1.3 と Agent Studio
-の Vitest 3.2.4 を使った。TS 5 は公式 API backend の対象外なので native backend が
-解析した。新しい依存の取得や既存 lockfile の更新は行っていない。
+The native errspec implementation was `a642c2b488343c1b26603433294a07305b734f5e`. The environment was macOS ARM64, Node 24.22.1, TypeScript 5.9.3, Obel Vitest 4.1.3, and Agent Studio Vitest 3.2.4. TS 5 is outside the official semantic API backend's selection, so the native backend analyzed it. No new dependencies were fetched and existing lockfiles were not updated.
 
-VCS は既存テスト全体、AST VCS は性能試験 1 ファイルを除く既存テスト、Agent Studio
-は外部サービスを必要としない認証とエラー分類の既存 2 ファイルを対象にした。Agent
-Studio backend 全体の網羅率は計測していない。隔離コピーの全 `src` ファイルについて、
-相対パスと SHA-256 を元ファイルと比較し、実行前の一致を確認した。障害実験の変更は
-各試行後に戻し、元リポジトリに差分がないことも確認した。
+VCS used all existing tests. AST VCS excluded one performance-test file. Agent Studio selected two existing authentication/error-classification files that require no external service; this is not a backend-wide coverage measurement. Before execution, every copied `src` file's relative path and SHA-256 matched its original. Experimental edits were restored after each trial, and the original repository remained unchanged.
 
-実験用 tsconfig はコピーの内側に配置し、既存設定を extends した。Node の型定義と
-読み取り用の依存解決経路を明示し、Vite のキャッシュ先を一時ディレクトリに固定した。
-外部に置いた tsconfig から絶対パスで元コードを include する最初の試行では、設定の
-ディレクトリを基準にする走査境界から外れ、走査成功でも候補が 0 になった。その値は
-網羅の証拠に含めていない。導入時は候補数と対象ファイルを確認する必要がある。
+Experimental tsconfigs lived inside the copies and extended existing settings. They explicitly resolved Node declarations/read-only dependencies and placed Vite caches in temporary storage. An earlier attempt put tsconfig outside the copy and included original files by absolute path. Those files were outside the config-directory scan boundary, producing zero candidates despite successful scanning. That result was excluded from coverage evidence. Adoption must inspect candidate counts and selected files rather than inferring correct scope from successful exit alone.
 
-## 既存テストによるタグ比較
+## Tag comparisons in existing tests
 
-以下の時間は各対象を順番に 1 回ずつ実行した実測値で、性能の保証や統計的比較ではない。
-テスト本体を直接実行した時間と、型走査・比較の記録を含む `coverage` の時間を分けた。
+Each target was run once in sequence. These are observations, not performance guarantees or statistical comparisons. Direct runner duration is separate from `coverage`, which also acquires types and assertion evidence.
 
-| 対象 | 既存ファイル / テスト | 成功 / 失敗 / skip | 直接実行 | coverage | ローカル候補型 | タグ | asserted | mentioned | missing |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Target | Existing files / tests | Pass / fail / skip | Direct execution | Coverage command | Local candidate types | Tags | Asserted | Mentioned | Missing |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | VCS | 14 / 151 | 151 / 0 / 0 | 4.119 s | 4.826 s | 30 | 29 | 25 | 0 | 4 |
 | AST VCS | 43 / 908 | 908 / 0 / 0 | 19.901 s | 22.379 s | 32 | 47 | 42 | 4 | 1 |
-| Agent Studio の選択範囲 | 2 / 111 | 111 / 0 / 0 | 1.988 s | 2.404 s | 2 | 14 | 12 | 0 | 2 |
+| Selected Agent Studio scope | 2 / 111 | 111 / 0 / 0 | 1.988 s | 2.404 s | 2 | 14 | 12 | 0 | 2 |
 
-全対象で `runnerOk: true`、解析・実行の診断は 0。AST VCS の走査候補 37 のうち、
-依存先に宣言された 5 型は既定の coverage 対象から除外された。表のタグ数は型ごとの
-行数の合計ではなく、識別プロパティと値の組を重複除去した数である。
+All targets had `runnerOk: true` and zero analysis/execution diagnostics. Of 37 AST VCS scan candidates, five declared in dependencies were excluded from default coverage. Tag counts deduplicate discriminator-property/value pairs rather than summing repeated type rows.
 
-`asserted` は今回成功したテストでタグ値を比較した証拠であり、その型を返すすべての
-関数や失敗経路を実行した証拠ではない。同じ値を共有する別の宣言にも対応する。
-この限界は一般化した受け入れテストにも固定した。
+`asserted` proves a tag-value comparison in a currently passing test. It does not prove execution of every function/path returning that type and can match separate declarations sharing the same value. Generalized acceptance tests retain this limit.
 
-## 有用な情報とノイズの確認
+## Useful findings and noise
 
-- VCS の missing 4 値は宣言には存在したが、このパッケージの実装で構築される箇所が
-  なかった。テスト追加・公開契約整理の検討材料であり、実処理の欠陥とは判定しない。
-- AST VCS の mentioned 4 値は型の網羅確認用 switch に存在し、今回の実行で値を比較
-  した証拠はなかった。文字列の存在を実行済みと扱わない区別が役立った。missing 1 値も
-  既存テストに実行の証拠はなく、仕様を踏まえた追加調査の対象となる。
-- Agent Studio の missing 2 値は宣言されたエラー族に含まれるが、今回選んだ処理・
-  テスト範囲では生成の証拠がなかった。backend 全体のテスト不足とは判断しない。
-- 既定の構造的な候補取得には通常のデータ型も入る。AST VCS のローカル候補 32 型中
-  5 型・重複除去後 11 値は通常のリソース分類で、失敗の調査にはノイズだった。
-  VCS には成功値を 1 値含む混合結果型が 1 型あった。これらを除く失敗値の参考集計は
-  VCS が 28 値中 24 asserted、AST VCS が 36 値中 31 asserted となる。この手動分類を
-  errspec の自動的な意味判定とは扱わない。
+- VCS's four missing values existed in declarations without construction sites in that package's implementation. They inform tests/public-contract review rather than establish implementation defects.
+- AST VCS's four mentioned values appeared in a type-exhaustiveness switch without executed comparison evidence. Distinguishing source text from execution was useful. Its one missing value also lacked existing test evidence and requires specification-informed investigation.
+- Agent Studio's two missing values belonged to declared error families without generation evidence in the selected scope. They do not establish missing tests across the whole backend.
+- Structural discovery also includes ordinary data types. Five of AST VCS's 32 local candidates, containing 11 deduplicated values, were ordinary resource categories and noise for failure investigation. VCS had one mixed result type with one success value. Manual failure-only reference counts were 24 asserted of 28 VCS values and 31 asserted of 36 AST VCS values. This manual classification is not an automatic semantic judgment by errspec.
 
-新たな業務上の不具合の確定数は **0**。missing 7 値と mentioned 4 値は調査候補として
-有用だったが、自動生成されたバグ報告ではない。型の再公開・包含関係で同じ値が複数行に
-現れるため、レビュー時は重複除去した値と元の宣言を合わせて見る必要がある。
+Confirmed new business bugs: **0**. Seven missing and four mentioned values were useful investigation candidates, not generated bug reports. Reexports and type inclusion can repeat values across rows; review deduplicated values together with their declarations.
 
-## 実処理への障害注入と負の対照
+## Fault injection and negative controls
 
-既存の実処理を呼び、VCS はストレージポート、AST VCS は最初の読み取りポート、Agent
-Studio は module mock 経由の外部クライアント境界へ、意図した失敗を注入した。Agent
-Studio は宣言済みの型付き失敗を伝える振る舞いを検証し、認証判断の全分岐を検証した
-とは扱わない。AST VCS と Agent Studio は後続処理を呼ばない比較も登録した。
+Scenarios called real implementation and injected intended failures at the VCS storage port, the AST VCS initial-read port, and Agent Studio's external-client boundary through a module mock. Agent Studio verified propagation of declared typed failures, not every authentication branch. AST VCS and Agent Studio also required assertions that subsequent operations were not called.
 
-| 対象 | 登録ケース | 障害あり / 明示した障害なし | 正常な検証 | 所要時間 | 失敗処理を書き換えた対照 |
-| --- | ---: | ---: | --- | ---: | --- |
-| VCS | 4 | 3 / 1 | テスト・必須観測とも全件成功 | 1.246 s | 障害あり 3 件が失敗、障害なし 1 件は成功 |
-| AST VCS | 3 | 3 / 0 | テスト・必須観測とも全件成功 | 2.573 s | 3 件が失敗 |
-| Agent Studio | 10 | 10 / 0 | テスト・必須観測とも全件成功 | 1.652 s | 10 件が失敗 |
+| Target | Registered cases | With fault / explicit no-fault | Normal verification | Duration | Seeded failure-handling regression |
+|---|---:|---:|---|---:|---|
+| VCS | 4 | 3 / 1 | All tests and required observations pass | 1.246 s | Three fault cases fail; no-fault case still passes |
+| AST VCS | 3 | 3 / 0 | All tests and required observations pass | 2.573 s | All three fail |
+| Agent Studio | 10 | 10 / 0 | All tests and required observations pass | 1.652 s | All ten fail |
 
-各対象で必須の結果比較を削除すると `EC010`、障害ラッパーを迂回すると `EC009` を報告し、
-検証を不合格にした。AST VCS の 3 件と Agent Studio の 10 件では、結果比較を削除しても
-別の比較が残るため Vitest 自体は全件成功し、errspec だけが必須比較の不足を検出した。
-VCS は唯一の比較を削除したため testkit 自体もテストを不合格にした。障害ラッパーを
-すべて除いたケースは testkit も未完了として拒否し、VCS の障害なしケースは成功を保った。
+Removing a mandatory result assertion produced EC010 and bypassing the fault wrapper produced EC009 for each target. For AST VCS's three cases and Agent Studio's ten, another assertion remained, so Vitest itself passed while errspec detected the missing required assertion. Removing VCS's sole assertion also caused testkit to fail the test. Removing all fault wrappers was rejected as incomplete by testkit; VCS's explicitly fault-free case remained successful.
 
-実装を失敗から成功へ変える、または元の型付き失敗を別の失敗へ置き換える対照でも、
-3 対象すべてで検証が失敗した。これらは **意図的に作った 3 変更** であり、実発見の
-不具合数に加えない。17 ケースの成功は選んだシナリオの証拠で、全入力・全順序の保証や
-自動 failure-atomicity 判定ではない。
+Seeded implementation changes converted failure to success or replaced the original typed failure with another failure. Verification rejected all three target-level changes. These were **three intentionally seeded regressions**, excluded from discovered bug counts. Seventeen passing scenarios establish selected behavior, not all inputs/orderings or automatic failure-atomicity verification.
 
-## 導入と調査の経過時間
+## Adoption and investigation time
 
-最初の隔離設定の作成時刻から、各対象で最終的な選択範囲の coverage が揃うまでの経過は順に
-3 分 26 秒、4 分 20 秒、6 分 56 秒。3 対象の障害付き検証が初めて揃うまで 7 分 32 秒、
-全負の対照が揃うまで 15 分 35 秒だった。設定・依存解決・元テストの調査・実行を含む
-エージェントの壁時計時間で、一部は並行している。人の作業時間やレビュー効率の KPI
-としては計測していない。個別の調査にかかった能動的な時間も分離していない。
+Elapsed time from first isolated configuration to each target's final selected coverage was 3 min 26 s, 4 min 20 s, and 6 min 56 s. All three initial fault-verification results were available after 7 min 32 s; all negative controls after 15 min 35 s. These are agent wall-clock observations including setup, dependency resolution, reading existing tests, and execution, with some parallel work. They do not measure human labor, review efficiency, or separate active investigation costs.
 
-導入で必要だった調整は、走査境界、Node globals の型解決、monorepo の上位依存解決、
-既存の Vitest 設定から必要なテスト範囲を選ぶことだった。元システムの修正は不要だった。
-スキャン結果だけから範囲の正しさを推測せず、候補と実行ファイル数を照合する必要がある。
+Required adjustments were the scan boundary, Node-global type resolution, monorepo parent dependency resolution, and choosing the intended test scope from existing Vitest configuration. Original systems required no changes. Candidate counts and executed files must be checked explicitly.
 
-## 公開リポジトリに残す受け入れ
+## Durable public acceptance
 
-[`scripts/demo-failure-boundaries.mjs`](../../../scripts/demo-failure-boundaries.mjs) は、非公開
-コードを使わずに新しく書いた読み取り・書き込みの小さな fixture を一時作成する。実際の
-Vitest で、既存のタグ比較、失敗の伝達、後続書き込みの停止、成功テスト内の必須比較不足、
-別 ID の障害観測、失敗の成功化、失敗後の書き込みを確認する。Check CI に組み込んだ。
-この受け入れを再実行できることと、非公開システムの実地測定を再現できることは区別する。
-詳細な実地レポートと試行コードは公開成果物へコピーしていない。
+[`scripts/demo-failure-boundaries.mjs`](../../../scripts/demo-failure-boundaries.mjs) creates a newly written, nonprivate read/write fixture in temporary storage. Actual Vitest tests exercise existing tag comparisons, failure propagation, blocked later writes, a missing mandatory comparison in a passing test, wrong-ID fault observations, failure converted to success, and a write after failure. Check CI includes it.
+
+Re-running this public acceptance is distinct from reproducing the private-system measurements. Detailed private reports and trial code were not copied into public artifacts. Overall completion and CI limitations remain in [implementation status](implementation-status.md).

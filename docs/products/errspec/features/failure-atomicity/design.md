@@ -1,67 +1,64 @@
-# 障害を差し込んだ操作の状態検査の設計
+# Failure-atomicity design
 
-## このドキュメントについて
+## About this document
 
-[Requirements](requirements.md)と[Product](../../product.md)に基づき、testkitの依存ラッパーと状態比較で単一障害を検査します。
+This implements the [Requirements](requirements.md) under the [Product](../../product.md)
+using testkit dependency wrappers and state comparisons. It is intended for testkit
+maintainers familiar with async tests and independent fixtures. Type scanning and
+existing-test assertion acquisition remain separate features.
 
-### 対象読者
+## Implementation
 
-testkitを実装・保守する開発者。
+`checkFailureAtomicity` first runs a fixture without faults and records call counts
+through named wrappers. For each fault/ordinal pair, create a fresh fixture and
+run the same operation. At the selected call, invoke the user's fault function
+instead of the real implementation.
 
-### 前提知識
+For a failure value, compare `structuredClone` snapshots before and after the
+operation with `deepStrictEqual`. Record successful outcomes separately as
+`recovered`. Exceptions, unreached/incomplete faults, snapshot acquisition errors
+and cleanup failures are violations. Execute all cases, then throw an error
+carrying the report when violations exist.
 
-非同期のテストと、実行ごとに独立したfixtureを生成する方法。
+## Flow and data
 
-### このドキュメントで扱わないこと
+The sequence is fixture creation, operation, snapshot acquisition and cleanup;
+there is no external process requiring a sequence diagram. The normal case maps
+dependency names to call counts. Each fault case holds its ID, dependency, ordinal,
+outcome, state and violation reason. These records are not persisted, so no ER
+diagram is needed.
 
-型の走査と既存テストのアサーション記録は既存機能に委ねます。
+## API
 
-## 実装方針
+`checkFailureAtomicity({ setup, faults, isFailure, only? })` returns a result Promise.
+The fixture returned by `setup` supplies `run(scope)`, `snapshot()` and optional
+`dispose()`. `scope.wrap(name, implementation)` wraps async dependencies while
+preserving arguments and `this`. Each fault has a unique `id`, `dependency` and
+`inject`; injection may return a value or throw.
 
-testkitに`checkFailureAtomicity`を追加します。最初に障害なしでfixtureを実行し、名前付きラッパーを通った依存の呼び出し回数を記録します。各障害と呼び出し回数の組を一つずつ選び、新しいfixtureで同じ操作を実行します。選択した呼び出しでは実装を呼ばず、利用者の障害関数を呼びます。
+`only: { fault, call }` replays one case. `FailureAtomicityError.report` contains
+all case evidence; each case's `fault` holds its replay conditions. Arbitrary
+JavaScript values mean the report is not guaranteed to be JSON-serializable.
 
-操作が失敗値を返したら、`structuredClone`した操作前後の状態を`deepStrictEqual`で比較します。成功値は`recovered`として別に記録します。操作の例外、未実行・未完了の障害、スナップショットの取得失敗、後処理の失敗を違反として記録します。全ケースを実行してから、違反があればレポートを持つ例外を投げます。
+## Integration and data handling
 
-## アーキテクチャ・シーケンス図
+There is no extra external service or runtime dependency. Vitest, Bun and Node
+tests can call the API. Clone snapshots before comparison to prevent mutations
+through shared references from concealing changes. Call fixture cleanup in
+`finally`. Keep counts and incomplete-call tracking per run.
 
-外部プロセスはなく、fixture生成、操作、状態取得、後処理を順番に呼ぶため図は不要です。
+Use the test's existing permissions. Trust the supplied fixture; explain that
+snapshot diagnostics can expose its values so consumers should exclude secrets.
+This is an additive testkit API and preserves existing scenario APIs; no special
+deployment procedure is required.
 
-## データモデル・ER 図
+## Alternative considered
 
-正常系は依存名から呼び出し回数への対応を持ちます。各ケースは障害ID・依存名・呼び出し回数、結果、状態、違反理由を持ちます。永続化しないためER図は不要です。
+Changing source alone can measure test sensitivity, but checking whether a normal
+implementation leaves partial updates under realistic faults still requires
+inputs and expected state. Explicit valid fault values and business state supply
+that missing contract.
 
-## API・インターフェース
+## Unresolved decisions
 
-`checkFailureAtomicity({ setup, faults, isFailure, only? })`は結果のPromiseを返します。`setup`のfixtureは`run(scope)`、`snapshot()`、任意の`dispose()`を持ちます。`scope.wrap(name, implementation)`は引数とthisを保って非同期依存を包みます。`faults`は一意の`id`、`dependency`、`inject`関数の配列です。注入関数は戻り値と例外の両方を表現できます。
-
-`only: { fault, call }`で一つのケースを再実行できます。`FailureAtomicityError.report`は全ケースの情報を、各ケースの`fault`は同じ条件を再実行する情報を持ちます。任意のJavaScript値を扱うため、レポートをJSONとして保存できる保証はしません。
-
-## 外部サービスとの連携方式
-
-追加の外部サービスと実行時依存はありません。Vitest・Bun・Nodeのテストから呼び出せます。
-
-## データの取り扱い設計
-
-スナップショットは比較前に複製し、参照の共有による変化の見逃しを防ぎます。各fixtureの後処理をfinallyで呼びます。呼び出し回数と未完了数は実行ごとに保持します。
-
-## 認証認可に関する特記事項
-
-なし。テストと同じ権限で実行します。
-
-## セキュリティ上の留意事項
-
-テスト用fixtureを信頼します。スナップショットの値は診断に含まれるため、秘密情報を含めないよう利用者に案内します。
-
-## デプロイに関する特記事項
-
-なし。testkitの公開APIへの追加で、既存のシナリオAPIは維持します。
-
-## 検討した代替手段
-
-### ソースコードの改変だけで失敗を作る
-
-既存テストの感度は測れますが、正常な実装が現実の障害で部分更新を残すかを検査するには、別途入力と状態の期待が必要です。有効な障害値と業務状態を明示する方式を採用します。
-
-## 未決事項
-
-なし。
+None for this feature's accepted scope.

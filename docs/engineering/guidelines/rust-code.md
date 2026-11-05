@@ -1,46 +1,77 @@
-# Rustコードの配置とsnaptest
+# Rust code ownership and snapshot tests
 
-Rustの実装・変更では、関数の責務と入出力の契約に従って配置します。
+Place Rust functions and types according to their responsibility and input/output
+contract.
 
-## 関数と型の配置
+## Functions and types
 
-- 一つの機能だけが使う関数は、その機能のモジュールに所属させます。
-- 同じ契約で複数の機能が使う関数は、役割が明確な共通モジュールに集約します。入力条件、結果の意味、失敗条件が一致することを確認します。
-- 行数だけを理由にファイルを分割しません。用途や失敗条件が異なる関数を、見た目の類似だけで共通化しません。
-- ファイルの取得と判定を分離します。判定関数は取得済みの値とファイルの確認結果を受け取り、結果と診断を返します。
+- A function used by one feature belongs to that feature's module.
+- Share a function in a clearly named common module only when its input conditions,
+  result meaning and failure conditions are the same for every caller.
+- Do not split files by line count alone or combine functions with different
+  purposes/failure conditions merely because their code looks similar.
+- Separate file acquisition from judgment. Judgment functions receive acquired
+  values and file-check results and return results and diagnostics.
 
-`tsrs_adapter`は、tsrsのASTから位置と本文を取得し、再帰走査を提供します。`scan`や`scenario_source`はそれを利用し、adapterから各機能への依存を作りません。関数本体だけの走査や伝播の規則など、機能固有の条件は各機能が担当します。
+`tsrs_adapter` acquires positions/text from the tsrs AST and supplies recursive
+traversal. `scan` and `scenario_source` consume it; the adapter does not depend on
+individual features. Body-only traversal and propagation rules stay with the
+feature that owns their meaning.
 
-`analysis_backend`は解析先の選択と外部APIの要求・応答を管理します。公式API用adapterも所有可能な事実を返し、伝播と静的照合の比較規則をRustで共用します。コンパイラごとの型取得を判定関数へ含めず、宣言や位置の解釈を変えた場合は同じ入力で各backendを比較します。
+`analysis_backend` chooses analysis providers and manages external API requests
+and responses. Official-API adapters return owned facts; Rust shares propagation
+and static-matching rules. Do not embed compiler-specific type acquisition in
+judgment functions. Compare backends on the same input after changing declaration
+or location interpretation.
 
-コンパイラに依存しない共通データは`model`に定義します。`Location`はソース位置を表し、従来の`discovery::Location`も再公開で維持します。共有のためにコンパイラのハンドルをモデルへ含めません。
+Compiler-independent common data belongs in `model`. `Location` represents source
+positions; the existing `discovery::Location` re-export remains available. Do not
+place compiler handles in shared models just to facilitate reuse.
 
-## 解析・判定結果のsnaptest
+## Snapshot analysis and judgments
 
-開発用依存の[insta](https://insta.rs/docs/quickstart/)で、代表的な解析・判定結果を比較します。期待値は`tests/snapshots/`でGit管理します。`Serialize`可能な結果にはJSON形式、シリアライズしない内部の判定値にはDebug形式を使い、既存のassertも維持します。
+Use the development dependency [insta](https://insta.rs/docs/quickstart/) to compare
+representative whole results. Commit expectations under `tests/snapshots/`. Use
+JSON for serializable results and Debug snapshots for non-serialized internal
+judgments, retaining existing assertions.
 
-対象は型候補・伝播経路・静的照合の診断、契約登録、テストと実行記録の照合、タグ集計、baseline差分です。出力の一部だけを比較していたassertに加え、結果全体と診断の組合せを固定します。
+Cover type candidates, propagation paths, static-match diagnostics, contract
+registration, test/observation matching, tag summaries and baseline differences.
+When an assertion previously compared only a fragment, also fix the combination
+of the whole result and its diagnostics.
 
-共通関数を移す前に期待値を作成します。一時ディレクトリは、そのテストが作成した絶対パスの接頭辞とcanonicalな表記だけを`<project>/`に正規化します。相対パス、ID、byte offset、行番号、診断内容、配列順序は比較対象です。パス全般を消すフィルターや、比較前の配列のソートは追加しません。
+Create expectations before moving shared functions. Normalize only the absolute
+temporary-directory prefix created by that test and its canonical spelling to
+`<project>/`. Relative paths, IDs, byte offsets, line numbers, diagnostics and array
+order remain observable. Do not add filters that erase all paths or sort arrays
+before comparison.
 
-CLIの`snapshot`コマンドが保存するシナリオ履歴と、Rustテストの`.snap`ファイルは用途が異なります。シナリオ履歴は利用先の仕様変更を照合し、snaptestはerrspec自体の結果の変化を確認します。履歴の代わりに`.snap`を利用しません。
+The CLI `snapshot` command stores consumer scenario history. Rust `.snap` files
+check changes in errspec's own behavior. Neither replaces the other.
 
-## 期待値の確認と更新
+## Review expected changes
 
-リファクタリングでは期待値を更新せずに一致することを確認します。別の一時ディレクトリでも同じ期待値を使い、作成場所によって結果が変わらないことを確かめます。
-
-意図して振る舞いを変更する場合は、対応する要件・設計と既存assertを先に確認し、対象のテストで差分候補を生成します。
+Refactors must match existing expectations without updating them. Use a second
+temporary directory to verify that the expectation does not depend on its location.
+For intentional behavior changes, inspect Requirements, Design and existing
+assertions first, then generate a candidate with the relevant test:
 
 ```sh
 INSTA_UPDATE=new cargo test --locked --test discovery
 ```
 
-既存の`.snap`と生成された`.snap.new`を比較し、入力、期待する結果、診断、順序への影響を確認します。`cargo-insta`を導入済みなら`cargo insta review`を使えます。未導入なら`git diff --no-index <既存の.snap> <候補の.snap.new>`で比較し、確認した候補だけを採用します。初回の期待値は`INSTA_UPDATE=unseen`で作成でき、既存の期待値は変更しません。
+Compare `.snap` with `.snap.new` for changes in inputs, results, diagnostics and
+order. Use `cargo insta review` when cargo-insta is installed, or
+`git diff --no-index <existing.snap> <candidate.snap.new>`. Adopt only reviewed
+candidates. `INSTA_UPDATE=unseen` can create a first expectation without replacing
+an existing one.
 
-採用後は`git diff -- tests/snapshots`で差分を再確認し、PRや会話に更新理由と対象の振る舞いを記載します。テストが成功することだけを理由に一括更新しません。
+Review `git diff -- tests/snapshots` after adoption and explain the behavior and
+reason in the PR or discussion. A passing test is not a reason for bulk updates.
 
 ```sh
 INSTA_UPDATE=no cargo test --locked
 ```
 
-CIでは`INSTA_UPDATE=no`を指定し、期待値の作成・更新を伴わずに比較します。fmt、clippy、testkit、Bun/Vitestの受け入れ検証もREADMEの手順に従って実行します。
+CI uses `INSTA_UPDATE=no`. Also run the appropriate fmt, clippy, testkit and
+Bun/Vitest acceptance checks described by the engineering guides and workflows.

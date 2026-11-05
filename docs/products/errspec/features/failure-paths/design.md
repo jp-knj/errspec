@@ -1,25 +1,41 @@
-# 失敗の経路の設計
+# Failure-path design
 
-[Product](../../product.md)と[Requirements](requirements.md)に対応する設計です。
+This implements the [Requirements](requirements.md) under the [Product](../../product.md).
 
-## 設定
+## Configuration
 
-契約に任意の`entry`（`{ "file", "export" }`）を追加する。`file`は設定ファイルのあるディレクトリから解決する。設定v2だけで受け付ける。
-exportは関数宣言、または関数式・arrow functionで初期化したconst変数に解決する。それ以外や見つからない場合はEC002とする。
+Version 2 contracts accept optional `entry: { "file", "export" }`. Resolve the
+file from the configuration directory. The export must resolve to a function
+declaration or a const initialized with a function expression/arrow function.
+Missing or unsupported entries produce `EC002`.
 
-## エラー型の漏れ（EC018）
+## Error-type omissions: EC018
 
-型解析の後、`scan`と同じ事実の収集と伝播の計算を、検査で開いたtsrsのプログラムに対して行う。
-入口の関数の効果のうち、throwとrejectionの経路を候補にする。発生元がcatchの内側になく、経由したすべての呼出でcatchしていない経路だけをEC018とする。catchが再throwする可能性は、確定した漏れとしては扱わない。catchの中の再throwは、tryの外にある明示的なthrowなので、その位置を新しい発生元として扱う。
-未解決の呼出（外部実装や動的なdispatch）は発生元を持たないため、EC018にはならない。
+After type analysis, use the same fact acquisition and propagation as `scan` on
+the opened tsrs program. Consider throw and rejection effects of the entry. Emit
+`EC018` only when the origin is outside a catch and no traversed call catches the
+path. A potentially rethrowing catch does not make the original source a confirmed
+escape. Its explicit rethrow is outside the corresponding try body and is treated
+as a new source. Unresolved external implementations or dynamic dispatch have no
+known origin and do not become `EC018`.
 
-## 経路の一覧
+## Path inventory
 
-入口の関数の本体を、入れ子の関数に入らずに走査する。`return`の式の型（async関数ではawait後の型）を共用体の要素に分け、識別子のプロパティの文字列リテラル型を集める。契約のタグに含まれる値を一つ以上持つ`return`を経路とする。
-経路はファイル・行・バイト位置・タグを持ち、レポートの契約に`paths`として出力する。`reached`は到達を記録した場合だけ真偽値になり、記録しない場合は省略する。
+Traverse the entry body without entering nested functions. Split each return
+expression's type into union members, using the awaited type for async functions.
+Collect discriminator string literals. A return with at least one contract tag
+becomes a path with file, line, byte offset and tags in the contract's `paths`.
+`reached` is a boolean only when acquired; otherwise omit it.
 
-## 到達の記録（EC019）
+## Reachability: EC019
 
-Bunでのverifyで入口を持つ契約があれば、通常の実行の後に、登録テストファイルだけを`bun test --coverage --coverage-reporter=lcov -t "errspec \["`で実行する。観測用の環境変数は渡さず、testkitは単体テストとして動く。
-lcovの`SF`を設定ディレクトリから解決し、経路の行の`DA`の実行回数で判定する。回数が0なら未到達としてEC019とする。ファイルが記録に無ければ、そのファイルの経路はすべて未到達とする。行が記録に無い場合は判定せず、到達済みとして扱う。
-カバレッジのファイルを読めない場合はEC_RUNNERとする。Vitestでは記録せず、`reached`を省略する。
+For Bun verification with an entry, run registered test files after the ordinary
+run using `bun test --coverage --coverage-reporter=lcov -t "errspec \\["`.
+Do not pass observation environment variables: testkit behaves as a normal unit
+test in this additional run.
+
+Resolve lcov `SF` paths from the configuration directory and inspect each path's
+line count in `DA`. A zero count produces `EC019`. A missing file makes all its
+paths unreached. A missing line is not judged and is treated as reached, preserving
+the stated line-coverage limitation. Unreadable coverage produces `EC_RUNNER`.
+Vitest does not acquire this evidence and omits `reached`.
