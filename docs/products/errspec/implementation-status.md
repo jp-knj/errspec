@@ -39,6 +39,20 @@ trial. No npm/crates publication or production deployment is included.
 | KARTE mutation and failure-verification trial; comparison report | Earlier exploratory trials informed scope; no full-plan trial completed | Phase 5: retain lockfiles; journey/usecases full/repeat/diff; obel vcs and agent-studio coverage/fault checks; record time, useful findings, noise and investigation costs |
 | English documentation and removal of temporary sdev tooling | This status and public API guide are English | Phase 5: reconcile final specs, translate remaining documents and remove temporary configuration/guidance |
 
+## Cross-runner acceptance
+
+Cross-runner matrix and Git selection acceptance lives in
+`tests/mutation-runner-matrix.test.mjs`, using native ESM Jest, Vite+'s actual
+bundled Vitest and real Chromium under two Playwright projects. It covers late
+killers in another file, all covering cells under weak mutation, explicit
+bail/retry/project-repeat settings, actual per-test retry/repeat and deadlines,
+budget-incomplete rows, current/deleted/unobserved Git scopes, CLI/API equivalence
+and retention of acquired matrices in agent/MTE/HTML reports. The three-platform
+runner Check job runs these nine cases. Distribution's runner-package smoke also
+executes complete matrices and current Git selection through offline installed
+packages. Local source and offline installed acceptance passed on macOS ARM;
+remote platform checks remain required.
+
 ## Probe acquisition comparison
 
 Partial probe acquisition remains a deliberate performance difference, deferred

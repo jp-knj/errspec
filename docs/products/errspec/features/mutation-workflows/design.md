@@ -84,6 +84,8 @@ moduleのimport／requireとpackage manifestはNodeのmodule hookで取得し、
 
 既存のfirst-detectionとscope結果はmatrix cellへ再利用せず、行を毎回実取得します。入力照合済みのprobe再利用は維持します。matrixの結果rowは既存のfirst-detection保存形式へ書き込まず、cache.reused／savedは0とします。純粋な分析関数はcomplete rowだけから検出なし・strictな包含・同じ非空kill集合を求めます。件数と除外理由はJSONへ残し、Git・ID・shardなどで選んだ変異集合に対する観測として扱います。test削除の安全性の証明にはしません。
 
+全件取得では失敗ごとにrunnerやbrowserが再起動するため、成功したbaselineの時間だけではcohortの総時間を見積もれません。nativeの全体deadlineは従来の算出値と「選択test数×既存の進捗停止deadline」の大きい方を使います。test開始間の進捗停止検査とrunnerのtest／hook timeoutは維持し、timeout後の確認実行をcompleteへ格上げしません。Jest／Playwrightのtest・hook期限切れもRustでtimeoutとして解釈し、通常のexpect／locatorの失敗と区別します。
+
 ### ランナーと実行計画
 
 `-j`／`--concurrency`と設定・APIの`concurrency`は1〜64の整数とし、既定1を維持します。2以上ではRustのqueueから各workerへ候補を割り当て、逐次実行と同じtrial・再確認・判定を使います。samplingとcache照合は配分前に行い、時間予算は要求全体の開始時刻で共有します。開始済みのtrialは完了させ、開始前の候補はPendingにします。完了順によらずinventory順へ結果を戻し、engine.parallelに要求数と起動したtrial worker数を示します。
