@@ -43,9 +43,26 @@ try{
   }
   for(const compiler of compilers){
     const root=join(directory,"typecheck-"+compilers.indexOf(compiler));mkdirSync(root);
-    const source="export const value:number=42;";writeFileSync(join(root,"value.ts"),source);
+    const source="export const value:number=42;export const safe=(x:{n:number})=>x?.n;";writeFileSync(join(root,"value.ts"),source);
     writeFileSync(join(root,"tsconfig.json"),JSON.stringify({compilerOptions:{strict:true,skipLibCheck:true,noUncheckedIndexedAccess:true},files:["value.ts"]}));
-    writeFileSync(join(root,"installed.mjs"),`import assert from "node:assert/strict";import {readFileSync} from "node:fs";import {checkMutants,checkMutantsInWorker} from "@errspec/typecheck";const source=${JSON.stringify(source)},options={root:process.cwd(),typescriptPackage:${JSON.stringify(realpathSync(compiler))}},mutants=[{key:"bad",file:"value.ts",byteOffset:source.indexOf("42"),end:source.indexOf("42")+2,original:"42",replacement:"'wrong'"}];const facts=await checkMutants(options,mutants),worker=await checkMutantsInWorker(options,mutants);assert.deepEqual(worker,facts);assert.match(facts.outcomes[0].diagnostic,/TS2322/);assert.equal(facts.outcomes[0].equivalentReason,null);assert.equal(readFileSync("value.ts","utf8"),source);`);
+    writeFileSync(join(root,"installed.mjs"),`
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+import {checkMutants,checkMutantsInWorker} from "@errspec/typecheck";
+const source=${JSON.stringify(source)},options={root:process.cwd(),typescriptPackage:${JSON.stringify(realpathSync(compiler))}};
+const number=source.indexOf("42"),chain=source.indexOf("x?.n");
+const mutants=[
+  {key:"bad",file:"value.ts",byteOffset:number,end:number+2,original:"42",replacement:"'wrong'"},
+  {key:"mislabeled",file:"value.ts",byteOffset:chain,end:chain+4,original:"x?.n",replacement:"x.missing",mutator:"OptionalChaining"},
+  {key:"safe",file:"value.ts",byteOffset:chain,end:chain+4,original:"x?.n",replacement:"x.n",mutator:"OptionalChaining"},
+];
+const facts=await checkMutants(options,mutants),worker=await checkMutantsInWorker(options,mutants);
+assert.deepEqual(worker,facts);
+assert.match(facts.outcomes[0].diagnostic,/TS2322/);assert.equal(facts.outcomes[0].equivalentReason,null);
+assert.match(facts.outcomes[1].diagnostic,/TS2339/);assert.equal(facts.outcomes[1].equivalentReason,null);
+assert.equal(facts.outcomes[2].diagnostic,null);assert.match(facts.outcomes[2].equivalentReason,/equivalent:/);
+assert.equal(readFileSync("value.ts","utf8"),source);
+`);
     run(root,process.execPath,["installed.mjs"]);
   }
   link(directory,"@types");
