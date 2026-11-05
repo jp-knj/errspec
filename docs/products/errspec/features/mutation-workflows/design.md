@@ -12,7 +12,7 @@ Additional behavior is enabled through explicit options/configuration. Existing 
 
 The typecheck request identifies tsconfig, installed TypeScript, and candidates. TS 6 uses LanguageService text overlays; TS 7 uses the official API's virtual files. Apply each edit to original text and compare diagnostic multisets against original diagnostics. Only new diagnostics produce `CompileError`.
 
-Restore text between candidates and close compiler state in `finally`. Reject `noCheck` as typechecking. Optional-chain equivalence requires strictNullChecks, noUncheckedIndexedAccess, and a receiver type excluding null/undefined. Semantic discovery backend options remain distinct from mutation typecheck options.
+Restore text between candidates and close compiler state in `finally`. Reject `noCheck` as typechecking. Optional-chain equivalence requires strictNullChecks, noUncheckedIndexedAccess, and a receiver type excluding null/undefined. The complete replacement must match exactly one optional-token removal from the original expression; altered property names, indices, arguments, call shapes, suffixes, or multiple removals require normal diagnostic acquisition. Semantic discovery backend options remain distinct from mutation typecheck options.
 
 ## History and probe reuse
 
@@ -85,6 +85,8 @@ Return `errspec/test-selection` JSON or files with uncollected-test warnings/fal
 A complete row requires every selected ID to have started and returned ordinary pass/fail, without module/runner error, timeout, native retry, or observed test retry/repeat. Unexecuted/sample/budget/unreached/insufficient acquisition does not create complete cells. Failed final input validation clears every row's completeness.
 
 Do not reuse first-detection or scope result cache as matrix cells. Acquire rows afresh; compatible probe reuse remains allowed. Do not write matrix verdict rows into first-detection storage; `cache.reused`/`saved` stay zero. Pure analysis uses complete rows only to find no-kill tests, strict subsumption, and identical nonempty kill sets. Report incomplete counts/reasons. Relations apply only to the selected Git/ID/shard mutant set and do not prove safe test deletion.
+
+Complete acquisition may restart a runner/browser after each failing test, so the successful baseline duration alone cannot estimate cohort wall time. The native total deadline is the larger of the existing estimate and selected-test count multiplied by the existing progress-stall deadline. Per-test/hook deadlines and progress-stall checks remain active; native retries never upgrade a row to complete. Rust recognizes Jest/Playwright test/hook deadline forms while retaining ordinary expect/locator assertion failures as kills.
 
 ## Concurrency, shards, and sessions
 
