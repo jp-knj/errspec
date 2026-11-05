@@ -406,6 +406,33 @@ fn cleanup_temporary(configuration: &Configuration) {
     {
         return;
     }
+    let Ok(canonical) = directory.canonicalize() else {
+        return;
+    };
+    let Ok(canonical_metadata) = fs::symlink_metadata(&canonical) else {
+        return;
+    };
+    if canonical.file_name() != directory.file_name()
+        || canonical_metadata.dev() != metadata.dev()
+        || canonical_metadata.ino() != metadata.ino()
+    {
+        return;
+    }
+    let directory = canonical.as_path();
+    for name in ["jest", "playwright", "jest-cache", "vite-cache"] {
+        let path = directory.join(name);
+        let Ok(entry) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if entry.file_type().is_symlink() {
+            // Unlink the known leaf; never follow it outside the private workspace.
+            let _ = fs::remove_file(path);
+        } else if entry.is_dir() && entry.uid() == unsafe { libc::geteuid() } {
+            // std's Unix remove_dir_all uses no-follow traversal, including nested
+            // symlinks. Only these generated namespaces can be removed recursively.
+            let _ = fs::remove_dir_all(path);
+        }
+    }
     for name in [
         "driver.mjs".to_owned(),
         "setup.mjs".into(),
@@ -581,5 +608,111 @@ pub(crate) fn entry(path: &Path) -> ExitCode {
             eprintln!("Mutation supervisor: {error}");
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    fn configuration(directory: &Path) -> Configuration {
+        Configuration {
+            engine_fingerprint: errspec::mutation::cache::ENGINE_FINGERPRINT.into(),
+            endpoint: false,
+            node: "node".into(),
+            script: directory.join("driver.mjs"),
+            record: directory.join("unused-record.json"),
+            identity: Record {
+                version: 1,
+                run_id: directory
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .replace('-', ""),
+                token: "a".repeat(64),
+                owner: 123,
+                supervisor: 456,
+                socket: directory.join("unused.sock"),
+            },
+        }
+    }
+
+    #[test]
+    fn orphan_cleanup_removes_only_generated_namespaces_without_following_symlinks() {
+        let temporary = tempfile::Builder::new()
+            .prefix("errspec-mutation-")
+            .permissions(fs::Permissions::from_mode(0o700))
+            .tempdir()
+            .unwrap();
+        let directory = temporary.path().canonicalize().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        fs::write(external.path().join("keep.txt"), "external").unwrap();
+        fs::write(directory.join("keep.txt"), "project").unwrap();
+        fs::create_dir(directory.join("unknown-project-directory")).unwrap();
+        fs::write(
+            directory.join("unknown-project-directory/keep.txt"),
+            "project",
+        )
+        .unwrap();
+        for name in ["jest", "jest-cache", "vite-cache"] {
+            fs::create_dir_all(directory.join(name).join("nested")).unwrap();
+            fs::write(directory.join(name).join("nested/generated.json"), "{}").unwrap();
+            symlink(external.path(), directory.join(name).join("nested/outside")).unwrap();
+        }
+        symlink(external.path(), directory.join("playwright")).unwrap();
+        fs::write(directory.join("driver.mjs"), "").unwrap();
+        cleanup_temporary(&configuration(&directory));
+        for name in [
+            "jest",
+            "playwright",
+            "jest-cache",
+            "vite-cache",
+            "driver.mjs",
+        ] {
+            assert!(
+                fs::symlink_metadata(directory.join(name)).is_err(),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(directory.join("keep.txt")).unwrap(),
+            "project"
+        );
+        assert!(
+            directory
+                .join("unknown-project-directory/keep.txt")
+                .is_file()
+        );
+        assert_eq!(
+            fs::read_to_string(external.path().join("keep.txt")).unwrap(),
+            "external"
+        );
+    }
+
+    #[test]
+    fn orphan_cleanup_rejects_mismatched_identity_and_symlinked_or_public_workspaces() {
+        let temporary = tempfile::Builder::new()
+            .prefix("errspec-mutation-")
+            .permissions(fs::Permissions::from_mode(0o700))
+            .tempdir()
+            .unwrap();
+        let directory = temporary.path().canonicalize().unwrap();
+        fs::create_dir(directory.join("jest")).unwrap();
+        fs::write(directory.join("jest/keep.txt"), "keep").unwrap();
+        let mut invalid = configuration(&directory);
+        invalid.identity.run_id.push('x');
+        cleanup_temporary(&invalid);
+        assert!(directory.join("jest/keep.txt").is_file());
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+        cleanup_temporary(&configuration(&directory));
+        assert!(directory.join("jest/keep.txt").is_file());
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let alias_root = tempfile::tempdir().unwrap();
+        let alias = alias_root.path().join(directory.file_name().unwrap());
+        symlink(&directory, &alias).unwrap();
+        cleanup_temporary(&configuration(&alias));
+        assert!(directory.join("jest/keep.txt").is_file());
     }
 }
