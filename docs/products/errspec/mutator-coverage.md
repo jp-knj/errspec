@@ -20,7 +20,7 @@
 | 組み込み18種のmutator | `mutate`で提供。規則と安全な配置の条件は[Design](features/mutation-testing/design.md)を参照 |
 | dry run、テスト単位の到達記録、到達したテストだけの実行、モジュール初期化時のmutant | `mutate`で提供。concurrentや初期化時はファイル全体へ選択を広げる |
 | Vitest/Vite内のメモリ上の変換とセッション再利用 | メモリ上の変換と`--reuse-session`によるinstrumented session再利用を提供。既定はfresh。globalSetupがある場合や必要な公開APIがない版ではfreshへ戻し、理由をengine.sessionReuseに示す |
-| 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 入力完全一致の結果・probe再利用に加え、明示的な`--cache-relocation`でproject位置に依存しないテストの別checkout再利用を提供。依存内容・外部path・その他の環境・provide値の照合は維持し、ordinary baselineは毎回実行。`--cache-scope`で、全probeを更新した上で位置だけの編集と到達test fileが独立な関数の結果を再利用。入口不足・opaqueな呼出し・commentを持つfileは保守的に再検査。custom pluginのmodule・依存・settings・追加入力を取得し、変更時に再検査。partial probeは後続。契約snapshotと別形式 |
+| 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 入力完全一致の結果・probe再利用に加え、明示的な`--cache-relocation`でproject位置に依存しないテストの別checkout再利用を提供。依存内容・外部path・その他の環境・provide値の照合は維持し、ordinary baselineは毎回実行。`--cache-scope`で、全probeを更新した上で位置だけの編集と到達test fileが独立な関数の結果を再利用。入口不足・opaqueな呼出し・commentを持つfileは保守的に再検査。custom pluginのmodule・依存・settings・追加入力を取得し、変更時に再検査。編集時は全probeを再取得する。固定版の部分再取得は、未実装の利用者機能ではなく延期した速度最適化の差として区別する（implementation-statusの監査根拠を参照）。契約snapshotと別形式 |
 | `--since`によるGit差分の限定、`node`/`scope`単位の選択、検出テストの削除による再検査、未収集の変更テストの警告 | `--since`と`--diff-unit node/scope`を提供。テスト変更・削除やinventory外の変更では全候補を再検査し、未収集の変更テストを警告。検出テストを保存する履歴との照合は後続 |
 | `--only`で指定したmutantだけの再検査 | `mutate --only`で提供。未知のIDはエラー |
 | `--full-dry-run`による到達記録の再取得 | 同名の指定と`fullDryRun`設定・APIを提供。結果cacheとは独立に、全テストでprobeを実行する |

@@ -39,6 +39,26 @@ trial. No npm/crates publication or production deployment is included.
 | KARTE mutation and failure-verification trial; comparison report | Earlier exploratory trials informed scope; no full-plan trial completed | Phase 5: retain lockfiles; journey/usecases full/repeat/diff; obel vcs and agent-studio coverage/fault checks; record time, useful findings, noise and investigation costs |
 | English documentation and removal of temporary sdev tooling | This status and public API guide are English | Phase 5: reconcile final specs, translate remaining documents and remove temporary configuration/guidance |
 
+## Probe acquisition comparison
+
+Partial probe acquisition remains a deliberate performance difference, deferred
+under the user's instruction to postpone optimization. The fixed comparison
+revision chooses test files in [`planDryRun`](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/cli/src/coverage-cache.ts#L97-L185)
+and [merges their newly observed coverage with skipped files](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/cli/src/run.ts#L224-L240).
+Errspec reuses a whole probe only after exact-input and current-baseline validation;
+edits refresh all probe observations, including in scope-cache mode.
+
+The [accepted requirements](features/mutation-workflows/requirements.md) require
+same-input reuse, changed-input revalidation and an explicit full refresh. They
+do not require skipping some test files after an edit or matching the comparison
+tool's `dryRunFiles` telemetry. The [design](features/mutation-workflows/design.md)
+explicitly requires a full probe after raw input changes. Current behavior meets
+that functional contract; partial re-collection is not claimed as implemented or
+as a remaining user-facing feature. Existing `mutation-cache.test.mjs` counters
+prove full-refresh control independently of result reuse, and scope-cache
+acceptance proves a fresh probe after position edits. Future optimization must
+retain the present unknown-input fallback and acquisition validation.
+
 ## Delivery and estimates
 
 Phase 1 introduces shared options, configuration and the initial public execution
