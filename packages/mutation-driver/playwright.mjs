@@ -1,4 +1,4 @@
-import {readFileSync,writeFileSync,existsSync,mkdirSync,realpathSync,rmSync} from "node:fs";
+import {readFileSync,writeFileSync,existsSync,mkdirSync,realpathSync,rmSync,readdirSync} from "node:fs";
 import {join,dirname,resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {runChild} from "./process-runner.mjs";
@@ -35,20 +35,25 @@ function reporter(load){
     onTestBegin(){if(process.send)process.send({errspec:"testStart"});}
     onTestEnd(test,result){
       const item=this.tests.get(test.id);
-      if(this.state.complete&&(result.retry>0||test.repeatEachIndex>0))this.acquisitionIncomplete="Playwright repeated or retried a selected test";
+      if(this.state.matrix&&(result.retry>0||test.repeatEachIndex>0))this.acquisitionIncomplete="Playwright repeated or retried a selected test";
       item.status=result.status==="skipped"?"skipped":result.status===test.expectedStatus?"passed":"failed";
       item.started=result.status!=="skipped";item.duration=result.duration;
       item.errors=item.status==="passed"?[]:result.errors.map(e=>e.stack||e.message||String(e));
       if(item.status==="failed"&&!item.errors.length)item.errors.push(`Expected ${test.expectedStatus}; received ${result.status}`);
       const attachment=result.attachments.find(a=>a.name==="errspec-mutation");
       if(attachment){
-        const data=JSON.parse(attachment.body?.toString()||readFileSync(attachment.path,"utf8"));
-        if(data.runId!==this.state.context.runId||data.requestId!==this.state.context.requestId)throw new Error("Stale errspec Playwright observation");
+        let data;
+        try{data=JSON.parse(attachment.body?.toString()||readFileSync(attachment.path,"utf8"));}
+        catch{this.protocolError="Invalid Playwright mutation fixture metadata";item.started=false;return;}
+        if(data.runId!==this.state.context.runId||data.requestId!==this.state.context.requestId){this.protocolError="Stale errspec Playwright observation";item.started=false;return;}
+        if(data.nodeObserverVersion!==1){this.errors.push("Playwright mutation fixture does not support Node observations; reinstall the matching @errspec/playwright artifact");item.started=false;return;}
+        const object=value=>value!==null&&typeof value==="object"&&!Array.isArray(value);
+        if(!object(data.hits)||!object(data.infected)||Object.values(data.hits).some(count=>!Number.isSafeInteger(count)||count<0)||Object.values(data.infected).some(value=>value!==true)){this.protocolError="Invalid Playwright mutation fixture facts";item.started=false;return;}
         item.hits=data.hits;item.infected=Object.keys(data.infected);
       }else if(item.started){item.started=false;this.errors.push(`Missing errspec Playwright fixture metadata: ${item.file}: ${item.name}. Import test from @errspec/playwright or extend mutationFixtures.`);}
     }
     onError(error){this.errors.push(error.stack||error.message||String(error));}
-    onEnd(){writeFileSync(this.state.report,JSON.stringify({tests:[...this.tests.values()],errors:this.errors,...(this.acquisitionIncomplete?{acquisitionIncomplete:this.acquisitionIncomplete}:{})}));}
+    onEnd(){writeFileSync(this.state.report,JSON.stringify({tests:[...this.tests.values()],errors:this.errors,...(this.protocolError?{protocolError:this.protocolError}:{}),...(this.acquisitionIncomplete?{acquisitionIncomplete:this.acquisitionIncomplete}:{})}));}
   };
 }
 export async function createPlaywrightAdapter(ctx){
@@ -90,7 +95,8 @@ export async function createPlaywrightAdapter(ctx){
     }
     const context={runId:ctx.runId,requestId:request.requestId,activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER,weakMutation:options.weakMutation};
     const selectedTaskIds=(request.selected||[]).map(id=>{const test=baseline.tests.find(t=>t.id===id);if(!test)throw failure("EC_MUTATION_PROTOCOL",`Unknown test ID: ${id}`);return test.taskId;});
-    writeFileSync(stateFile,JSON.stringify({root,report:reportFile,context,complete:!!request.complete,selectedTaskIds,
+    const nodeObservations=join(directory,`observations-${request.requestId}-${nextPhase}`);rmSync(nodeObservations,{recursive:true,force:true});mkdirSync(nodeObservations,{recursive:true});
+    writeFileSync(stateFile,JSON.stringify({root,phase:nextPhase,nodeObservations,nodeObserver:pathToFileURL(join(options.toolTemp,"child-process.mjs")).href,report:reportFile,context,matrix:!!options.killMatrix,complete:!!request.complete,selectedTaskIds,
       runtime:`(()=>{${weakRuntime}\n(${browserRuntime.toString()})(${JSON.stringify(context)},attachWeakBinary);})();`}));
     rmSync(reportFile,{force:true});
     const args=[cli,"test","--config",wrapper,...(nextPhase==="inspect"?["--list"]:[]),...(options.runnerProject?["--project",options.runnerProject]:[])];
@@ -98,6 +104,7 @@ export async function createPlaywrightAdapter(ctx){
       const outcome=await runChild(args,{root,env:{ERRSPEC_BROWSER_STATE:stateFile,ERRSPEC_VITE_URL:url,ERRSPEC_TIMEOUT_MULTIPLIER:String(request.multiplier||1),ERRSPEC_COMPLETE:request.complete?"1":"0"},onProgress:()=>ctx.progress(request)});
       if(!existsSync(reportFile))throw failure("EC_MUTATION_CONFIG",`Playwright failed before providing test results (${outcome.code??outcome.signal}); inspect stderr`);
       const report=JSON.parse(readFileSync(reportFile,"utf8"));
+      if(report.protocolError)throw failure("EC_MUTATION_PROTOCOL",report.protocolError);
       const files=[...new Set(report.tests.map(t=>resolve(root,t.file)))];files.forEach(file=>remember(file));
       const specs=report.tests.map(t=>({file:t.file,project:JSON.parse(t.id)[0],id:t.id}));
       if(nextPhase==="inspect"){
@@ -108,6 +115,11 @@ export async function createPlaywrightAdapter(ctx){
       for(const test of report.tests){
         for(const [key,count]of Object.entries(test.hits))execution.hits[key]=(execution.hits[key]||0)+count;
         execution.moduleDurations[test.file]=(execution.moduleDurations[test.file]||0)+test.duration;
+      }
+      for(const file of readdirSync(nodeObservations)){
+        const data=JSON.parse(readFileSync(join(nodeObservations,file),"utf8"));
+        if(data.runId!==ctx.runId||data.requestId!==request.requestId||data.phase!==nextPhase)throw failure("EC_MUTATION_PROTOCOL","Stale Playwright Node observations");
+        for(const fact of data.facts)ctx.recordChildProcesses(execution,ctx.rel(fact.file),[fact]);
       }
       if(![0,1].includes(outcome.code))execution.errors.push(`Playwright process terminated: ${outcome.code??outcome.signal}`);
       for(const environment of Object.values(server.environments))for(const module of environment.moduleGraph?.idToModuleMap?.values()||[]){
