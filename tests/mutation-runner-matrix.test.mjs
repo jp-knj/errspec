@@ -1,7 +1,8 @@
+import {temporaryProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {mkdtempSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync,cpSync} from "node:fs";
-import {tmpdir} from "node:os";
+import {writeFileSync,readFileSync,rmSync,symlinkSync,cpSync} from "node:fs";
 import {join,dirname,resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {spawnSync} from "node:child_process";
@@ -20,9 +21,9 @@ function commit(root){
   git(root,["-c","commit.gpgSign=false","-c","user.name=Fixture","-c","user.email=fixture@example.invalid","commit","-q","-m","fixture"]);
 }
 function fixture(t,runner,{projects=true}={}){
-  const root=realpathSync(mkdtempSync(join(tmpdir(),"errspec-runner-matrix-")));
-  const control=realpathSync(mkdtempSync(join(tmpdir(),"errspec-runner-matrix-control-")));
-  t.after(()=>{rmSync(root,{recursive:true,force:true});rmSync(control,{recursive:true,force:true});});
+  const root=temporaryProject(t,"errspec-runner-matrix-");
+  const control=temporaryProject(t,"errspec-runner-matrix-control-");
+
   cpSync(join(repo,"tests/fixtures/runners",runner),root,{recursive:true});
   rmSync(join(root,runner==="playwright"?"value.spec.mjs":"value.test.ts"));
   symlinkSync(dependencies,join(root,"node_modules"),"dir");
@@ -52,9 +53,7 @@ function fixture(t,runner,{projects=true}={}){
   return {root,tracker,extension,multiple:runner==="playwright"&&projects?2:1};
 }
 function cli(root,runner,command,args=[],exit=0){
-  const result=spawnSync(binary,[command,"--node",process.execPath,"--runner",runner,"--include","src/value.ts","--format","json",...args],{cwd:root,encoding:"utf8",timeout:240000,killSignal:"SIGKILL"});
-  assert.ifError(result.error);assert.equal(result.status,exit,result.stderr+result.stdout);
-  return JSON.parse(result.stdout);
+  return runJsonCommand(binary,[command,"--node",process.execPath,"--runner",runner,"--include","src/value.ts","--format","json",...args],{cwd:root,encoding:"utf8",timeout:240000,killSignal:"SIGKILL"},exit);
 }
 const identities=report=>report.mutants.map(m=>({key:m.key,status:m.status,coveredBy:m.coveredBy,killedBy:m.killedBy,matrix:m.matrix}));
 const selected=report=>Object.fromEntries(["files","tests","changedTests","covering","killers","warnings","fallbackReason","selection"].filter(k=>k in report).map(k=>[k,report[k]]));

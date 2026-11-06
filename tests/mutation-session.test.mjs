@@ -1,15 +1,15 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync} from "node:fs";
-import {tmpdir} from "node:os";
+import {mkdirSync,writeFileSync,readFileSync,rmSync} from "node:fs";
 import {join} from "node:path";
-import {spawnSync} from "node:child_process";
 import {fileURLToPath,pathToFileURL} from "node:url";
 const repo=fileURLToPath(new URL("../",import.meta.url)),binary=join(repo,"target/debug/errspec");
 function fixture(t,globalSetup=false){
-  const root=mkdtempSync(join(tmpdir(),"errspec-session-"));t.after(()=>rmSync(root,{recursive:true,force:true}));
-  mkdirSync(join(root,"src"));mkdirSync(join(root,"node_modules"));
-  symlinkSync(join(repo,"examples/checkout/node_modules/vitest"),join(root,"node_modules/vitest"),"dir");
+  const root=temporaryProject(t,"errspec-session-",{canonical:false});
+  prepareVitestProject(root,repo);
+
   writeFileSync(join(root,"src/value.ts"),"export const add=(a:number,b:number)=>a+b;\nexport const flag=()=>true;");
   writeFileSync(join(root,"a.test.ts"),'import {test,expect} from "vitest";import {add} from "./src/value";globalThis.__fixtureRuns=(globalThis.__fixtureRuns||0)+1;test("addition",()=>{expect(globalThis.__fixtureRuns).toBe(1);expect(Math.abs(-2)).toBe(2);expect(add(2,3)).toBe(5)});');
   writeFileSync(join(root,"b.test.ts"),'import {test,expect,vi} from "vitest";import {flag} from "./src/value";globalThis.__fixtureRuns=(globalThis.__fixtureRuns||0)+1;test("weak flag",()=>{expect(globalThis.__fixtureRuns).toBe(1);vi.spyOn(Math,"abs").mockReturnValue(999);expect(flag()).toBeDefined()});');
@@ -18,8 +18,7 @@ function fixture(t,globalSetup=false){
   return root;
 }
 function run(root,args=[],code=0){
-  const r=spawnSync(binary,["mutate","--node",process.execPath,"--format","json",...args],{cwd:root,encoding:"utf8",timeout:60000});
-  assert.ifError(r.error);assert.equal(r.status,code,r.stdout+r.stderr);return JSON.parse(r.stdout);
+  return runJsonCommand(binary,["mutate","--node",process.execPath,"--format","json",...args],{cwd:root,encoding:"utf8",timeout:60000},code);
 }
 const verdict=r=>r.mutants.map(m=>[m.key,m.status,m.coveredBy,m.killedBy,m.attempts]);
 function runnerProxy(root,decorate){

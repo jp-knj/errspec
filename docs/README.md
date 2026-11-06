@@ -30,6 +30,7 @@ functional inclusion does not require copying mutator's public interface.
 
 - [Specification workflow](engineering/guidelines/specification-workflow.md)
 - [Rust ownership and snapshot tests](engineering/guidelines/rust-code.md)
+- [Node integration test support](engineering/guidelines/integration-tests.md)
 - [Mutation execution and change boundaries](engineering/mutation-flow.md)
 - [Preparing distribution packages](engineering/guidelines/distribution.md)
 - [Failure-scenario testkit](../packages/testkit/README.md)

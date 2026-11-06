@@ -1,10 +1,11 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync } from "node:fs";
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,realpathSync} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import {join} from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { spawnSync } from "node:child_process";
 import { runInNewContext } from "node:vm";
 import { defineMutator, defineIgnorer, definePlugin, runMutation, formatReport } from "../packages/core/index.mjs";
 import { loadPlugins } from "../packages/mutation-driver/plugins.mjs";
@@ -12,10 +13,10 @@ import { instrument } from "../packages/mutation-driver/emitter.mjs";
 const repo=fileURLToPath(new URL("../",import.meta.url)), binary=process.env.ERRSPEC_BIN||join(repo,"target/debug/errspec");
 const sdk=pathToFileURL(join(repo,"packages/core/index.mjs")).href;
 function fixture(t) {
-  const root=realpathSync(mkdtempSync(join(tmpdir(),"errspec-plugins-")));
-  t.after(()=>rmSync(root,{recursive:true,force:true}));
-  mkdirSync(join(root,"src"));mkdirSync(join(root,"node_modules"));
-  symlinkSync(join(repo,"examples/checkout/node_modules/vitest"),join(root,"node_modules/vitest"),"dir");
+  const root=temporaryProject(t,"errspec-plugins-");
+
+  prepareVitestProject(root,repo);
+
   writeFileSync(join(root,"package.json"),JSON.stringify({type:"module",dependencies:{vitest:"5.0.5"}}));
   writeFileSync(join(root,"src/value.ts"),"export const value=()=>2;");
   writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";import {value} from "./src/value";test("value",()=>expect(value()).toBe(2));');
@@ -23,12 +24,10 @@ function fixture(t) {
   return root;
 }
 function native(source,extra={}) {
-  const output=spawnSync(binary,["__mutation-source"],{input:JSON.stringify({file:"src/value.ts",source,facts:true,...extra}),encoding:"utf8"});
-  assert.equal(output.status,0,output.stderr);return JSON.parse(output.stdout);
+  return runJsonCommand(binary,["__mutation-source"],{input:JSON.stringify({file:"src/value.ts",source,facts:true,...extra}),encoding:"utf8"},0);
 }
 function cli(root,args=[],code=0) {
-  const output=spawnSync(binary,["mutate","--node",process.execPath,"--format","json","--reuse-session",...args],{cwd:root,encoding:"utf8",timeout:90000});
-  assert.ifError(output.error);assert.equal(output.status,code,output.stdout+output.stderr);return JSON.parse(output.stdout);
+  return runJsonCommand(binary,["mutate","--node",process.execPath,"--format","json","--reuse-session",...args],{cwd:root,encoding:"utf8",timeout:90000},code);
 }
 const pluginSource=(replacement="3",extra="")=>`import {defineMutator,definePlugin} from ${JSON.stringify(sdk)};
 export default definePlugin({name:'numbers',cache:'deterministic',mutators:[defineMutator({name:'CustomNumber',visit(node,ctx){if(node.kind==='NumericLiteral')return [{replacement:${JSON.stringify(replacement)}}]}})]${extra}});`;

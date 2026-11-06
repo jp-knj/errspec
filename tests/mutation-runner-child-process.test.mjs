@@ -1,7 +1,7 @@
+import {temporaryProject} from "./support/project.mjs";
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,realpathSync,rmSync,cpSync,symlinkSync} from "node:fs";
-import {tmpdir} from "node:os";
+import {mkdirSync,writeFileSync,readFileSync,realpathSync,rmSync,cpSync,symlinkSync} from "node:fs";
 import {resolve,dirname,join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {runMutation,formatReport} from "../packages/core/index.mjs";
@@ -9,8 +9,8 @@ const repo=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const binary=process.env.ERRSPEC_BIN||join(repo,"target/debug/errspec");
 const dependencies=realpathSync(join(repo,"tests/fixtures/runners/node_modules"));
 function project(t,runner){
-  const root=realpathSync(mkdtempSync(join(tmpdir(),"errspec-runner-children-")));
-  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const root=temporaryProject(t,"errspec-runner-children-");
+
   cpSync(join(repo,"tests/fixtures/runners",runner),root,{recursive:true});
   mkdirSync(join(root,"node_modules"));
   const link=name=>{mkdirSync(dirname(join(root,"node_modules",name)),{recursive:true});symlinkSync(realpathSync(join(dependencies,name)),join(root,"node_modules",name),"dir");};

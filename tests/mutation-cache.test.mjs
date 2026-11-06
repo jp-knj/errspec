@@ -1,6 +1,8 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync} from "node:fs";
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,realpathSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {spawnSync} from "node:child_process";
@@ -8,9 +10,9 @@ import {fileURLToPath,pathToFileURL} from "node:url";
 import {runMutation} from "../packages/core/index.mjs";
 const repo=fileURLToPath(new URL("../",import.meta.url)),binary=join(repo,"target/debug/errspec");
 function fixture(t){
-  const root=realpathSync(mkdtempSync(join(tmpdir(),"errspec-cache-")));t.after(()=>rmSync(root,{recursive:true,force:true}));
-  mkdirSync(join(root,"src"));mkdirSync(join(root,"node_modules"));
-  symlinkSync(join(repo,"examples/checkout/node_modules/vitest"),join(root,"node_modules/vitest"),"dir");
+  const root=temporaryProject(t,"errspec-cache-");
+  prepareVitestProject(root,repo);
+
   writeFileSync(join(root,"package.json"),JSON.stringify({type:"module",dependencies:{vitest:"5.0.5"}}));
   writeFileSync(join(root,"src/value.ts"),"export const add=(a:number,b:number)=>a+b;");
   writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";import {add} from "./src/value";test("adds",()=>expect(add(2,3)).toBe(5));');
@@ -18,8 +20,7 @@ function fixture(t){
   return root;
 }
 function run(root,args=[],code=0,environment={}){
-  const result=spawnSync(binary,["mutate","--node",process.execPath,"--format","json",...args],{cwd:root,encoding:"utf8",timeout:60000,env:{...process.env,...environment}});
-  assert.ifError(result.error);assert.equal(result.status,code,result.stdout+result.stderr);return JSON.parse(result.stdout);
+  return runJsonCommand(binary,["mutate","--node",process.execPath,"--format","json",...args],{cwd:root,encoding:"utf8",timeout:60000,env:{...process.env,...environment}},code);
 }
 test("cache is opt-in, preserves current baselines, and labels reused assertion outcomes",{timeout:60000},t=>{
   const root=fixture(t),off=run(root);

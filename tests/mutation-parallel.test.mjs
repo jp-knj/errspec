@@ -1,23 +1,24 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync,readdirSync,existsSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {mkdirSync,writeFileSync,readFileSync,readdirSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
-import {spawnSync,spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {runMutation} from '../packages/core/index.mjs';
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=process.env.ERRSPEC_BIN||join(repo,'target/debug/errspec');
 function fixture(t,source='export const alpha=true;export const beta=true;export const gamma=true;',body='expect(alpha).toBe(true);expect(beta).toBe(true);expect(gamma).toBe(true);'){
- const root=realpathSync(mkdtempSync(join(tmpdir(),'errspec-parallel-'))),control=realpathSync(mkdtempSync(join(tmpdir(),'errspec-parallel-control-')));
- t.after(()=>{rmSync(root,{recursive:true,force:true});rmSync(control,{recursive:true,force:true});});
- mkdirSync(join(root,'src'));mkdirSync(join(root,'node_modules'));mkdirSync(join(root,'tmp'));
- symlinkSync(join(repo,'examples/checkout/node_modules/vitest'),join(root,'node_modules/vitest'),'dir');
+ const root=temporaryProject(t,"errspec-parallel-"),control=temporaryProject(t,"errspec-parallel-control-");
+
+ prepareVitestProject(root,repo);mkdirSync(join(root,'tmp'));
+
  writeFileSync(join(root,'package.json'),JSON.stringify({type:'module',dependencies:{vitest:'5.0.5'}}));writeFileSync(join(root,'src/value.ts'),source);
  writeFileSync(join(root,'value.test.ts'),`import {test,expect,inject} from 'vitest';import * as values from './src/value';import {writeFileSync,readFileSync,readdirSync} from 'node:fs';const control=${JSON.stringify(control)};const {alpha,beta,gamma}=values;test('guards',async()=>{${body}});`);
  writeFileSync(join(root,'vitest.config.mjs'),'export default {test:{include:["value.test.ts"]}};');return {root,control};
 }
-function run(root,args=[],expected=0){const result=spawnSync(binary,['mutate','--node',process.execPath,'--format','json',...args],{cwd:root,encoding:'utf8',timeout:90000});assert.ifError(result.error);assert.equal(result.status,expected,result.stderr+result.stdout);return JSON.parse(result.stdout);}
+function run(root,args=[],expected=0){return runJsonCommand(binary,['mutate','--node',process.execPath,'--format','json',...args],{cwd:root,encoding:'utf8',timeout:90000},expected);}
 const results=report=>report.mutants.map(m=>[m.key,m.status,m.coveredBy,m.infectedBy,m.attempts.map(a=>[a.status,a.killedBy])]);
 test('independent workers execute distinct active mutants at the same time',{timeout:60000},t=>{
  for(const reuse of [false,true]){

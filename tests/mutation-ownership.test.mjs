@@ -1,7 +1,7 @@
+import {temporaryProject} from "./support/project.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,symlinkSync,readdirSync,existsSync,rmSync,copyFileSync,realpathSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {mkdirSync,writeFileSync,readFileSync,symlinkSync,readdirSync,existsSync,rmSync,copyFileSync,realpathSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {spawn} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -12,7 +12,7 @@ import {Worker} from 'node:worker_threads';
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=process.env.ERRSPEC_BIN||join(repo,'target/debug/errspec');
 const registry=resolve('/tmp',`errspec-workers-v1-${process.getuid()}`);
 function fixture(t){
- const root=mkdtempSync(join(tmpdir(),'errspec-ownership-test-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const root=temporaryProject(t,"errspec-ownership-test-",{canonical:false});
  mkdirSync(join(root,'src'));mkdirSync(join(root,'tmp'));
  writeFileSync(join(root,'package.json'),'{"type":"module"}');
  symlinkSync(join(repo,'examples/checkout/node_modules'),join(root,'node_modules'),'dir');

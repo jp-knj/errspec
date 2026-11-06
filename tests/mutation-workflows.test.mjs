@@ -1,15 +1,8 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  realpathSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import {writeFileSync,readFileSync} from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -20,9 +13,9 @@ function project(
   t,
   source = "export const yes=()=>true; export const no=()=>false;",
 ) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "errspec-workflows-")));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  mkdirSync(join(root, "src"));
+  const root = temporaryProject(t,"errspec-workflows-");
+
+  prepareVitestProject(root,repo);
   writeFileSync(join(root, "src/value.ts"), source);
   writeFileSync(
     join(root, "value.test.ts"),
@@ -32,23 +25,12 @@ function project(
     join(root, "vitest.config.mjs"),
     'export default {test:{include:["value.test.ts"]}};',
   );
-  mkdirSync(join(root, "node_modules"));
-  symlinkSync(
-    join(repo, "examples/checkout/node_modules/vitest"),
-    join(root, "node_modules/vitest"),
-    "dir",
-  );
+
+
   return root;
 }
 function run(root, args = [], expected = 0) {
-  const output = spawnSync(
-    binary,
-    ["mutate", "--node", process.execPath, "--format", "json", ...args],
-    { cwd: root, encoding: "utf8", timeout: 60000 },
-  );
-  assert.ifError(output.error);
-  assert.equal(output.status, expected, output.stderr + output.stdout);
-  return JSON.parse(output.stdout);
+  return runJsonCommand(binary,["mutate", "--node", process.execPath, "--format", "json", ...args],{ cwd: root, encoding: "utf8", timeout: 60000 },expected);
 }
 test("explicit comments exclude trials with visible reasons and removing one invalidates cached evidence",t=>{
   const source='// errspec-disable-next-line: intentional weak check\nexport const yes=()=>true;\n/* Stryker disable all: unused API */\nexport const no=()=>false;\n// Stryker restore all\nexport const checked=true;';

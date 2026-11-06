@@ -1,7 +1,8 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {parseJsonResult} from "./support/cli.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync,existsSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {writeFileSync,readFileSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -9,15 +10,15 @@ import {runMutation} from '../packages/core/index.mjs';
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=join(repo,'target/debug/errspec');
 const source='export function add(a:number,b:number){return a+b;}\nexport function limit(n:number){return n>=2;}\nexport const ready=true;\n';
 function fixture(t){
- const root=realpathSync(mkdtempSync(join(tmpdir(),'errspec-shard-')));t.after(()=>rmSync(root,{recursive:true,force:true}));
- mkdirSync(join(root,'src'));mkdirSync(join(root,'node_modules'));symlinkSync(join(repo,'examples/checkout/node_modules/vitest'),join(root,'node_modules/vitest'),'dir');
+ const root=temporaryProject(t,"errspec-shard-");
+ prepareVitestProject(root,repo);
  writeFileSync(join(root,'package.json'),JSON.stringify({type:'module',dependencies:{vitest:'5.0.5'}}));
  writeFileSync(join(root,'src/value.ts'),source);
  writeFileSync(join(root,'value.test.ts'),'import {test,expect} from "vitest";import {add,limit,ready} from "./src/value";test("guards",()=>{expect(add(2,3)).toBe(5);expect(limit(2)).toBe(true);expect(limit(1)).toBe(false);expect(ready).toBe(true)});');
  writeFileSync(join(root,'vitest.config.mjs'),'export default {test:{include:["value.test.ts"]}};');return root;
 }
 function execute(root,args=[]){return spawnSync(binary,['mutate','--node',process.execPath,'--format','json',...args],{cwd:root,encoding:'utf8',timeout:60000});}
-function run(root,args=[],expected=0){const result=execute(root,args);assert.ifError(result.error);assert.equal(result.status,expected,result.stderr+result.stdout);return JSON.parse(result.stdout);}
+function run(root,args=[],expected=0){return parseJsonResult(execute(root,args),expected);}
 const ids=report=>report.mutants.map(m=>m.key).sort();
 const partition=(key,total)=>Number(BigInt('0x'+key.slice(0,16))%BigInt(total))+1;
 test('shards partition the requested inventory without duplicates and preserve keys across positions',{timeout:60000},t=>{

@@ -1,15 +1,7 @@
+import {temporaryProject} from "./support/project.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  mkdtempSync,
-  writeFileSync,
-  readFileSync,
-  realpathSync,
-  mkdirSync,
-  rmSync,
-  symlinkSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import {writeFileSync,readFileSync,realpathSync,mkdirSync,symlinkSync} from "node:fs";
 import { resolve, join, dirname, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -37,10 +29,8 @@ const modern = {
 };
 
 function project(t, source, options = modern) {
-  const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "errspec-mutant-types-")),
-  );
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = temporaryProject(t,"errspec-mutant-types-");
+
   mkdirSync(join(root, "src"));
   writeFileSync(join(root, "src/value.ts"), source);
   writeFileSync(

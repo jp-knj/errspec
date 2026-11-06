@@ -1,3 +1,5 @@
+import {runCommand} from "./support/cli.mjs";
+import {temporaryProject} from "./support/project.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync,cpSync,existsSync,readdirSync,lstatSync,appendFileSync} from 'node:fs';
@@ -13,8 +15,7 @@ const binary=process.env.ERRSPEC_TEST_BINARY||join(repo,'target/debug/errspec');
 const action=join(repo,'scripts/action.mjs'),metadata=parse(readFileSync(join(repo,'action.yml'),'utf8'));
 const live=join(repo,'scripts/action-live-acceptance.mjs');
 function command(cwd,cmd,args,code=0,env={}) {
-  const result=spawnSync(cmd,args,{cwd,env:{...process.env,...env},encoding:'utf8',timeout:60000});
-  assert.ifError(result.error);assert.equal(result.status,code,result.stdout+result.stderr);return result;
+  return runCommand(cmd,args,{cwd,env:{...process.env,...env},encoding:'utf8',timeout:60000},code);
 }
 function outputs(path) {
   const values={};const lines=readFileSync(path,'utf8').split('\n');
@@ -22,7 +23,7 @@ function outputs(path) {
   return values;
 }
 function fixture(t) {
-  const control=realpathSync(mkdtempSync(join(tmpdir(),'errspec-action-')));t.after(()=>rmSync(control,{recursive:true,force:true}));
+  const control=temporaryProject(t,"errspec-action-");
   const origin=join(control,'origin.git'),source=join(control,'source'),project=join(control,'project');
   command(control,'git',['init','--bare','-q',origin]);command(control,'git',['clone','-q',origin,source]);
   mkdirSync(join(source,'src'));
