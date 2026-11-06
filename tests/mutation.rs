@@ -2,6 +2,121 @@ use errspec::mutation::{self, Execution, Status};
 use serde_json::{Value, json};
 
 #[test]
+fn test_recommendations_keep_shared_line_module_syntax_outside_function_cohorts() {
+    use errspec::mutation::{
+        Mutant,
+        selection::{Changes, Lines},
+        test_selection,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    let file = "src/rules.ts";
+    let cases = [
+        (
+            "import {f} from './one'; export function a(){return f(1)}\nexport function b(){return f(2)}\n",
+            "import {f} from './other'; export function a(){return f(1)}\nexport function b(){return f(2)}\n",
+            Lines { start: 1, end: 1 },
+            true,
+        ),
+        (
+            "globalThis.convert=String; export function a(){return true}\nexport function b(){return globalThis.convert(1)}\n",
+            "globalThis.convert=Boolean; export function a(){return true}\nexport function b(){return globalThis.convert(1)}\n",
+            Lines { start: 1, end: 1 },
+            true,
+        ),
+        (
+            "export const a=()=>true,convert=String;\nexport function b(){return convert(1)}\n",
+            "export const a=()=>true,convert=Boolean;\nexport function b(){return convert(1)}\n",
+            Lines { start: 1, end: 1 },
+            true,
+        ),
+        (
+            "import {f} from './other';\nexport function a(){\nreturn f(1)\n}\nexport function b(){return f(2)}\n",
+            "import {f} from './other';\nexport function a(){\nreturn f(2)\n}\nexport function b(){return f(2)}\n",
+            Lines { start: 3, end: 3 },
+            false,
+        ),
+        (
+            "export const a=()=>true;\nexport const b=()=>true;\n",
+            "export const a=()=>!false;\nexport const b=()=>true;\n",
+            Lines { start: 1, end: 1 },
+            false,
+        ),
+        (
+            "export function a(){return true}\nconst convert=String;\nexport function b(){return convert(1)}\n",
+            "export function a(){return true}\nconst convert=Boolean;\nexport function b(){return convert(1)}\n",
+            Lines { start: 1, end: 2 },
+            true,
+        ),
+        (
+            "import './side'; export function a(){return true}\nexport function b(){return String(globalThis.flag)}\n",
+            "export function a(){return true}\nexport function b(){return String(globalThis.flag)}\n",
+            Lines { start: 1, end: 1 },
+            true,
+        ),
+    ];
+    for (before, source, range, module_changed) in cases {
+        let generated = generate_options(source, json!({"facts":true}));
+        let metadata: mutation::syntax::Metadata =
+            serde_json::from_value(generated["metadata"].clone()).unwrap();
+        let candidates: Vec<mutation::Candidate> =
+            serde_json::from_value(generated["candidates"].clone()).unwrap();
+        let mutants: Vec<_> = candidates
+            .into_iter()
+            .filter(|candidate| {
+                metadata.scopes[&metadata.owners[&candidate.key]]
+                    .name
+                    .as_deref()
+                    == Some("a")
+            })
+            .map(|candidate| Mutant {
+                candidate,
+                status: Status::Pending,
+                covered_by: vec!["a.test.ts#a".into()],
+                killed_by: vec![],
+                failed_modules: vec![],
+                attempts: vec![],
+                reason: None,
+                accepted: None,
+                critical: false,
+                reused: false,
+                infected_by: None,
+                matrix: None,
+            })
+            .collect();
+        assert!(!mutants.is_empty());
+        let changes = Changes {
+            base: "base".into(),
+            fingerprint: "fingerprint".into(),
+            files: BTreeMap::from([(file.into(), vec![range])]),
+            removals: BTreeSet::new(),
+        };
+        let metadata = BTreeMap::from([(file.into(), metadata)]);
+        let sources = BTreeMap::from([(file.into(), source.into())]);
+        let previous = BTreeMap::from([(
+            file.into(),
+            test_selection::PreviousSource {
+                text: before.into(),
+                metadata: serde_json::from_value(
+                    generate_options(before, json!({"facts":true}))["metadata"].clone(),
+                )
+                .unwrap(),
+            },
+        )]);
+        let fallback = test_selection::fallback(&changes, &mutants, &metadata, &sources, &previous);
+        assert_eq!(
+            fallback,
+            module_changed.then(|| "Changed module-level source has no bounded function cohort; select every collected test file".into()),
+            "{source}",
+        );
+        assert!(
+            test_selection::fallback(&changes, &mutants, &metadata, &sources, &BTreeMap::new())
+                .unwrap()
+                .contains("unavailable"),
+        );
+    }
+}
+
+#[test]
 fn passing_cases_do_not_hide_baseline_module_failures() {
     let mut baseline:errspec::mutation::Execution=serde_json::from_value(json!({"selected":[],"tests":[{"id":"pass","taskId":"1","file":"passing.test.ts","name":"passes","status":"passed","started":true,"duration":0,"errors":[],"hits":{}}],"failedModules":["missing.test.ts"],"errors":["Cannot resolve missing-dependency"],"staticHits":{},"hits":{},"wallTimeout":false})).unwrap();
     let message =
@@ -859,6 +974,7 @@ fn score_and_gate_depend_on_completion() {
         reused: false,
         critical: false,
         infected_by: None,
+        matrix: None,
     });
     report.finish();
     assert!(report.summary.score.is_none());

@@ -19,6 +19,7 @@ pub struct Changes {
     pub base: String,
     pub fingerprint: String,
     pub files: BTreeMap<String, Vec<Lines>>,
+    pub removals: BTreeSet<String>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,7 +34,7 @@ pub struct SelectionReport {
     pub full_run_reason: Option<String>,
     pub warnings: Vec<Warning>,
 }
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Warning {
     pub code: &'static str,
     pub file: String,

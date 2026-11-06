@@ -83,6 +83,35 @@ impl Record {
     }
 }
 impl File {
+    /// Historical ranking hints only. A different fingerprint is permitted, but
+    /// current coverage and test identities must still match this evidence.
+    pub fn killer_hints(&self, mutants: &[Mutant]) -> BTreeMap<String, Vec<String>> {
+        if self.kind != "errspec/mutation-results"
+            || self.schema_version != 1
+            || self.acquisition_mode != "first_detection"
+            || self.fingerprint.len() != 64
+            || !self
+                .fingerprint
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return BTreeMap::new();
+        }
+        mutants
+            .iter()
+            .filter_map(|mutant| {
+                let record = self.records.get(&mutant.candidate.key)?;
+                (record.valid(mutant, &mutant.covered_by)
+                    && record.attempt.status == Status::Killed)
+                    .then(|| {
+                        (
+                            mutant.candidate.key.clone(),
+                            record.attempt.killed_by.clone(),
+                        )
+                    })
+            })
+            .collect()
+    }
     pub fn new(fingerprint: String) -> Self {
         Self {
             kind: "errspec/mutation-results".into(),

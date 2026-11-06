@@ -16,10 +16,13 @@ struct Input {
     protocol: u8,
     options: Value,
     config_file: Option<PathBuf>,
+    #[serde(default)]
+    operation: Option<String>,
 }
 
 pub(crate) fn entry() -> ExitCode {
-    let acquire = || -> Result<MutationRequest, String> {
+    let mut selection_only = false;
+    let mut acquire = || -> Result<MutationRequest, String> {
         let mut bytes = vec![];
         io::stdin()
             .take(1024 * 1024 + 1)
@@ -29,6 +32,11 @@ pub(crate) fn entry() -> ExitCode {
             return Err("API request exceeds 1 MiB".into());
         }
         let mut input: Input = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        selection_only = match input.operation.as_deref() {
+            None | Some("runMutation") => false,
+            Some("selectTests") => true,
+            _ => return Err("Unknown mutation API operation".into()),
+        };
         if input.protocol != 1 {
             return Err("Unsupported mutation API protocol".into());
         }
@@ -69,7 +77,22 @@ pub(crate) fn entry() -> ExitCode {
             overrides,
         })
     };
-    let report = match acquire() {
+    let acquired = acquire();
+    if selection_only {
+        let report = match acquired {
+            Ok(request) => mutation_config::select_tests(request),
+            Err(error) => {
+                let mut report = Report::new(false);
+                report.error("EC_MUTATION_CONFIG", error);
+                report.finish();
+                errspec::mutation::test_selection::Report::from_mutation(report)
+            }
+        };
+        let code = report.exit_code();
+        println!("{}", json!({"protocol":1,"exitCode":code,"report":report}));
+        return ExitCode::from(code);
+    }
+    let report = match acquired {
         Ok(request) => mutation_config::run(request),
         Err(error) => {
             let mut report = Report::new(false);

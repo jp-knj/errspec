@@ -20,7 +20,7 @@
 | 組み込み18種のmutator | `mutate`で提供。規則と安全な配置の条件は[Design](features/mutation-testing/design.md)を参照 |
 | dry run、テスト単位の到達記録、到達したテストだけの実行、モジュール初期化時のmutant | `mutate`で提供。concurrentや初期化時はファイル全体へ選択を広げる |
 | Vitest/Vite内のメモリ上の変換とセッション再利用 | メモリ上の変換と`--reuse-session`によるinstrumented session再利用を提供。既定はfresh。globalSetupがある場合や必要な公開APIがない版ではfreshへ戻し、理由をengine.sessionReuseに示す |
-| 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 入力完全一致の結果・probe再利用に加え、明示的な`--cache-relocation`でproject位置に依存しないテストの別checkout再利用を提供。依存内容・外部path・その他の環境・provide値の照合は維持し、ordinary baselineは毎回実行。`--cache-scope`で、全probeを更新した上で位置だけの編集と到達test fileが独立な関数の結果を再利用。入口不足・opaqueな呼出し・commentを持つfileは保守的に再検査。custom pluginのmodule・依存・settings・追加入力を取得し、変更時に再検査。partial probeは後続。契約snapshotと別形式 |
+| 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 入力完全一致の結果・probe再利用に加え、明示的な`--cache-relocation`でproject位置に依存しないテストの別checkout再利用を提供。依存内容・外部path・その他の環境・provide値の照合は維持し、ordinary baselineは毎回実行。`--cache-scope`で、全probeを更新した上で位置だけの編集と到達test fileが独立な関数の結果を再利用。入口不足・opaqueな呼出し・commentを持つfileは保守的に再検査。custom pluginのmodule・依存・settings・追加入力を取得し、変更時に再検査。編集時は全probeを再取得する。固定版の部分再取得は、未実装の利用者機能ではなく延期した速度最適化の差として区別する（implementation-statusの監査根拠を参照）。契約snapshotと別形式 |
 | `--since`によるGit差分の限定、`node`/`scope`単位の選択、検出テストの削除による再検査、未収集の変更テストの警告 | `--since`と`--diff-unit node/scope`を提供。テスト変更・削除やinventory外の変更では全候補を再検査し、未収集の変更テストを警告。検出テストを保存する履歴との照合は後続 |
 | `--only`で指定したmutantだけの再検査 | `mutate --only`で提供。未知のIDはエラー |
 | `--full-dry-run`による到達記録の再取得 | 同名の指定と`fullDryRun`設定・APIを提供。結果cacheとは独立に、全テストでprobeを実行する |
@@ -61,8 +61,8 @@
 | `not detected`／`not infected`／`not reached`の分類、子プロセス内で実行された可能性の警告 | レポートで3区分を表示。実際のNode子プロセス起動をテストへ関連付け、相対script依存のAST閉包に警告。raw argv/envは公開しない。動的な依存名・package/alias・shell展開は推測しない |
 | `--reporter agent`の不足・関数本文・到達テスト・修正案、stdoutとstderrの分離 | `--reporter agent` / `formatReport`で未検出区分、ASTの関数本文、到達テスト、修正案を単一JSONへ出力。GitHub環境でもannotationを混在させない |
 | `--reporter simplify`で削除してもテストが失敗しないコードを一覧化 | 到達済みの生存削除変異を、位置・関数・変異ID・削除内容とともに提示。未到達・Ignoredは含めない |
-| `select-tests`で変更に関係するテストを順位付けし、files／JSONで出力 | 未実装 |
-| `--kill-matrix`による全検出テスト、検出なし・包含・重複テストの一覧、各実行方式での結果再利用 | 未実装 |
+| `select-tests`で変更に関係するテストを順位付けし、files／JSONで出力 | `select-tests --since`と公開`selectTests`。現在のbaseline／probeによるcoverageを取得し、過去のkillは明示したhintとして順位付け。変更test・削除code・観測不足・helper/module変更は全収集fileへ戻し、削除testと最後のinventory変更も検査。CLI／API／filesとinstalled-coreで検証 |
+| `--kill-matrix`による全検出テスト、検出なし・包含・重複テストの一覧、各実行方式での結果再利用 | 全covering testを実行し、complete rowだけで関係を判定。遅いkiller・weak mode・matching stampのfirst-detection排除・未実行予算・retry/timeoutを実fixtureで検証。結果rowは毎回再実行し、照合済みprobeだけ再利用。installed-coreも検証 |
 | high／low／breakの閾値、`--fail-on-survived`、baseline失敗とquality gate失敗の区別 | `--threshold-high/low/break`と`--fail-on-survived`を提供。quality gateは終了1、基準実行の異常は終了2 |
 | critical領域のglob／コメント指定、全mutantの検出または承認の要求 | `--critical`と直前の`// errspec-critical` / `// mutator-critical`で提供 |
 | GitHub Actionsの差分上のwarning annotation | 未実装 |

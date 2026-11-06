@@ -188,6 +188,7 @@
       "type": "boolean"
     },
     "experimentalCallgraph": { "type": "boolean" },
+    "killMatrix": { "type": "boolean" },
     "fullDryRun": {
       "type": "boolean"
     },

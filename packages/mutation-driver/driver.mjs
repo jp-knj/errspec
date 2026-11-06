@@ -148,6 +148,8 @@ function recordModule(module,execution,request) {
     if(meta && (meta.runId!==runId||meta.requestId!==request.requestId))
       throw failure("EC_MUTATION_PROTOCOL","Stale test metadata");
     const result=test.result();
+    if(options.killMatrix&&(test.diagnostic()?.retryCount>0||test.diagnostic()?.repeatCount>0))
+      execution.acquisitionIncomplete=`Complete acquisition included a retried or repeated test: ${id}`;
     execution.tests.push({id,taskId:test.id,file:moduleFile,name:test.fullName,status:result.state,
       started:request.started.has(test.id),duration:test.diagnostic()?.duration||0,
       errors:(result.errors||[]).map(e=>`${e.name||"Error"}: ${e.message||e}`),hits:meta?.hits||{},infected:Object.keys(meta?.infected||{}),
@@ -269,7 +271,7 @@ async function execute(phase,request) {
         if(!mutationPlugins.cacheable)throw new Error("Plugin has no deterministic input contract");
         configurationHash=hash(serialize({compiler:compilerInputs(project.vite,config,relocatedPath),provided,env:config.env,include:config.include,exclude:config.exclude,
           testNamePattern:config.testNamePattern,testTimeout:timeouts.test,hookTimeout:timeouts.hook,
-          retry:config.retry,bail:config.bail,sequence,setupFiles:config.setupFiles.filter(f=>f!==options.setup).map(relocatedPath),
+          retry:options.killMatrix?0:config.retry,bail:options.killMatrix?0:config.bail,sequence,setupFiles:config.setupFiles.filter(f=>f!==options.setup).map(relocatedPath),
           globalSetup:config.globalSetup,environment:config.environment,environmentOptions:config.environmentOptions,
           restoreMocks:config.restoreMocks,clearMocks:config.clearMocks,mockReset:config.mockReset,
           unstubEnvs:config.unstubEnvs,unstubGlobals:config.unstubGlobals,expect:config.expect,
@@ -277,6 +279,7 @@ async function execute(phase,request) {
       }catch{configurationHash=null;}
     }
     config.watch=false;config.update=false;config.snapshotOptions={...config.snapshotOptions,updateSnapshot:"none"};
+    if(options.killMatrix || request.complete){config.bail=0;config.retry=0;ctx.config.bail=0;ctx.config.retry=0;}
     ctx.config.snapshotOptions.updateSnapshot="none";ctx.snapshot.options.updateSnapshot="none";
     config.pool="forks";config.isolate=true;config.maxWorkers=1;config.fileParallelism=false;config.fsModuleCache=false;
     config.typecheck={...config.typecheck,enabled:false,only:false};
@@ -502,7 +505,7 @@ async function handle(request) {
     verifyInputs();
     // A fully reused result may run no trials. Refresh discovery anyway so a
     // newly added source or test cannot disappear behind cached coverage.
-    if((options.cache||options.concurrency>1)&&baseline)await execute("inspect",request);
+    if((options.cache||options.concurrency>1||options.killMatrix||options.selectionOnly)&&baseline)await execute("inspect",request);
     if(warmContext){const saved=warmContext;warmContext=undefined;await closeContext(saved.ctx);if(saved.state.failure)throw saved.state.failure;}
     verifyInputs();send(request,"done",{count:0,...(options.cache?{cacheFacts:cacheFacts()}:{})});return;
   }

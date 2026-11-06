@@ -74,6 +74,18 @@ Nodeはmoduleを取得し、Rustが取得した構文nodeのkind・親子関係�
 
 moduleのimport／requireとpackage manifestはNodeのmodule hookで取得し、世代中の内容変化を検査します。明示の`inputs`とcontextの`readInput`も同じ入力記録へ加えます。`cache: "deterministic"`は、取得済みmodule・settings・環境・追加入力から決定的に動くというplugin作者の契約です。時刻、乱数、未宣言の外部読取に依存するpluginは指定せず、cacheを保守的に無効化します。設定、plugin本体、依存module、追加入力の変更はnativeの指紋を変え、実行結果と到達記録を再取得します。scope cacheでもpluginの取得済み入力を省きません。
 
+### テスト選択と完全なkill matrix
+
+`select-tests --since`と`selectTests({since})`は、CLI解析を経由せず同じnative要求・設定解決・baseline／probe経路を使います。現在の収集test IDと到達記録を取得し、入力が一致したprobeだけ再利用します。変異trialは実行せず、予算・品質gate・weak絞込・型検査・shardを推薦へ適用しません。Git基準は必須で、function scopeの変更に対する現在のcoverageを順位付けします。過去のkillは現在のcovering test IDと一致したときだけhistorical hintとして先行させ、今回も検出できる証拠とはしません。削除されたtestは除き、変更test・helperや設定などinventory外の変更・削除行・module領域・観測できないfunctionは現在の全test fileへ戻します。削除だけのhunkはGit取得で事実として保持し、元scopeが消えた場合に隣接scopeだけへ限定しません。
+
+変更fileはGit基準の本文と構文も取得し、前後それぞれの関数scopeのbyte範囲を除いたmodule本文を比較します。同じ行に関数とimportやmoduleの文があっても、関数外の変更・削除を見落として隣の関数のcoverageだけへ推薦を絞りません。旧本文や構文を取得できない場合も全test fileへ戻します。
+
+選択結果は`errspec/test-selection`のJSONとfile一覧で提供し、変更testの未収集warningと保守的なfallback理由を残します。最後にも現在のsource／test inventoryを収集して、Gitが無視するfileがprobe中に追加された場合を含めて照合します。取得や最終照合が失敗した場合は未完了・exit 2とし、file推薦を空にします。
+
+`killMatrix`／`--kill-matrix`は全covering testの実行を要求し、`--no-kill-matrix`で設定を解除できます。adapterはcomplete取得能力を明示し、bailと全体retryを0にして遅い検出testも実行します。強制後の値をcache指紋にも使います。weak mutationの感染testだけへの絞込は行いません。nativeは全selected IDにstartedな通常pass／failがあり、module／runner error・timeout・native再試行・観測されたtest単位retry／repeatが無いことを確認してcompleteを付けます。未実行・予算・標本・未到達・取得不足はcomplete cellを作りません。runの入力照合を完了できなければ全rowのcompleteを解除します。
+
+既存のfirst-detectionとscope結果はmatrix cellへ再利用せず、行を毎回実取得します。入力照合済みのprobe再利用は維持します。matrixの結果rowは既存のfirst-detection保存形式へ書き込まず、cache.reused／savedは0とします。純粋な分析関数はcomplete rowだけから検出なし・strictな包含・同じ非空kill集合を求めます。件数と除外理由はJSONへ残し、Git・ID・shardなどで選んだ変異集合に対する観測として扱います。test削除の安全性の証明にはしません。
+
 ### ランナーと実行計画
 
 `-j`／`--concurrency`と設定・APIの`concurrency`は1〜64の整数とし、既定1を維持します。2以上ではRustのqueueから各workerへ候補を割り当て、逐次実行と同じtrial・再確認・判定を使います。samplingとcache照合は配分前に行い、時間予算は要求全体の開始時刻で共有します。開始済みのtrialは完了させ、開始前の候補はPendingにします。完了順によらずinventory順へ結果を戻し、engine.parallelに要求数と起動したtrial worker数を示します。

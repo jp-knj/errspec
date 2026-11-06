@@ -8,9 +8,15 @@ export function definePlugin(definition) { return definition; }
 
 /** Run native planning/judgment directly; quality failure still returns its report. */
 export async function runMutation(options = {}, transport = {}) {
+  return invokeMutation(options,transport,"runMutation","errspec/mutation");
+}
+export async function selectTests(options = {}, transport = {}) {
+  return invokeMutation(options,transport,"selectTests","errspec/test-selection");
+}
+async function invokeMutation(options,transport,operation,kind) {
   if (Number(process.versions.node.split(".")[0]) < 24) throw new Error("runMutation requires Node.js 24 or later");
   transport.signal?.throwIfAborted();
-  const input = JSON.stringify({ protocol: 1, options, ...(transport.configFile ? { configFile: transport.configFile } : {}) }, (_key, value) => {
+  const input = JSON.stringify({ protocol: 1, operation, options, ...(transport.configFile ? { configFile: transport.configFile } : {}) }, (_key, value) => {
     if (["function", "symbol", "bigint"].includes(typeof value) || typeof value === "number" && !Number.isFinite(value)) throw new TypeError("Mutation options must contain JSON values only");
     return value;
   });
@@ -39,7 +45,7 @@ export async function runMutation(options = {}, transport = {}) {
         if(failure)throw failure;
         if(signal)throw new Error(`Mutation API terminated by ${signal}`);
         const result=JSON.parse(output);
-        if(result.protocol!==1 || result.exitCode!==code || result.report?.kind!=="errspec/mutation" || result.report?.schemaVersion!==1)throw new Error("Invalid mutation API response");
+        if(result.protocol!==1 || result.exitCode!==code || result.report?.kind!==kind || result.report?.schemaVersion!==1)throw new Error("Invalid mutation API response");
         resolve({exitCode:result.exitCode,report:result.report});
       }catch(error){reject(error);}
     });

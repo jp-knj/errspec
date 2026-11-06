@@ -56,6 +56,22 @@ pub(crate) fn source_entry() -> ExitCode {
 }
 
 pub(crate) fn run(request: MutationRequest) -> Report {
+    run_mode(request, false)
+}
+pub(crate) fn select_tests(mut request: MutationRequest) -> mutation::test_selection::Report {
+    request.policy = Default::default();
+    request.shard = None;
+    request.concurrency = 1;
+    request.fail_on_undetected = false;
+    request.kill_matrix = false;
+    request.experimental_callgraph = false;
+    request.weak_mutation = false;
+    request.typecheck = false;
+    request.typecheck_package = None;
+    request.typecheck_project = None;
+    mutation::test_selection::Report::from_mutation(run_mode(request, true))
+}
+fn run_mode(request: MutationRequest, selection_only: bool) -> Report {
     let mut report = Report::new(request.fail_on_undetected);
     report.presentation = mutation::reporting::Presentation {
         root: request.root.clone(),
@@ -79,7 +95,13 @@ pub(crate) fn run(request: MutationRequest) -> Report {
             }
         }
     }
-    if let Err(error) = run_inner(request, &mut report, signal.clone(), started.clone()) {
+    if let Err(error) = run_inner(
+        request,
+        &mut report,
+        signal.clone(),
+        started.clone(),
+        selection_only,
+    ) {
         report.run_complete = false;
         report.error(&error.code, error.message);
     }
@@ -91,6 +113,9 @@ pub(crate) fn run(request: MutationRequest) -> Report {
     }
     for registration in registrations {
         signal_hook::low_level::unregister(registration);
+    }
+    if selection_only {
+        report.policy = None;
     }
     report.finish();
     report
@@ -348,7 +373,17 @@ fn run_inner(
     report: &mut Report,
     signal: Arc<AtomicI32>,
     started: Arc<AtomicBool>,
+    selection_only: bool,
 ) -> Result<(), Failure> {
+    if selection_only && request.since.is_none() {
+        return Err(Failure::new(
+            "EC_MUTATION_CONFIG",
+            "selectTests requires since",
+        ));
+    }
+    if request.kill_matrix {
+        report.kill_matrix = Some(mutation::kill_matrix::analyze(&[]));
+    }
     request
         .policy
         .validate()
@@ -419,7 +454,8 @@ fn run_inner(
         })
         .transpose()
         .map_err(|e| Failure::new("EC_MUTATION_CONFIG", e))?;
-    if request.policy.accepted_file.is_none()
+    if !selection_only
+        && request.policy.accepted_file.is_none()
         && request.root.join("errspec.accepted.json").is_file()
     {
         request.policy.accepted_file = Some("errspec.accepted.json".into());
@@ -486,6 +522,7 @@ fn run_inner(
     )?;
     let mut options = serde_json::to_value(&request).unwrap();
     options["binary"] = json!(std::env::current_exe()?);
+    options["selectionOnly"] = json!(selection_only);
     options["engineFingerprint"] = json!(mutation::cache::ENGINE_FINGERPRINT);
     options["temp"] = json!(temp.path());
     options["toolTemp"] = json!(temp.path());
@@ -511,6 +548,12 @@ fn run_inner(
     open.check_error()?;
     expected(&open.messages, &["done"], 0)?;
     let info = only(&open.messages, "done")?;
+    if request.kill_matrix && info["capabilities"]["complete"] != true {
+        return Err(Failure::new(
+            "EC_MUTATION_CONFIG",
+            "Runner does not support complete kill-matrix acquisition",
+        ));
+    }
     let custom_mutators: Vec<String> =
         serde_json::from_value(info.get("mutators").cloned().unwrap_or(json!([])))
             .map_err(|e| Failure::protocol(e.to_string()))?;
@@ -598,6 +641,7 @@ fn run_inner(
                 accepted: None,
                 reused: false,
                 infected_by: None,
+                matrix: None,
                 candidate,
                 status,
                 covered_by: vec![],
@@ -823,7 +867,11 @@ fn run_inner(
             .collect();
         let (selected, selection) = mutation::selection::select(
             request.since.as_ref().unwrap(),
-            request.diff_unit.unwrap_or(mutation::selection::Unit::Node),
+            if selection_only {
+                mutation::selection::Unit::Scope
+            } else {
+                request.diff_unit.unwrap_or(mutation::selection::Unit::Node)
+            },
             changes,
             report.mutants.iter().map(|m| &m.candidate),
             &syntax,
@@ -949,7 +997,7 @@ fn run_inner(
                 "Hit mutant has no attributable baseline tests",
             ));
         }
-        if request.weak_mutation && mutant.candidate.weak.is_some() {
+        if request.weak_mutation && !request.kill_matrix && mutant.candidate.weak.is_some() {
             let infected = baseline
                 .tests
                 .iter()
@@ -967,11 +1015,75 @@ fn run_inner(
             mutant.infected_by = Some(infected);
         }
     }
+    if selection_only {
+        let hints = crate::mutation_cache::historical(&request)
+            .map(|history| history.killer_hints(&report.mutants))
+            .unwrap_or_default();
+        let previous = changes
+            .as_ref()
+            .unwrap()
+            .files
+            .keys()
+            .filter(|file| syntax.contains_key(*file))
+            .filter_map(|file| {
+                let text = crate::mutation_git::source_at(
+                    &request.root,
+                    &changes.as_ref().unwrap().base,
+                    file,
+                    &signal,
+                )
+                .ok()?;
+                let source =
+                    crate::mutation_source::SourceRequest::for_facts(file.clone(), text.clone());
+                let metadata = std::thread::Builder::new()
+                    .stack_size(32 * 1024 * 1024)
+                    .spawn(move || {
+                        crate::mutation_source::generate(source)
+                            .ok()
+                            .and_then(|result| result.metadata)
+                    })
+                    .ok()?
+                    .join()
+                    .ok()??;
+                Some((
+                    file.clone(),
+                    mutation::test_selection::PreviousSource { text, metadata },
+                ))
+            })
+            .collect();
+        let fallback = mutation::test_selection::fallback(
+            changes.as_ref().unwrap(),
+            &report.mutants,
+            &syntax,
+            &sources,
+            &previous,
+        );
+        report.test_selection = Some(mutation::test_selection::rank(
+            request.since.as_deref().unwrap(),
+            changes.as_ref().unwrap(),
+            &report.mutants,
+            &baseline,
+            &hints,
+            report
+                .selection
+                .as_ref()
+                .and_then(|selection| selection.full_run_reason.as_deref())
+                .or(fallback.as_deref()),
+        ));
+        report.test_selection.as_mut().unwrap().warnings = report
+            .selection
+            .as_ref()
+            .map(|selection| selection.warnings.clone())
+            .unwrap_or_default();
+    }
     let sampled = request
         .policy
         .mutants_per_line
         .map(|maximum| mutation::policy::sample_per_line(&report.mutants, maximum));
     for (index, mutant) in report.mutants.iter_mut().enumerate() {
+        if selection_only {
+            continue;
+        }
         if mutant.status != Status::Pending {
             continue;
         }
@@ -988,21 +1100,23 @@ fn run_inner(
             report.policy.as_mut().unwrap().sampled += 1;
             continue;
         }
-        if let Some(store) = &cache_store
+        if !request.kill_matrix
+            && let Some(store) = &cache_store
             && store.data.reuse(&store.stamp.hash, mutant, &selected)
         {
             report.cache.as_mut().unwrap().reused += 1;
             continue;
         }
-        if cache_store
-            .as_ref()
-            .and_then(|store| store.scope.as_ref())
-            .is_some_and(|scope| {
-                scope
-                    .previous
-                    .as_ref()
-                    .is_some_and(|data| data.reuse(&scope.context, mutant, &selected))
-            })
+        if !request.kill_matrix
+            && cache_store
+                .as_ref()
+                .and_then(|store| store.scope.as_ref())
+                .is_some_and(|scope| {
+                    scope
+                        .previous
+                        .as_ref()
+                        .is_some_and(|data| data.reuse(&scope.context, mutant, &selected))
+                })
         {
             let info = report.cache.as_mut().unwrap();
             info.reused += 1;
@@ -1152,19 +1266,33 @@ fn run_inner(
             report.cache.as_mut().unwrap().disabled_reason = Some(reason);
         } else {
             store.data.retain(&keys);
-            for mutant in &report.mutants {
+            for mutant in report
+                .mutants
+                .iter()
+                .filter(|_| !request.kill_matrix && !selection_only)
+            {
                 store.data.record(
                     mutant,
                     mutant.infected_by.as_ref().unwrap_or(&mutant.covered_by),
                 );
             }
-            crate::mutation_cache::save(store)
-                .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
+            if !selection_only && !request.kill_matrix {
+                crate::mutation_cache::save(store)
+                    .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
+            }
             crate::mutation_cache::save_coverage(store, &baseline)
                 .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
-            let scoped = crate::mutation_cache::save_scope(store, &report.mutants)
-                .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?;
-            report.cache.as_mut().unwrap().saved = store.data.len().max(scoped);
+            let scoped = if request.kill_matrix || selection_only {
+                0
+            } else {
+                crate::mutation_cache::save_scope(store, &report.mutants)
+                    .map_err(|e| Failure::new("EC_MUTATION_CACHE", e.to_string()))?
+            };
+            report.cache.as_mut().unwrap().saved = if request.kill_matrix || selection_only {
+                0
+            } else {
+                store.data.len().max(scoped)
+            };
         }
     }
     report.run_complete = true;
@@ -1272,7 +1400,7 @@ fn execute_trial(
         } else {
             1
         };
-        let response=driver.request(json!({"op":"run","key":key,"selected":selected,"hitLimit":hit_limit,"multiplier":multiplier}),
+        let response=driver.request(json!({"op":"run","key":key,"selected":selected,"hitLimit":hit_limit,"multiplier":multiplier,"complete":context.options["killMatrix"]==true}),
             Duration::from_secs_f64(total_ms*multiplier as f64/1000.0),Duration::from_secs_f64(stall_ms*multiplier as f64/1000.0))?;
         response.check_error()?;
         let result = if response.timeout {
@@ -1290,6 +1418,14 @@ fn execute_trial(
             execution(value)?
         };
         mutation::validate_execution(&result, &selected).map_err(Failure::protocol)?;
+        if context.options["killMatrix"] == true {
+            let mut observation = mutation::kill_matrix::Observation::acquire(&result, &selected);
+            if number > 1 {
+                observation
+                    .invalidate("Retried execution does not establish one complete matrix row");
+            }
+            mutant.matrix = Some(observation);
+        }
         if result
             .hits
             .keys()

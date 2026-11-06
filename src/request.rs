@@ -7,6 +7,7 @@ pub(crate) enum Request {
     Init(InitRequest),
     Coverage(CoverageRequest),
     Mutation(Box<MutationRequest>),
+    SelectTests(Box<MutationRequest>),
     MutationSource,
     MutationApi,
     FormatReport,

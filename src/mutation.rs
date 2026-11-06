@@ -5,6 +5,7 @@ pub mod cache;
 pub mod callgraph;
 pub mod coverage_cache;
 pub mod exclusions;
+pub mod kill_matrix;
 pub mod options;
 pub mod ownership;
 pub mod parallel;
@@ -14,6 +15,7 @@ pub mod scope_cache;
 pub mod selection;
 pub mod sharding;
 pub mod syntax;
+pub mod test_selection;
 
 pub const RULES_VERSION: &str = "1";
 pub const MUTATORS: [&str; 18] = [
@@ -105,6 +107,8 @@ pub struct TestResult {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Execution {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acquisition_incomplete: Option<String>,
     pub selected: Vec<String>,
     pub tests: Vec<TestResult>,
     pub failed_modules: Vec<String>,
@@ -336,6 +340,8 @@ pub struct Mutant {
     pub reused: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub infected_by: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matrix: Option<kill_matrix::Observation>,
 }
 
 #[derive(Debug, Serialize)]
@@ -413,6 +419,10 @@ pub struct Report {
     pub shard: Option<sharding::Info>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<policy::PolicyReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kill_matrix: Option<kill_matrix::Report>,
+    #[serde(skip)]
+    pub test_selection: Option<test_selection::Selection>,
     #[serde(skip)]
     pub presentation: reporting::Presentation,
     #[serde(skip)]
@@ -469,6 +479,8 @@ impl Report {
             workers: None,
             shard: None,
             policy: None,
+            kill_matrix: None,
+            test_selection: None,
             fail_on_undetected: gate,
             presentation: Default::default(),
         }
@@ -480,6 +492,16 @@ impl Report {
         });
     }
     pub fn finish(&mut self) {
+        if self.kill_matrix.is_some() {
+            if !self.run_complete {
+                for mutant in &mut self.mutants {
+                    if let Some(row) = &mut mutant.matrix {
+                        row.invalidate("Run did not complete input validation");
+                    }
+                }
+            }
+            self.kill_matrix = Some(kill_matrix::analyze(&self.mutants));
+        }
         let mut s = Summary {
             total: self.mutants.len(),
             ..Summary::default()
