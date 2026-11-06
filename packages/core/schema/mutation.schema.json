@@ -13,6 +13,10 @@
       "type": "string",
       "minLength": 1
     },
+    "runner": { "enum": ["auto", "vitest", "vite-plus", "jest", "playwright"] },
+    "runnerConfig": { "type": ["string", "null"], "minLength": 1 },
+    "runnerProject": { "type": ["string", "null"], "minLength": 1 },
+    "runnerPackage": { "type": ["string", "null"], "minLength": 1 },
     "vitestConfig": {
       "type": [
         "string",

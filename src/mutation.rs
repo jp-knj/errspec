@@ -345,6 +345,10 @@ pub struct Engine {
     pub rules_version: &'static str,
     pub node: Option<String>,
     pub vitest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_version: Option<String>,
     pub typecheck: &'static str,
     pub coverage_scope: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -439,6 +443,8 @@ impl Report {
                 rules_version: RULES_VERSION,
                 node: None,
                 vitest: None,
+                runner: None,
+                runner_version: None,
                 typecheck: "not_run",
                 coverage_scope: "vitest_vite_workers",
                 session_reuse: None,

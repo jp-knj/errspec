@@ -1,7 +1,7 @@
 // driver.mjs
-import { readFileSync as readFileSync3, writeFileSync, realpathSync as realpathSync3, existsSync as existsSync3, globSync, statSync } from "node:fs";
-import { basename, dirname as dirname3, resolve as resolve3, relative as relative2, join as join3, isAbsolute as isAbsolute2, matchesGlob } from "node:path";
-import { pathToFileURL as pathToFileURL3 } from "node:url";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync3, realpathSync as realpathSync6, existsSync as existsSync6, globSync, statSync } from "node:fs";
+import { basename, dirname as dirname5, resolve as resolve5, relative as relative2, join as join6, isAbsolute as isAbsolute2, matchesGlob } from "node:path";
+import { pathToFileURL as pathToFileURL4 } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -2230,6 +2230,498 @@ async function loadPlugins(specs, root, remember, excluded = []) {
   };
 }
 
+// runners.mjs
+import { existsSync as existsSync3, readFileSync as readFileSync3, realpathSync as realpathSync3 } from "node:fs";
+import { createRequire as createRequire3 } from "node:module";
+import { dirname as dirname3, join as join3 } from "node:path";
+var extensions = ["ts", "mts", "cts", "js", "mjs", "cjs"];
+var configs = (root, names) => names.some((name) => [...extensions, "json"].some((ext) => existsSync3(join3(root, `${name}.config.${ext}`))));
+function resolvePackage(root, name, explicit) {
+  if (explicit) {
+    if (!existsSync3(join3(explicit, "package.json")))
+      throw new Error(`Runner package not found: ${explicit}`);
+    return realpathSync3(explicit);
+  }
+  try {
+    return dirname3(realpathSync3(createRequire3(join3(root, "package.json")).resolve(`${name}/package.json`)));
+  } catch {
+    return;
+  }
+}
+function detectRunner(root, options = {}) {
+  if (options.runner && options.runner !== "auto")
+    return options.runner;
+  if (options.vitestConfig || options.vitestPackage || options.vitestProject)
+    return "vitest";
+  if (configs(root, ["vitest", "vite"]))
+    return resolvePackage(root, "vitest") ? "vitest" : resolvePackage(root, "vite-plus") ? "vite-plus" : "vitest";
+  let pkg = {};
+  try {
+    pkg = JSON.parse(readFileSync3(join3(root, "package.json"), "utf8"));
+  } catch {}
+  if (configs(root, ["jest"]) || Object.hasOwn(pkg, "jest"))
+    return "jest";
+  if (configs(root, ["playwright"]))
+    return "playwright";
+  for (const [runner, name] of [["vitest", "vitest"], ["vite-plus", "vite-plus"], ["jest", "jest"], ["playwright", "@playwright/test"]])
+    if (resolvePackage(root, name))
+      return runner;
+  throw new Error("Cannot find a supported test runner; select --runner and --runner-package");
+}
+
+// jest.mjs
+import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync4, mkdirSync, rmSync, realpathSync as realpathSync4 } from "node:fs";
+import { join as join4, resolve as resolve3 } from "node:path";
+import { createRequire as createRequire4 } from "node:module";
+
+// process-runner.mjs
+import { spawn } from "node:child_process";
+async function runChild(args, { root, env, onProgress, capture = false }) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe", "ipc"] });
+    let stdout = "";
+    child.stdout.on("data", (data) => {
+      if (capture)
+        stdout += data;
+      else
+        process.stderr.write(data);
+    });
+    child.stderr.on("data", (data) => process.stderr.write(data));
+    child.on("message", (message) => {
+      if (message?.errspec === "testStart")
+        onProgress();
+    });
+    child.on("error", reject);
+    child.on("close", (code, signal) => resolve({ code, signal, stdout }));
+  });
+}
+
+// jest.mjs
+function transformer(load) {
+  const { readFileSync } = load("node:fs");
+  const { stripTypeScriptTypes } = load("node:module");
+  function prepare(source, file, options) {
+    const state = JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE, "utf8"));
+    if (file.startsWith(state.toolTemp + "/"))
+      return { code: source };
+    if (!options.supportsStaticESM)
+      throw new Error(`errspec Jest requires native ESM: ${file}`);
+    const entry = state.inventory[file];
+    if (entry && entry.source !== source)
+      throw new Error(`Mutation source changed: ${file}`);
+    const code = entry?.code ?? source;
+    const transform = state.transforms.find(([pattern]) => new RegExp(pattern).test(file));
+    return { code, transform };
+  }
+  const plain = (code, file) => ({ code: /\.[cm]?tsx?$/.test(file) ? stripTypeScriptTypes(code, { mode: "transform", sourceUrl: file }) : code });
+  const instances = new Map;
+  function instance(transform) {
+    const key = JSON.stringify(transform);
+    if (!instances.has(key))
+      instances.set(key, (async () => {
+        const module = await import(load("node:url").pathToFileURL(transform[1]).href), adapter = module.default || module;
+        return typeof adapter.createTransformer === "function" ? await adapter.createTransformer(transform[2]) : adapter;
+      })());
+    return instances.get(key);
+  }
+  return {
+    async processAsync(source, file, options) {
+      const { code, transform } = prepare(source, file, options);
+      if (!transform)
+        return plain(code, file);
+      const adapter = await instance(transform);
+      const process2 = adapter.processAsync || adapter.process;
+      if (typeof process2 !== "function")
+        throw new Error(`Invalid Jest ESM transformer: ${transform[1]}`);
+      return await process2.call(adapter, code, file, { ...options, transformerConfig: transform[2] });
+    }
+  };
+}
+function environment(Base, attachWeakBinary, load) {
+  const { readFileSync, writeFileSync } = load("node:fs");
+  const { join, relative } = load("node:path");
+  return class extends Base {
+    constructor(config, context) {
+      super(config, context);
+      this.file = context.testPath;
+    }
+    async setup() {
+      await super.setup();
+      this.state = JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE, "utf8"));
+      this.data = { file: this.file, tests: [], hits: {}, staticHits: {} };
+      const self = this, ctx = this.state.context;
+      const record = this.global[Symbol.for(`errspec.mutation.${ctx.runId}`)] = (key) => {
+        const count = self.data.hits[key] = (self.data.hits[key] || 0) + 1;
+        if (self.active && !self.concurrent) {
+          self.active.hits[key] = (self.active.hits[key] || 0) + 1;
+        } else
+          self.data.staticHits[key] = true;
+        if (key === ctx.activeKey && count > ctx.hitLimit) {
+          const e = new Error("ERRSPEC_HIT_LIMIT");
+          e.name = "ErrspecHitLimitError";
+          throw e;
+        }
+        return key === ctx.activeKey;
+      };
+      if (ctx.weakMutation)
+        attachWeakBinary(record, (key) => {
+          if (self.active && !self.concurrent)
+            self.active.infected[key] = true;
+        }, ctx.activeKey);
+    }
+    async handleTestEvent(event, state) {
+      if (super.handleTestEvent)
+        await super.handleTestEvent(event, state);
+      const t = event.test;
+      if (event.name === "run_finish")
+        this.data.moduleErrors = state.unhandledErrors.map((e) => String(e?.[0]?.stack || e?.stack || e));
+      if (event.name === "run_start") {
+        if (this.state.context.complete) {
+          this.global[Symbol.for("RETRY_TIMES")] = 0;
+          state.describeRetryOptions?.clear();
+        }
+        const counts = new Map, selected = this.state.selected;
+        const file = relative(this.state.root, this.file).replaceAll("\\", "/");
+        const walk = (node) => {
+          for (const child of node.children || []) {
+            if (child.type === "test") {
+              const names = [];
+              for (let n = child;n && n.name !== "ROOT_DESCRIBE_BLOCK"; n = n.parent)
+                names.unshift(n.name);
+              const name = names.join(" "), occurrence = counts.get(name) || 0;
+              counts.set(name, occurrence + 1);
+              child.errspec = { id: JSON.stringify(["", file, name, occurrence]), order: counts.size };
+              if (selected.length && !selected.includes(child.errspec.id))
+                child.mode = "skip";
+              if (child.concurrent)
+                this.concurrent = true;
+            } else
+              walk(child);
+          }
+        };
+        walk(state.rootDescribeBlock);
+      }
+      if (event.name === "test_start") {
+        this.active = { test: t, hits: {}, infected: {} };
+        if (process.send)
+          process.send({ errspec: "testStart" });
+      }
+      if (["test_done", "test_skip", "test_todo"].includes(event.name)) {
+        const names = [];
+        for (let n = t;n && n.name !== "ROOT_DESCRIBE_BLOCK"; n = n.parent)
+          names.unshift(n.name);
+        const meta = this.active?.test === t ? this.active : { hits: {}, infected: {} };
+        this.data.tests.push({ id: t.errspec.id, order: t.errspec.order, name: names.join(" "), status: event.name === "test_skip" ? "skipped" : event.name === "test_todo" ? "pending" : t.errors.length ? "failed" : "passed", started: event.name === "test_done", duration: t.duration || 0, errors: t.errors.map((e) => String(e?.[0]?.stack || e?.stack || e)), hits: meta.hits, infected: Object.keys(meta.infected) });
+        this.active = undefined;
+      }
+    }
+    async teardown() {
+      try {
+        writeFileSync(join(this.state.output, Buffer.from(this.file).toString("hex") + ".json"), JSON.stringify(this.data));
+      } finally {
+        await super.teardown();
+      }
+    }
+  };
+}
+async function createJestAdapter(ctx) {
+  const { root, options, packageDir, remember, failure } = ctx;
+  const fromJest = createRequire4(join4(packageDir, "package.json"));
+  const configApi = createRequire4(fromJest.resolve("jest-cli/package.json"))("jest-config");
+  const { config: raw, configPath } = await configApi.readInitialOptions(options.runnerConfig || undefined, { packageRootOrConfig: options.runnerConfig || root });
+  if (raw.projects)
+    throw failure("EC_MUTATION_CONFIG", "Jest projects are not supported; select a native ESM project");
+  const { options: normalized } = await configApi.normalize(raw, {});
+  if (options.runnerProject)
+    throw failure("EC_MUTATION_CONFIG", "runnerProject is not supported by the Jest native ESM adapter");
+  const directory = join4(options.temp, "jest");
+  mkdirSync(directory, { recursive: true });
+  const transformFile = join4(directory, "transform.cjs"), environmentFile = join4(directory, "environment.cjs"), configFile = join4(directory, "config.json");
+  writeFileSync(transformFile, `module.exports=(${transformer.toString()})(require);`);
+  const weak = readFileSync4(join4(options.toolTemp, "weak-runtime.mjs"), "utf8").replace("export function attachWeakBinary", "function attachWeakBinary");
+  writeFileSync(environmentFile, `${weak}
+const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports=(${environment.toString()})(base.TestEnvironment||base.default||base,attachWeakBinary,require);`);
+  const config = {
+    ...raw,
+    rootDir: normalized.rootDir,
+    testEnvironment: environmentFile,
+    transform: { "\\.[cm]?[jt]sx?$": transformFile },
+    extensionsToTreatAsEsm: [...new Set([...normalized.extensionsToTreatAsEsm, ".ts", ".mts"])],
+    transformIgnorePatterns: [...normalized.transformIgnorePatterns, realpathSync4(options.temp).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/"],
+    cache: false,
+    watch: false,
+    watchman: false,
+    collectCoverage: false,
+    updateSnapshot: false,
+    reporters: [],
+    maxWorkers: 1
+  };
+  writeFileSync(configFile, JSON.stringify(config));
+  const configFiles = [configPath, ...normalized.setupFiles, ...normalized.setupFilesAfterEnv, normalized.globalSetup, normalized.globalTeardown, ...normalized.transform.map((t) => t[1])].filter(Boolean);
+  configFiles.forEach((file) => remember(file));
+  const cli = join4(packageDir, "bin/jest.js");
+  return { async execute(phase, request, inventory, baseline) {
+    configFiles.forEach((file) => remember(file));
+    writeFileSync(configFile, JSON.stringify({ ...config, ...request.complete ? { bail: 0 } : {} }));
+    const list = await runChild(["--experimental-vm-modules", cli, "--config", configFile, "--listTests", "--json"], { root, onProgress: () => {}, capture: true });
+    if (list.code !== 0)
+      throw failure("EC_MUTATION_CONFIG", "Jest test discovery failed");
+    let files;
+    try {
+      files = JSON.parse(list.stdout).sort();
+    } catch {
+      throw failure("EC_MUTATION_PROTOCOL", "Jest returned invalid test discovery JSON");
+    }
+    const specs = files.map((file) => ({ file, project: "" }));
+    if (phase === "inspect")
+      return { specs, excluded: [...configFiles, ...files] };
+    for (const file of inventory.keys())
+      if (normalized.transformIgnorePatterns.some((pattern) => new RegExp(pattern).test(file)))
+        throw failure("EC_MUTATION_CONFIG", `Mutation target is excluded from Jest transforms: ${file}; exclude the target or adjust transformIgnorePatterns`);
+    const output = join4(directory, `results-${request.requestId}`);
+    mkdirSync(output, { recursive: true });
+    const stateFile = join4(directory, "state.json"), reportFile = join4(directory, "report.json");
+    rmSync(reportFile, { force: true });
+    writeFileSync(stateFile, JSON.stringify({
+      root,
+      toolTemp: realpathSync4(options.toolTemp),
+      transforms: normalized.transform,
+      output,
+      selected: request.selected || [],
+      context: { runId: ctx.runId, requestId: request.requestId, activeKey: request.key || null, hitLimit: request.hitLimit || Number.MAX_SAFE_INTEGER, weakMutation: options.weakMutation, complete: !!request.complete },
+      inventory: Object.fromEntries([...inventory].map(([file, entry]) => [file, { source: entry.source, code: phase === "plain" ? entry.source : entry.emitted.code }]))
+    }));
+    const selectedFiles = request.selected?.length ? [...new Set(request.selected.map((id) => {
+      const test = baseline.tests.find((t) => t.id === id);
+      if (!test)
+        throw failure("EC_MUTATION_PROTOCOL", `Unknown test ID: ${id}`);
+      return resolve3(root, test.file);
+    }))] : files;
+    const outcome = await runChild(["--experimental-vm-modules", cli, "--config", configFile, "--ci", "--runInBand", "--json", "--outputFile", reportFile, "--testTimeout", String((normalized.testTimeout || 5000) * (request.multiplier || 1)), "--runTestsByPath", ...selectedFiles], { root, env: { ERRSPEC_JEST_STATE: stateFile }, onProgress: () => ctx.progress(request) });
+    if (!existsSync4(reportFile))
+      throw failure("EC_MUTATION_RUNNER", `Jest exited without results (${outcome.code ?? outcome.signal})`);
+    const report = JSON.parse(readFileSync4(reportFile, "utf8"));
+    const execution = { selected: request.selected || [], tests: [], failedModules: [], errors: [], hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
+    for (const fileResult of report.testResults) {
+      const file = fileResult.name, name = ctx.rel(file), metadata = join4(output, Buffer.from(file).toString("hex") + ".json");
+      let moduleErrors = [];
+      execution.moduleDurations[name] = (fileResult.endTime || 0) - (fileResult.startTime || 0);
+      if (existsSync4(metadata)) {
+        const data = JSON.parse(readFileSync4(metadata, "utf8"));
+        moduleErrors = data.moduleErrors || [];
+        for (const test of data.tests.sort((a, b) => a.order - b.order)) {
+          delete test.order;
+          execution.tests.push({ ...test, taskId: test.id, file: name });
+        }
+        for (const [key, count] of Object.entries(data.hits))
+          execution.hits[key] = (execution.hits[key] || 0) + count;
+        for (const key of Object.keys(data.staticHits))
+          (execution.staticHits[key] ||= []).push(name);
+      } else if (fileResult.assertionResults.length)
+        throw failure("EC_MUTATION_PROTOCOL", `Jest worker did not provide mutation metadata: ${name}`);
+      if (moduleErrors.length || fileResult.testExecError || fileResult.status === "failed" && !fileResult.assertionResults.some((test) => test.status === "failed")) {
+        execution.failedModules.push(name);
+        execution.errors.push(...moduleErrors.length ? moduleErrors : [`Jest native ESM module failed: ${fileResult.message || name}`]);
+      }
+    }
+    if (report.runExecError)
+      execution.errors.push(String(report.runExecError));
+    if ((report.success === false || outcome.code !== 0) && !execution.failedModules.length && !execution.errors.length && !execution.tests.some((test) => test.status === "failed"))
+      execution.errors.push(report.snapshot?.failure ? "Jest snapshot validation failed" : "Jest runner reported failure without a failed assertion");
+    if (![0, 1].includes(outcome.code))
+      execution.errors.push(`Jest process terminated: ${outcome.code ?? outcome.signal}`);
+    return { execution, specs, excluded: [...configFiles, ...files] };
+  } };
+}
+
+// playwright.mjs
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync2, existsSync as existsSync5, mkdirSync as mkdirSync2, realpathSync as realpathSync5, rmSync as rmSync2 } from "node:fs";
+import { join as join5, dirname as dirname4, resolve as resolve4 } from "node:path";
+import { pathToFileURL as pathToFileURL3 } from "node:url";
+function browserRuntime(context, weak) {
+  const counts = {}, pending = globalThis.__errspecMutationPending = [];
+  const notify = (key, infected = false) => {
+    const promise = globalThis.__errspecMutationHit({ runId: context.runId, requestId: context.requestId, key, infected });
+    pending.push(promise);
+    promise.catch(() => {});
+  };
+  const record = globalThis[Symbol.for(`errspec.mutation.${context.runId}`)] = (key) => {
+    notify(key);
+    const count = counts[key] = (counts[key] || 0) + 1;
+    if (key === context.activeKey && count > context.hitLimit) {
+      const error = new Error("ERRSPEC_HIT_LIMIT");
+      error.name = "ErrspecHitLimitError";
+      throw error;
+    }
+    return key === context.activeKey;
+  };
+  if (context.weakMutation)
+    weak(record, (key) => notify(key, true), context.activeKey);
+}
+function reporter(load) {
+  const { readFileSync, writeFileSync } = load("node:fs");
+  const { relative } = load("node:path");
+  return class {
+    onBegin(config, suite) {
+      this.state = JSON.parse(readFileSync(process.env.ERRSPEC_BROWSER_STATE, "utf8"));
+      const counts = new Map;
+      this.tests = new Map;
+      this.errors = [];
+      for (const test of suite.allTests()) {
+        const file = relative(this.state.root, test.location.file).replaceAll("\\", "/");
+        const project = test.parent.project()?.name || "";
+        const names = [test.title];
+        for (let p = test.parent;p?.type === "describe"; p = p.parent)
+          names.unshift(p.title);
+        const name = names.join(" "), group = JSON.stringify([project, file, name]), occurrence = counts.get(group) || 0;
+        counts.set(group, occurrence + 1);
+        this.tests.set(test.id, { id: JSON.stringify([project, file, name, occurrence]), taskId: test.id, file, name, status: "skipped", started: false, duration: 0, errors: [], hits: {}, infected: [] });
+      }
+    }
+    onTestBegin() {
+      if (process.send)
+        process.send({ errspec: "testStart" });
+    }
+    onTestEnd(test, result) {
+      const item = this.tests.get(test.id);
+      item.status = result.status === "skipped" ? "skipped" : result.status === test.expectedStatus ? "passed" : "failed";
+      item.started = result.status !== "skipped";
+      item.duration = result.duration;
+      item.errors = item.status === "passed" ? [] : result.errors.map((e) => e.stack || e.message || String(e));
+      if (item.status === "failed" && !item.errors.length)
+        item.errors.push(`Expected ${test.expectedStatus}; received ${result.status}`);
+      const attachment = result.attachments.find((a) => a.name === "errspec-mutation");
+      if (attachment) {
+        const data = JSON.parse(attachment.body?.toString() || readFileSync(attachment.path, "utf8"));
+        if (data.runId !== this.state.context.runId || data.requestId !== this.state.context.requestId)
+          throw new Error("Stale errspec Playwright observation");
+        item.hits = data.hits;
+        item.infected = Object.keys(data.infected);
+      } else if (item.started) {
+        item.started = false;
+        this.errors.push(`Missing errspec Playwright fixture metadata: ${item.file}: ${item.name}. Import test from @errspec/playwright or extend mutationFixtures.`);
+      }
+    }
+    onError(error) {
+      this.errors.push(error.stack || error.message || String(error));
+    }
+    onEnd() {
+      writeFileSync(this.state.report, JSON.stringify({ tests: [...this.tests.values()], errors: this.errors }));
+    }
+  };
+}
+async function createPlaywrightAdapter(ctx) {
+  const { root, options, packageDir, remember, failure } = ctx;
+  let inventory = ctx.inventory;
+  const viteDir = resolvePackage(root, "vite");
+  if (!viteDir)
+    throw failure("EC_MUTATION_CONFIG", "Playwright mutation requires a project Vite installation");
+  const configFile = options.runnerConfig || ["ts", "mts", "js", "mjs", "cts", "cjs"].map((ext) => join5(root, `playwright.config.${ext}`)).find(existsSync5);
+  if (!configFile)
+    throw failure("EC_MUTATION_CONFIG", "Cannot find playwright.config.*; use --runner-config");
+  remember(configFile);
+  remember(join5(viteDir, "package.json"));
+  const directory = join5(options.temp, "playwright");
+  mkdirSync2(directory, { recursive: true });
+  const wrapper = join5(directory, "config.mjs"), reporterFile = join5(directory, "reporter.cjs"), stateFile = join5(directory, "state.json"), reportFile = join5(directory, "report.json");
+  writeFileSync2(reporterFile, `module.exports=(${reporter.toString()})(require);`);
+  const configRoot = dirname4(configFile);
+  const weakRuntime = readFileSync5(join5(options.toolTemp, "weak-runtime.mjs"), "utf8").replace("export function attachWeakBinary", "function attachWeakBinary");
+  writeFileSync2(wrapper, `import original from ${JSON.stringify(pathToFileURL3(configFile).href)};
+import {resolve} from "node:path";
+const base=${JSON.stringify(configRoot)};
+const absolute=value=>value?resolve(base,value):undefined;
+const servers=[original.webServer||[]].flat();
+if(servers.some(server=>server.command&&!/^(?:vite|vp dev)(?:\\s|$)/.test(server.command)))throw new Error("errspec Playwright supports a Vite app; custom webServer commands are unsupported");
+const project=p=>({...p,timeout:(p.timeout??original.timeout??30000)*Number(process.env.ERRSPEC_TIMEOUT_MULTIPLIER||1),testDir:absolute(p.testDir||original.testDir||"."),snapshotDir:absolute(p.snapshotDir||original.snapshotDir),use:{...original.use,...p.use,baseURL:process.env.ERRSPEC_VITE_URL}});
+export default {...original,...project(original),globalSetup:[original.globalSetup||[]].flat().map(absolute),globalTeardown:[original.globalTeardown||[]].flat().map(absolute),webServer:undefined,workers:1,retries:0,repeatEach:1,fullyParallel:false,maxFailures:process.env.ERRSPEC_COMPLETE==="1"?0:original.maxFailures,updateSnapshots:"none",outputDir:${JSON.stringify(join5(directory, "test-results"))},reporter:[[${JSON.stringify(reporterFile)}]],projects:original.projects?.map(project)};`);
+  const vite = await import(pathToFileURL3(join5(viteDir, "dist/node/index.js")).href);
+  let phase = "plain";
+  const plugin = { name: "errspec-mutation", enforce: "pre", configResolved(config) {
+    if (config.configFile)
+      remember(config.configFile);
+    for (const file of config.configFileDependencies || [])
+      remember(file);
+  }, transform(code, id) {
+    let file = id.split("?")[0];
+    if (existsSync5(file))
+      file = realpathSync5(file);
+    const entry = inventory.get(file);
+    if (!entry || phase === "plain")
+      return;
+    if (code !== entry.source)
+      throw failure("EC_MUTATION_INSTRUMENTATION", `Source transformed before browser mutation instrumentation: ${ctx.rel(file)}`);
+    return entry.emitted;
+  } };
+  let server;
+  const cli = join5(packageDir, "cli.js");
+  return { async execute(nextPhase, request, entries, baseline) {
+    phase = nextPhase;
+    inventory = entries;
+    if (server) {
+      await server.close();
+      server = undefined;
+    }
+    let url = "http://127.0.0.1";
+    if (nextPhase !== "inspect") {
+      server = await vite.createServer({ root, plugins: [plugin], server: { host: "127.0.0.1", port: 0, strictPort: true, open: false } });
+      await server.listen();
+      url = `http://127.0.0.1:${server.httpServer.address().port}`;
+    }
+    const context = { runId: ctx.runId, requestId: request.requestId, activeKey: request.key || null, hitLimit: request.hitLimit || Number.MAX_SAFE_INTEGER, weakMutation: options.weakMutation };
+    const selectedTaskIds = (request.selected || []).map((id) => {
+      const test = baseline.tests.find((t) => t.id === id);
+      if (!test)
+        throw failure("EC_MUTATION_PROTOCOL", `Unknown test ID: ${id}`);
+      return test.taskId;
+    });
+    writeFileSync2(stateFile, JSON.stringify({
+      root,
+      report: reportFile,
+      context,
+      selectedTaskIds,
+      runtime: `(()=>{${weakRuntime}
+(${browserRuntime.toString()})(${JSON.stringify(context)},attachWeakBinary);})();`
+    }));
+    rmSync2(reportFile, { force: true });
+    const args = [cli, "test", "--config", wrapper, ...nextPhase === "inspect" ? ["--list"] : [], ...options.runnerProject ? ["--project", options.runnerProject] : []];
+    try {
+      const outcome = await runChild(args, { root, env: { ERRSPEC_BROWSER_STATE: stateFile, ERRSPEC_VITE_URL: url, ERRSPEC_TIMEOUT_MULTIPLIER: String(request.multiplier || 1), ERRSPEC_COMPLETE: request.complete ? "1" : "0" }, onProgress: () => ctx.progress(request) });
+      if (!existsSync5(reportFile))
+        throw failure("EC_MUTATION_CONFIG", `Playwright failed before providing test results (${outcome.code ?? outcome.signal}); inspect stderr`);
+      const report = JSON.parse(readFileSync5(reportFile, "utf8"));
+      const files = [...new Set(report.tests.map((t) => resolve4(root, t.file)))];
+      files.forEach((file) => remember(file));
+      const specs = report.tests.map((t) => ({ file: t.file, project: JSON.parse(t.id)[0], id: t.id }));
+      if (nextPhase === "inspect") {
+        if (outcome.code !== 0 || report.errors.length)
+          throw failure("EC_MUTATION_CONFIG", report.errors.join(`
+`) || "Playwright test discovery failed");
+        return { specs, excluded: [configFile, ...files] };
+      }
+      const execution = { selected: request.selected || [], tests: report.tests, failedModules: [], errors: report.errors, hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
+      for (const test of report.tests) {
+        for (const [key, count] of Object.entries(test.hits))
+          execution.hits[key] = (execution.hits[key] || 0) + count;
+        execution.moduleDurations[test.file] = (execution.moduleDurations[test.file] || 0) + test.duration;
+      }
+      if (![0, 1].includes(outcome.code))
+        execution.errors.push(`Playwright process terminated: ${outcome.code ?? outcome.signal}`);
+      for (const environment of Object.values(server.environments))
+        for (const module of environment.moduleGraph?.idToModuleMap?.values() || []) {
+          if (module.file && !module.file.includes("/node_modules/") && existsSync5(module.file))
+            remember(module.file);
+        }
+      return { execution, specs, excluded: [configFile, ...files] };
+    } finally {
+      if (server) {
+        await server.close();
+        server = undefined;
+      }
+    }
+  } };
+}
+
 // driver.mjs
 var protocolWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = (chunk, encoding, cb) => process.stderr.write(chunk, encoding, cb);
@@ -2251,6 +2743,8 @@ var testSpecs;
 var projectName;
 var configFiles = new Set;
 var current;
+var adapter;
+var runner;
 var infrastructureFailure;
 var warmContext;
 var reuseMode = "fresh_lifecycle_unknown";
@@ -2272,10 +2766,10 @@ function failure(code, message) {
   return e;
 }
 function remember(file, content) {
-  if (!existsSync3(file) || !statSync(file).isFile())
+  if (!existsSync6(file) || !statSync(file).isFile())
     return;
-  file = realpathSync3(file);
-  const next = hash(readFileSync3(file));
+  file = realpathSync6(file);
+  const next = hash(readFileSync6(file));
   if (content !== undefined && hash(content) !== next)
     throw failure("EC_MUTATION_INPUT", `Input changed while being acquired: ${file}`);
   if (fingerprints.has(file) && fingerprints.get(file) !== next)
@@ -2284,7 +2778,7 @@ function remember(file, content) {
 }
 function verifyInputs() {
   for (const [file, digest] of fingerprints) {
-    if (!existsSync3(file) || hash(readFileSync3(file)) !== digest)
+    if (!existsSync6(file) || hash(readFileSync6(file)) !== digest)
       throw failure("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
   }
 }
@@ -2310,27 +2804,12 @@ async function generateSource(source, file, base) {
   const edits = await mutationPlugins.edits(source, file, acquired.metadata);
   return native(source, file, false, edits);
 }
-function packagePath(explicit) {
-  if (explicit) {
-    if (!existsSync3(join3(explicit, "package.json")))
-      throw failure("EC_MUTATION_CONFIG", `Vitest package not found: ${explicit}`);
-    return realpathSync3(explicit);
-  }
-  for (let dir = root;; dir = dirname3(dir)) {
-    const candidate = join3(dir, "node_modules/vitest");
-    if (existsSync3(join3(candidate, "package.json")))
-      return realpathSync3(candidate);
-    if (dirname3(dir) === dir)
-      break;
-  }
-  throw failure("EC_MUTATION_CONFIG", "Cannot find Vitest; use --vitest-package");
-}
 function candidateFiles(excluded) {
   const patterns = options.include.length ? options.include : ["src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"];
   const files = new Set;
   for (const pattern of patterns)
     for (const entry of globSync(pattern, { cwd: root, exclude: ["**/node_modules/**", ...options.exclude] })) {
-      const absolute = realpathSync3(resolve3(root, entry));
+      const absolute = realpathSync6(resolve5(root, entry));
       const name = rel(absolute);
       if (absolute === toolTemp || absolute.startsWith(toolTemp + "/") || name.startsWith("../") || isAbsolute2(name) || name.split("/").includes("node_modules") || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(name) || /\.d\.(?:[cm]?ts)$/.test(name) || excluded.has(absolute) || !statSync(absolute).isFile())
         continue;
@@ -2344,13 +2823,13 @@ function specIdentities(specs) {
 function plugin(phase) {
   return { name: "errspec-mutation", enforce: "pre", configResolved(config) {
     if (config.configFile)
-      configFiles.add(realpathSync3(config.configFile));
+      configFiles.add(realpathSync6(config.configFile));
     for (const file of config.configFileDependencies || [])
-      configFiles.add(realpathSync3(file));
+      configFiles.add(realpathSync6(file));
   }, transform(code, id) {
     let file = id.split("?")[0];
-    if (existsSync3(file))
-      file = realpathSync3(file);
+    if (existsSync6(file))
+      file = realpathSync6(file);
     const entry = inventory.get(file);
     if (!entry || phase === "plain")
       return;
@@ -2363,7 +2842,7 @@ function plugin(phase) {
 }
 var childDependencies = new Map;
 function childProcessClosure(entries) {
-  const pending = entries.map((file) => resolve3(root, file)), seen = new Set;
+  const pending = entries.map((file) => resolve5(root, file)), seen = new Set;
   while (pending.length) {
     const file = pending.pop();
     if (seen.has(file))
@@ -2373,13 +2852,13 @@ function childProcessClosure(entries) {
     let dependencies = childDependencies.get(file);
     if (!dependencies) {
       dependencies = [];
-      const source = inventory.get(file)?.source ?? readFileSync3(file, "utf8");
+      const source = inventory.get(file)?.source ?? readFileSync6(file, "utf8");
       for (const specifier of native(source, rel(file), true, {}, true).metadata?.dependencies || []) {
         if (!specifier.startsWith("."))
           continue;
-        const target = resolve3(dirname3(file), specifier);
-        const candidates = [target, ...[".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].map((ext) => target + ext), ...["index.ts", "index.js", "index.mjs", "index.cjs"].map((name) => join3(target, name))];
-        const found = candidates.find((path) => existsSync3(path) && statSync(path).isFile());
+        const target = resolve5(dirname5(file), specifier);
+        const candidates = [target, ...[".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].map((ext) => target + ext), ...["index.ts", "index.js", "index.mjs", "index.cjs"].map((name) => join6(target, name))];
+        const found = candidates.find((path) => existsSync6(path) && statSync(path).isFile());
         if (found && /[.][cm]?[jt]sx?$/.test(found) && !rel(found).startsWith("../") && !rel(found).split("/").includes("node_modules"))
           dependencies.push(found);
       }
@@ -2395,8 +2874,8 @@ function childProcessEntries(fact) {
   for (const arg of tokens) {
     if (!arg || arg.startsWith("-") || !/[.][cm]?[jt]sx?$/.test(arg))
       continue;
-    const path = resolve3(fact.cwd, arg), relative = rel(path);
-    if (relative.startsWith("../") || relative.split("/").includes("node_modules") || !existsSync3(path))
+    const path = resolve5(fact.cwd, arg), relative = rel(path);
+    if (relative.startsWith("../") || relative.split("/").includes("node_modules") || !existsSync6(path))
       continue;
     if (!statSync(path).isFile())
       continue;
@@ -2469,7 +2948,51 @@ async function closeContext(ctx) {
   if (failed)
     throw failure("EC_MUTATION_RUNNER", "Vitest cleanup reported a failure; see stderr");
 }
+async function executeAdapter(phase, request) {
+  verifyInputs();
+  const inspected = await adapter.execute("inspect", request, inventory, baseline);
+  const specs = inspected.specs;
+  const excluded = new Set([...inspected.excluded, ...mutationPlugins.files, ...configFiles].filter((f) => existsSync6(f)).map((f) => realpathSync6(f)));
+  for (const file of excluded)
+    remember(file);
+  const files = candidateFiles(excluded);
+  if (phase === "plain") {
+    for (const file of files) {
+      inventory.set(file, { source: readFileSync6(file, "utf8"), candidates: [] });
+      remember(file);
+    }
+    testSpecs = specs;
+    if (options.plugins?.length)
+      for (const [file, entry] of inventory)
+        entry.generated = await generateSource(entry.source, rel(file));
+    for (const file of mutationPlugins.files)
+      inventory.delete(file);
+    for (const file of globSync("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,json,snap,html,css,scss,sass,less,svg,png,jpg,jpeg,webp,avif,gif,wasm,txt,md}", { cwd: root, exclude: ["**/node_modules/**", "**/.git/**"] })) {
+      const absolute = resolve5(root, file);
+      if (!absolute.startsWith(toolTemp + "/") && !absolute.includes("/.errspec/"))
+        remember(absolute);
+    }
+    for (const file of globSync("**/.env*", { cwd: root, exclude: ["**/node_modules/**", "**/.git/**"] }))
+      remember(resolve5(root, file));
+    for (let dir = root;; dir = dirname5(dir)) {
+      for (const name of ["package.json", "package-lock.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json"])
+        remember(join6(dir, name));
+      if (dirname5(dir) === dir)
+        break;
+    }
+  } else if (JSON.stringify(specs) !== JSON.stringify(testSpecs) || JSON.stringify(files) !== JSON.stringify([...inventory.keys()]))
+    throw failure("EC_MUTATION_INPUT", "Source or test file inventory changed during the run");
+  if (phase === "inspect") {
+    verifyInputs();
+    return;
+  }
+  const result = await adapter.execute(phase, request, inventory, baseline);
+  verifyInputs();
+  return result.execution;
+}
 async function execute(phase, request) {
+  if (adapter)
+    return executeAdapter(phase, request);
   verifyInputs();
   if (phase === "plain" && warmContext) {
     const saved = warmContext;
@@ -2554,7 +3077,7 @@ async function execute(phase, request) {
       reuseMode = globalSetup ? "fresh_global_setup" : rootProject && typeof ctx.clearSpecificationsCache === "function" ? "available" : "fresh_lifecycle_unknown";
       reusable = reuseMode === "available";
     }
-    timeouts ??= { test: config.testTimeout, hook: config.hookTimeout };
+    timeouts ??= { test: config.testTimeout, hook: config.hookTimeout, retry: config.retry, bail: config.bail };
     if (options.cache) {
       try {
         if ([...ctx.projects, ...rootProject ? [rootProject] : []].some((p) => p.config.globalSetup?.length))
@@ -2617,6 +3140,8 @@ async function execute(phase, request) {
       weakMutation: options.weakMutation
     } };
     project.provide("__errspecMutation", config.provide.__errspecMutation);
+    config.retry = request.complete ? 0 : timeouts.retry;
+    config.bail = request.complete ? 0 : timeouts.bail;
     config.testTimeout = timeouts.test * (request.multiplier || 1);
     config.hookTimeout = timeouts.hook * (request.multiplier || 1);
     if (!previous)
@@ -2624,27 +3149,27 @@ async function execute(phase, request) {
     if (typeof ctx.clearSpecificationsCache === "function")
       ctx.clearSpecificationsCache();
     const specs = await ctx.globTestSpecifications();
-    const excluded = new Set([...mutationPlugins.files, ...configFiles, ...config.setupFiles, ...config.globalSetup || [], ...specs.map((s) => s.moduleId)].filter((f) => existsSync3(f)).map((f) => realpathSync3(f)));
+    const excluded = new Set([...mutationPlugins.files, ...configFiles, ...config.setupFiles, ...config.globalSetup || [], ...specs.map((s) => s.moduleId)].filter((f) => existsSync6(f)).map((f) => realpathSync6(f)));
     for (const file of globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", { cwd: root, exclude: ["**/node_modules/**"] }))
-      excluded.add(realpathSync3(resolve3(root, file)));
+      excluded.add(realpathSync6(resolve5(root, file)));
     for (const file of excluded)
       remember(file);
     if (phase === "plain") {
       const files = candidateFiles(excluded);
       for (const file of files) {
-        const source = readFileSync3(file, "utf8");
+        const source = readFileSync6(file, "utf8");
         inventory.set(file, { source, candidates: [] });
         remember(file);
       }
       testSpecs = specIdentities(specs);
       for (const file of [...globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", { cwd: root, exclude: ["**/node_modules/**"] })])
-        remember(resolve3(root, file));
+        remember(resolve5(root, file));
       for (const file of globSync("**/*.snap", { cwd: root, exclude: ["**/node_modules/**"] }))
-        remember(resolve3(root, file));
-      for (let dir = root;; dir = dirname3(dir)) {
+        remember(resolve5(root, file));
+      for (let dir = root;; dir = dirname5(dir)) {
         for (const name of ["package.json", "package-lock.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json"])
-          remember(join3(dir, name));
-        if (dirname3(dir) === dir)
+          remember(join6(dir, name));
+        if (dirname5(dir) === dir)
           break;
       }
       if (options.plugins?.length)
@@ -2664,7 +3189,7 @@ async function execute(phase, request) {
         const base = baseline.tests.find((t) => t.id === id);
         if (!base)
           throw failure("EC_MUTATION_PROTOCOL", `Unknown test ID: ${id}`);
-        const file = resolve3(root, base.file);
+        const file = resolve5(root, base.file);
         (grouped.get(file) || grouped.set(file, []).get(file)).push(base.taskId);
       }
       planned = specs.filter((s) => grouped.has(s.moduleId));
@@ -2683,7 +3208,7 @@ async function execute(phase, request) {
       for (const environment of Object.values(project.vite.environments))
         for (const module of environment.moduleGraph?.idToModuleMap?.values() || []) {
           const file = module.file;
-          if (file && !file.includes("/node_modules/") && !file.startsWith(options.temp) && existsSync3(file))
+          if (file && !file.includes("/node_modules/") && !file.startsWith(options.temp) && existsSync6(file))
             remember(file);
         }
     verifyInputs();
@@ -2723,9 +3248,9 @@ async function acquireStaticImports(project) {
         let target = resolved?.id?.split("?")[0];
         if (target?.startsWith("/@fs/"))
           target = target.slice(4);
-        if (!target || !isAbsolute2(target) || !existsSync3(target))
+        if (!target || !isAbsolute2(target) || !existsSync6(target))
           continue;
-        target = normalize(realpathSync3(target));
+        target = normalize(realpathSync6(target));
         remember(target);
         if (inventory.has(target))
           binding.resolved = rel(target);
@@ -2744,20 +3269,54 @@ async function handle(request) {
     pendingGenerated.clear();
     if (Number(process.versions.node.split(".")[0]) < 24)
       throw failure("EC_MUTATION_CONFIG", "mutate requires Node 24 or newer");
-    root = realpathSync3(options.root);
-    toolTemp = realpathSync3(options.toolTemp || options.temp);
-    packageDir = packagePath(options.vitestPackage);
+    root = realpathSync6(options.root);
+    toolTemp = realpathSync6(options.toolTemp || options.temp);
     mutationPlugins = await loadPlugins(options.plugins, root, remember, options.excludeMutator);
-    const pkg = JSON.parse(readFileSync3(join3(packageDir, "package.json"), "utf8"));
-    remember(join3(packageDir, "package.json"));
-    if (!/^5\./.test(pkg.version))
-      throw failure("EC_MUTATION_CONFIG", `mutate requires Vitest 5.x; found ${pkg.version}`);
-    api = await import(pathToFileURL3(join3(packageDir, "dist/node.js")).href);
-    const setup = readFileSync3(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join3(packageDir, "dist/index.js"))));
-    if (setup !== readFileSync3(options.setup, "utf8"))
-      writeFileSync(options.setup, setup);
+    try {
+      runner = detectRunner(root, options);
+    } catch (error) {
+      throw failure("EC_MUTATION_CONFIG", error.message);
+    }
+    if (!["vitest", "vite-plus"].includes(runner) && (options.vitestConfig || options.vitestPackage || options.vitestProject))
+      throw failure("EC_MUTATION_CONFIG", "Vitest options do not match the selected runner");
+    options.vitestConfig ??= options.runnerConfig;
+    options.vitestProject ??= options.runnerProject;
+    const packageName = { vitest: "vitest", "vite-plus": "vite-plus", jest: "jest", playwright: "@playwright/test" }[runner];
+    try {
+      packageDir = resolvePackage(root, packageName, options.runnerPackage || options.vitestPackage);
+    } catch (error) {
+      throw failure("EC_MUTATION_CONFIG", error.message);
+    }
+    if (!packageDir)
+      throw failure("EC_MUTATION_CONFIG", `Cannot find ${packageName}; use --runner-package`);
+    const runnerVersion = JSON.parse(readFileSync6(join6(packageDir, "package.json"), "utf8")).version;
+    if (runner === "vite-plus") {
+      remember(join6(packageDir, "package.json"));
+      const vitest = resolvePackage(packageDir, "vitest");
+      if (!vitest)
+        throw failure("EC_MUTATION_CONFIG", "Vite+ must expose a compatible Vitest 5 installation");
+      packageDir = vitest;
+    }
+    const pkg = JSON.parse(readFileSync6(join6(packageDir, "package.json"), "utf8"));
+    remember(join6(packageDir, "package.json"));
+    if (["vitest", "vite-plus"].includes(runner)) {
+      if (!/^5\./.test(pkg.version))
+        throw failure("EC_MUTATION_CONFIG", `mutate requires Vitest 5.x; found ${pkg.version}`);
+      api = await import(pathToFileURL4(join6(packageDir, "dist/node.js")).href);
+      const setup = readFileSync6(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join6(packageDir, "dist/index.js"))));
+      if (setup !== readFileSync6(options.setup, "utf8"))
+        writeFileSync3(options.setup, setup);
+    } else if (runner === "jest") {
+      if (!/^30\./.test(pkg.version))
+        throw failure("EC_MUTATION_CONFIG", `mutate requires Jest 30.x native ESM; found ${pkg.version}`);
+      adapter = await createJestAdapter({ root, options, packageDir, remember, failure, rel, runId, progress: (request) => send(request, "progress", { event: "testStart" }) });
+    } else {
+      if (!/^1\./.test(pkg.version))
+        throw failure("EC_MUTATION_CONFIG", `mutate requires Playwright Test 1.x; found ${pkg.version}`);
+      adapter = await createPlaywrightAdapter({ root, options, packageDir, remember, failure, rel, runId, inventory, progress: (request) => send(request, "progress", { event: "testStart" }) });
+    }
     if (request.restore) {
-      const saved = JSON.parse(readFileSync3(options.state, "utf8"));
+      const saved = JSON.parse(readFileSync6(options.state, "utf8"));
       baseline = saved.baseline;
       plain = saved.plain;
       testSpecs = saved.testSpecs;
@@ -2772,7 +3331,7 @@ async function handle(request) {
       for (const [file, entry] of inventory)
         entry.emitted = instrument(entry.source, entry.candidates, file, runId);
     }
-    send(request, "done", { node: process.versions.node, vitest: pkg.version, mutators: mutationPlugins.names, count: 0 });
+    send(request, "done", { mutators: mutationPlugins.names, capabilities: { complete: true }, node: process.versions.node, ...["vitest", "vite-plus"].includes(runner) ? { vitest: pkg.version } : {}, ...runner !== "vitest" ? { runner, runnerVersion } : {}, count: 0 });
     return;
   }
   if (!options)
@@ -2902,7 +3461,7 @@ async function prepareProbe(request, count) {
   const identity = (e) => e.tests.map((t) => [t.id, t.status, t.started]);
   if (JSON.stringify(identity(plain)) !== JSON.stringify(identity(baseline)) || baseline.errors.length || baseline.failedModules.length)
     throw failure("EC_MUTATION_INSTRUMENTATION", "Probe baseline changed test registration or results");
-  writeFileSync(options.state, JSON.stringify({ baseline, plain, testSpecs, projectName, inventory: [...inventory], fingerprints: [...fingerprints] }));
+  writeFileSync3(options.state, JSON.stringify({ baseline, plain, testSpecs, projectName, inventory: [...inventory], fingerprints: [...fingerprints] }));
   send(request, "prepared", { execution: baseline, ...options.reuseSession ? { sessionReuse: reuseMode } : {}, ...options.cache ? { cacheFacts: cacheFacts() } : {} });
   send(request, "done", { count });
   return;

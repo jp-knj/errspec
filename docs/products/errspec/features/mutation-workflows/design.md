@@ -82,7 +82,13 @@ moduleのimport／requireとpackage manifestはNodeのmodule hookで取得し、
 
 `--shard INDEX/TOTAL`はGit・onlyの後の候補を、keyの先頭64-bit値modulo totalで分けます。設定・APIは`shard: {index,total}`とし、1始まりの範囲を検証します。選択と省略の件数・方式をreport.shardに示し、scoreとgateをその要求範囲に限定します。baseline／probeはproject全体、型検査とtrialはshard内です。共通cacheの指紋からshard指定を外し、全候補keyの記録を保持して逐次実行の結果を集めます。並行保存のatomicityは保ち、lost updateは再検査へ戻します。標本と予算は各shard呼出し内で適用します。
 
-Vitest、Jest、Playwrightは共通の実行要求と結果へ変換します。Jestはnative ESM、PlaywrightはViteとfixtureを使う方式に限定します。各実行器は独立した状態を持ち、並列枠数、分割、標本、時間予算を実行計画へ反映します。予算で開始しなかった候補はPendingとし、標本と予算の理由を区別します。Pendingが残る場合は全体スコアをnullにし、break閾値とfail-on-undetectedを合格にしません。実行済みの一部だけで100%の全体判定を作りません。
+ランナー選択は`runner`（auto / vitest / vite-plus / jest / playwright）、`runnerConfig`、`runnerProject`、`runnerPackage`で受け取ります。既存のVitest指定も維持します。自動選択はrootのVitest/Vite設定、Jest設定またはpackage.jsonのjest、Playwright設定、導入済みpackageの順に確認します。ViteとPlaywright設定が共存する場合はPlaywrightを明示します。
+
+Vitest、Jest、Playwrightは共通の実行要求と結果へ変換します。Jestはnative ESM、PlaywrightはViteとfixtureを使う方式に限定します。Jestは利用先のESM変換をwrapし、元ソースに共通emitterのswitchを適用してから変換します。変換未設定のTypeScriptはNodeの型除去を使います。共通generator、probe、Rustの試行と判定を共用し、ランナーごとの判定loopは作りません。Vite+は導入先が同梱するVitest 5の公開APIへ接続します。
+
+Playwrightでは全projectを列挙し、projectを含むテストidentityを持ちます。各owned workerのVite serverを異なる一時portで起動し、利用先のfixtureを拡張できる自動fixtureでpage/frameの到達とinfectionを取得します。browser bindingでdocumentの破棄前に観測をNode側へ渡し、遷移後も保持します。fixtureを取得できなかった実行を検出にしません。追加adapterでは完全な外部入力を取得できるまでconfigurationHashをnullとし、結果と到達記録のキャッシュを再検証します。
+
+各実行器は独立した状態を持ち、並列枠数、分割、標本、時間予算を実行計画へ反映します。予算で開始しなかった候補はPendingとし、標本と予算の理由を区別します。Pendingが残る場合は全体スコアをnullにし、break閾値とfail-on-undetectedを合格にしません。実行済みの一部だけで100%の全体判定を作りません。
 
 Vitest sessionの再利用は`--reuse-session`／`reuseSession`で有効にし、既定はfreshとします。plain baselineは独立させ、probe以降のcontextだけを保持します。試行ごとにrequest・結果の格納先・provided context・test IDsを更新し、公開APIでテストファイルの収集cacheを消して再列挙します。workerはforks・isolateを維持し、timeoutは保存した初期値から毎回設定します。確認用の試行だけ3倍にし、次の候補へ持ち越しません。
 

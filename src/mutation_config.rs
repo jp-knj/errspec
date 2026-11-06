@@ -109,6 +109,8 @@ fn resolve(request: MutationRequest) -> Result<Options, ConfigFailure> {
     config["root"] = serde_json::json!(effective_root);
     for name in [
         "reportDir",
+        "runnerConfig",
+        "runnerPackage",
         "vitestConfig",
         "vitestPackage",
         "typecheckProject",
@@ -164,6 +166,10 @@ pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) 
         ("exclude", "exclude"),
         ("exclude_mutator", "excludeMutator"),
         ("plugins", "plugins"),
+        ("runner", "runner"),
+        ("runner_config", "runnerConfig"),
+        ("runner_project", "runnerProject"),
+        ("runner_package", "runnerPackage"),
         ("vitest_config", "vitestConfig"),
         ("vitest_project", "vitestProject"),
         ("vitest_package", "vitestPackage"),

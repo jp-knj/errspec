@@ -24,6 +24,10 @@ export interface MutationOptions {
   include?: string[];
   exclude?: string[];
   excludeMutator?: string[];
+  runner?: "auto" | "vitest" | "vite-plus" | "jest" | "playwright";
+  runnerConfig?: string | null;
+  runnerProject?: string | null;
+  runnerPackage?: string | null;
   vitestConfig?: string | null;
   vitestProject?: string | null;
   vitestPackage?: string | null;
@@ -131,6 +135,7 @@ export interface MutationReport {
   engine: {
     tsrsRevision: string; rulesVersion: string;
     node: string | null; vitest: string | null;
+    runner?: "vite-plus" | "jest" | "playwright"; runnerVersion?: string;
     typecheck: string; coverageScope: string;
     sessionReuse?: "available" | "fresh_global_setup" | "fresh_lifecycle_unknown";
     parallel?: { requested: number; workers: number };

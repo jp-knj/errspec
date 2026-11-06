@@ -449,6 +449,8 @@ pub(crate) fn acquire_scoped(
         for field in [
             "root",
             "node",
+            "runnerConfig",
+            "runnerPackage",
             "vitestConfig",
             "vitestPackage",
             "typecheckProject",
