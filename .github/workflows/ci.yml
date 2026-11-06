@@ -49,6 +49,7 @@ jobs:
       - run: node --test tests/mutation-emitter.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-plugins.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-matrix-selection.test.mjs
+      - run: node --test tests/practical-mutation.test.mjs
       - run: node --test tests/mutation-process.test.mjs
       - run: node --test tests/mutation-ownership.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-parallel.test.mjs
@@ -73,6 +74,7 @@ jobs:
       - run: node scripts/demo-scenarios.mjs
       - run: node scripts/demo-init.mjs
       - run: node scripts/demo-module-mock.mjs
+      - run: node scripts/demo-failure-boundaries.mjs
       - run: node scripts/demo-failure-paths.mjs
       - run: node scripts/demo-coverage.mjs
       - uses: actions/checkout@v4
