@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import { format } from "node:util";
 import { serialize } from "node:v8";
 
-// node_modules/@jridgewell/sourcemap-codec/dist/sourcemap-codec.mjs
+// ../../../errspec-merge-20261106/packages/mutation-driver/node_modules/@jridgewell/sourcemap-codec/dist/sourcemap-codec.mjs
 var comma = 44;
 var semicolon = 59;
 var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -118,7 +118,7 @@ function encode(decoded) {
   return writer.flush();
 }
 
-// node_modules/magic-string/dist/index.mjs
+// ../../../errspec-merge-20261106/packages/mutation-driver/node_modules/magic-string/dist/index.mjs
 var BitSet = class BitSet {
   constructor(arg) {
     this.bits = arg instanceof BitSet ? arg.bits.slice() : [];
@@ -2373,6 +2373,8 @@ function environment(Base, attachWeakBinary, load) {
       if (super.handleTestEvent)
         await super.handleTestEvent(event, state);
       const t = event.test;
+      if (event.name === "run_finish")
+        this.data.moduleErrors = state.unhandledErrors.map((e) => String(e?.[0]?.stack || e?.stack || e));
       if (event.name === "run_start") {
         if (this.state.context.complete) {
           this.global[Symbol.for("RETRY_TIMES")] = 0;
@@ -2502,9 +2504,11 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
     const execution = { selected: request.selected || [], tests: [], failedModules: [], errors: [], hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
     for (const fileResult of report.testResults) {
       const file = fileResult.name, name = ctx.rel(file), metadata = join4(output, Buffer.from(file).toString("hex") + ".json");
+      let moduleErrors = [];
       execution.moduleDurations[name] = (fileResult.endTime || 0) - (fileResult.startTime || 0);
       if (existsSync4(metadata)) {
         const data = JSON.parse(readFileSync4(metadata, "utf8"));
+        moduleErrors = data.moduleErrors || [];
         for (const test of data.tests.sort((a, b) => a.order - b.order)) {
           delete test.order;
           execution.tests.push({ ...test, taskId: test.id, file: name });
@@ -2515,13 +2519,15 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
           (execution.staticHits[key] ||= []).push(name);
       } else if (fileResult.assertionResults.length)
         throw failure("EC_MUTATION_PROTOCOL", `Jest worker did not provide mutation metadata: ${name}`);
-      if (fileResult.testExecError || fileResult.status === "failed" && !fileResult.assertionResults.length) {
+      if (moduleErrors.length || fileResult.testExecError || fileResult.status === "failed" && !fileResult.assertionResults.some((test) => test.status === "failed")) {
         execution.failedModules.push(name);
-        execution.errors.push(`Jest native ESM module failed: ${fileResult.message || name}`);
+        execution.errors.push(...moduleErrors.length ? moduleErrors : [`Jest native ESM module failed: ${fileResult.message || name}`]);
       }
     }
     if (report.runExecError)
       execution.errors.push(String(report.runExecError));
+    if ((report.success === false || outcome.code !== 0) && !execution.failedModules.length && !execution.errors.length && !execution.tests.some((test) => test.status === "failed"))
+      execution.errors.push(report.snapshot?.failure ? "Jest snapshot validation failed" : "Jest runner reported failure without a failed assertion");
     if (![0, 1].includes(outcome.code))
       execution.errors.push(`Jest process terminated: ${outcome.code ?? outcome.signal}`);
     return { execution, specs, excluded: [...configFiles, ...files] };
