@@ -52,6 +52,43 @@ test("Jest baseline and unsupported CommonJS inputs fail with actionable diagnos
   writeFileSync(join(root,"value.test.js"),'const {test}=require("@jest/globals");test("commonjs",()=>{});');
   const unsupported=run(root,[],2);assert.equal(unsupported.diagnostics[0].code,"EC_MUTATION_BASELINE");assert.match(unsupported.diagnostics[0].message,/native ESM/);
 });
+test("Jest suite cleanup errors never become a passing baseline or assertion detection",t=>{
+  const root=project(t);
+  writeFileSync(join(root,"src/value.ts"),'export const checked=()=>true;');
+  const source='import {test,expect,afterAll} from "@jest/globals";import {checked} from "./src/value.ts";test("checked",()=>{checked();expect(true).toBe(true)});';
+  writeFileSync(join(root,"value.test.ts"),source+'afterAll(()=>{throw Error("suite cleanup failed")});');
+  const baseline=run(root,["--runner","jest"],2);
+  assert.equal(baseline.diagnostics[0].code,"EC_MUTATION_BASELINE");
+  assert.match(baseline.diagnostics[0].message,/suite cleanup failed/);
+  assert.equal(baseline.summary.killed,0);
+  writeFileSync(join(root,"value.test.ts"),source+'afterAll(()=>{if(checked()!==true)throw Error("mutant cleanup failed")});');
+  const mutation=run(root,["--runner","jest"]);
+  assert.equal(mutation.runComplete,true,JSON.stringify(mutation.diagnostics));
+  assert.ok(mutation.summary.runtimeError>0,JSON.stringify(mutation.summary));
+  assert.equal(mutation.summary.killed,0);
+  assert.ok(mutation.mutants.filter(m=>m.status==="RuntimeError").every(m=>m.failedModules.includes("value.test.ts")&&m.killedBy.length===0&&m.attempts.length>1));
+});
+test("Jest rejects unsuccessful snapshot validation even when assertions passed",t=>{
+  const root=project(t),snapshots=join(root,"__snapshots__");mkdirSync(snapshots);
+  const snapshot=join(snapshots,"value.test.ts.snap"),source='// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing\n\nexports[`removed test 1`] = `"stale"`;\n';
+  writeFileSync(snapshot,source);
+  const report=run(root,["--runner","jest"],2);
+  assert.equal(report.diagnostics[0].code,"EC_MUTATION_BASELINE");
+  assert.match(report.diagnostics[0].message,/snapshot/i);
+  assert.ok(report.baseline.some(test=>test.started&&test.status==="passed"));
+  assert.equal(report.summary.killed,0);
+  assert.equal(readFileSync(snapshot,"utf8"),source);
+});
+for(const lifecycle of ["teardown","run_finish"])test(`Jest retains custom environment ${lifecycle} failures after passed assertions`,t=>{
+  const root=project(t);
+  const callback=lifecycle==="teardown"?'async teardown(){await super.teardown();throw Error("custom environment cleanup failed")}':'async handleTestEvent(event){if(event.name==="run_finish")throw Error("custom environment cleanup failed")}';
+  writeFileSync(join(root,"environment.cjs"),'const {TestEnvironment}=require("jest-environment-node");module.exports=class extends TestEnvironment{'+callback+'};');
+  writeFileSync(join(root,"jest.config.mjs"),'export default {testEnvironment:"<rootDir>/environment.cjs",transform:{},testMatch:["**/*.test.ts"],transformIgnorePatterns:["/node_modules/","/environment.cjs$"]};');
+  const report=run(root,["--runner","jest"],2);
+  assert.equal(report.diagnostics[0].code,"EC_MUTATION_BASELINE");
+  assert.match(report.diagnostics[0].message,/custom environment cleanup failed/);
+  assert.equal(report.summary.killed,0);
+});
 test("Jest preserves the project's asynchronous native ESM transform and its options",t=>{
   const root=project(t);
   writeFileSync(join(root,"src/value.ts"),'export const checked=(value:number)=>value+OFFSET;');

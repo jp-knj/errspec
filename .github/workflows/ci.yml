@@ -44,10 +44,12 @@ jobs:
       - run: node --test tests/package.test.mjs
       - run: node --test tests/vitest-recorder.test.mjs
       - run: node --test tests/analysis-driver.test.mjs
+      - run: node --test tests/mutator-comparison.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-reports.test.mjs tests/mutation-child-process.test.mjs tests/action.test.mjs tests/skills.test.mjs
       - run: node --test tests/mutation-emitter.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-plugins.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-matrix-selection.test.mjs
+      - run: node --test tests/practical-mutation.test.mjs
       - run: node --test tests/mutation-process.test.mjs
       - run: node --test tests/mutation-ownership.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-parallel.test.mjs
@@ -72,6 +74,7 @@ jobs:
       - run: node scripts/demo-scenarios.mjs
       - run: node scripts/demo-init.mjs
       - run: node scripts/demo-module-mock.mjs
+      - run: node scripts/demo-failure-boundaries.mjs
       - run: node scripts/demo-failure-paths.mjs
       - run: node scripts/demo-coverage.mjs
       - uses: actions/checkout@v4
@@ -90,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14, macos-15-intel]
+        os: [ubuntu-22.04, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:

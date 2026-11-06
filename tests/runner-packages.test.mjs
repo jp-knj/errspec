@@ -5,6 +5,7 @@ import {join,resolve,dirname} from "node:path";
 import {tmpdir} from "node:os";
 import {pathToFileURL,fileURLToPath} from "node:url";
 import {createRequire} from "node:module";
+import {spawnSync} from "node:child_process";
 import {checkMutants,checkMutantsInWorker} from "../packages/typecheck/index.mjs";
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const binary=process.env.ERRSPEC_BIN||join(repo,"target/debug/errspec");
@@ -39,6 +40,26 @@ test("public compiler validates source identity and cancels worker acquisition",
   await assert.rejects(pending,/cancelled active worker/);
   await assert.rejects(checkMutants(options,[mutants[0]],()=>writeFileSync(join(root,"value.ts"),source.replace("42","41"))),/input changed during acquisition/);
   writeFileSync(join(root,"value.ts"),source);
+});
+test("public compiler worker accepts stdin and eval module modes while preserving imports",t=>{
+  const {root,mutants}=compilerProject(t),trace=join(root,"imports.txt"),preload=join(root,"preload.mjs");
+  writeFileSync(preload,`import {appendFileSync} from "node:fs";import {isMainThread} from "node:worker_threads";appendFileSync(${JSON.stringify(trace)},isMainThread?"main\\n":"worker\\n");`);
+  const options={root,typescriptPackage:realpathSync(join(repo,"packages/analysis-driver/node_modules/typescript6"))};
+  const entry=pathToFileURL(join(repo,"packages/typecheck/index.mjs")).href;
+  const source=`import assert from "node:assert/strict";import {checkMutants,checkMutantsInWorker} from ${JSON.stringify(entry)};const options=${JSON.stringify(options)},mutants=${JSON.stringify(mutants)};assert.deepEqual(await checkMutantsInWorker(options,mutants),await checkMutants(options,mutants));`;
+  const file=join(root,"consumer.mjs");writeFileSync(file,source);
+  for(const args of [
+    [file],
+    ["--input-type=module"],
+    ["--input-type","module"],
+    ["--input-type=module","--eval",source],
+    ["--input-type","module","--eval",source],
+  ]){
+    writeFileSync(trace,"");
+    const result=spawnSync(process.execPath,["--import",pathToFileURL(preload).href,...args],{input:source,encoding:"utf8",timeout:30000});
+    assert.equal(result.status,0,result.error?.stack||result.stderr);
+    assert.deepEqual(readFileSync(trace,"utf8").trim().split("\n"),["main","worker"]);
+  }
 });
 for(const major of [6,7])test(`public TS${major} optional-chain equivalence accepts only one unchanged access or call`,async t=>{
   const root=temporary(t),source=[
