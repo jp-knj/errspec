@@ -4,6 +4,10 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { stripTypeScriptTypes } from "node:module";
 import { instrument, byteIndices } from "../packages/mutation-driver/emitter.mjs";
+import { nativeSource, nativeSources } from "../packages/mutation-driver/native-source.mjs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const binary = process.env.ERRSPEC_BIN || new URL("../target/debug/errspec", import.meta.url).pathname;
 function generate(source,file="example.ts") {
@@ -12,6 +16,59 @@ function generate(source,file="example.ts") {
 function validate(source,file="example.ts") {
   runCommand(binary,["__mutation-source"],{input:JSON.stringify({source,file,validateOnly:true}),encoding:"utf8"},0);
 }
+test("bounded batches preserve complete single-file results and isolate syntax failures",()=>{
+  const requests=[
+    {file:"unicode.ts",source:'// 日本語 🧪\r\nexport function f(n:number){return n>=2;}',facts:true,weakMutation:true},
+    {file:"view.tsx",source:'export const View=()=> <div>{true?"yes":"no"}</div>;',facts:true},
+    {file:"invalid.ts",source:'export function {'},
+    {file:"ignored.js",source:'function f(){ console.log("ok"); return 1+2; }',arid:true,excludeMutators:["ArithmeticOperator"]},
+    {file:"validated.mjs",source:'export const value=1;',validateOnly:true},
+  ];
+  const batched=nativeSources(binary,undefined,requests);
+  for(let index=0;index<requests.length;index++) {
+    if(index===2)assert.throws(()=>nativeSource(binary,undefined,requests[index]),error=>{
+      assert.equal(error.code,"EC_MUTATION_INSTRUMENTATION");assert.equal(batched[index].Err,error.message.trimEnd());return true;
+    });
+    else assert.deepEqual(batched[index],{Ok:nativeSource(binary,undefined,requests[index])});
+  }
+  assert.throws(()=>nativeSources(binary,"0".repeat(64),requests),{code:"EC_MUTATION_INPUT"});
+});
+test("parser batches reduce process starts and bound source bytes without losing order",t=>{
+  const directory=mkdtempSync(join(tmpdir(),"errspec-source-batch-"));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const wrapper=join(directory,"parser.mjs"),count=join(directory,"starts");
+  writeFileSync(wrapper,`#!${process.execPath}\nimport {appendFileSync,readFileSync} from 'node:fs';import {spawnSync} from 'node:child_process';appendFileSync(${JSON.stringify(count)},'1\\n');const result=spawnSync(${JSON.stringify(binary)},process.argv.slice(2),{input:readFileSync(0),encoding:'utf8',maxBuffer:64*1024*1024});process.stdout.write(result.stdout||'');process.stderr.write(result.stderr||'');process.exitCode=result.status;`,{mode:0o755});
+  const requests=Array.from({length:17},(_,index)=>({file:`value-${index}.ts`,source:`export const value=${index};`,facts:true}));
+  assert.deepEqual(nativeSources(wrapper,undefined,requests),requests.map(request=>({Ok:nativeSource(binary,undefined,request)})));
+  assert.equal(readFileSync(count,'utf8').trim().split('\n').length,3);
+  writeFileSync(count,'');
+  const large={file:"large.ts",source:'/*'+'x'.repeat(1024*1024)+'*/ export const value=1;'};
+  const mixed=[requests[0],large,requests[1]];
+  assert.deepEqual(nativeSources(wrapper,undefined,mixed),mixed.map(request=>({Ok:nativeSource(binary,undefined,request)})));
+  assert.equal(readFileSync(count,'utf8').trim().split('\n').length,3);
+});
+test("malformed native batch responses and oversized batches fail closed",t=>{
+  const directory=mkdtempSync(join(tmpdir(),"errspec-invalid-batch-"));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const wrapper=join(directory,"parser.mjs"),requests=Array.from({length:2},()=>({file:"x.ts",source:"const x=1;"}));
+  for(const response of [[],[{}],[{Ok:{},Err:"failure"},{Ok:{}}],[{Ok:{}}],[{Ok:null},{Ok:{candidates:[]}}]]) {
+    writeFileSync(wrapper,`#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>process.stdout.write(${JSON.stringify(JSON.stringify(response))}));`,{mode:0o755});
+    assert.throws(()=>nativeSources(wrapper,undefined,requests),{code:"EC_MUTATION_PROTOCOL"});
+  }
+  for(const batch of [[],Array.from({length:9},()=>requests[0])]) {
+    const result=runCommand(binary,["__mutation-source"],{input:JSON.stringify({requests:batch}),encoding:"utf8"},2);
+    assert.match(result.stderr,/require 1–8 requests/);
+  }
+});
+test("aggregate parser output overflow retries files independently",t=>{
+  const directory=mkdtempSync(join(tmpdir(),"errspec-batch-overflow-"));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const wrapper=join(directory,"parser.mjs"),count=join(directory,"starts");
+  writeFileSync(wrapper,`#!${process.execPath}\nimport {appendFileSync,readFileSync} from 'node:fs';appendFileSync(${JSON.stringify(count)},'1\\n');const request=JSON.parse(readFileSync(0,'utf8'));process.stdout.write(request.requests?' '.repeat(65*1024*1024):JSON.stringify({candidates:[]}));`,{mode:0o755});
+  const requests=Array.from({length:2},()=>({file:"x.ts",source:"const x=1;"}));
+  assert.deepEqual(nativeSources(wrapper,undefined,requests),[{Ok:{candidates:[]}},{Ok:{candidates:[]}}]);
+  assert.equal(readFileSync(count,'utf8').trim().split('\n').length,3);
+});
 test("UTF-8 offsets map exactly to UTF-16 including BOM, emoji, and CRLF",()=>{
   const text="\uFEFF日本🧪\r\nx";const map=byteIndices(text);
   assert.equal(map.get(Buffer.byteLength(text)),text.length);
