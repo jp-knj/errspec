@@ -23,7 +23,14 @@ This design implements [Product](../../product.md) and the [requirements](requir
 | `main` / `cli` / `request` | Convert arguments into parser-independent internal requests and runner choices |
 | `app` | Sequence configuration, shared analysis thread, registration, baseline, and verification |
 | `output` | Render text/JSON, separate stdout/stderr, select exit status |
-| `packages/testkit` | Record fault execution and value comparison inside JS runners; expose `index.mjs` and the same implementation in copyable `index.ts` |
+| `packages/testkit` | Record fault execution and value comparison inside JS runners; maintain copyable `index.ts` as the source and generate `index.mjs` plus `index.d.mts` |
+
+The testkit build script uses pinned TypeScript 6.0.3 to generate JavaScript and
+public declarations from `index.ts`. Check and Distribution CI compare both
+committed artifacts with that output before verification or packaging. The source
+remains self-contained for vendoring; neither distribution entry needs a consumer
+build. The same observation and atomicity cases run against the source and the
+generated entry, with strict consumer checks for declarations and copied source.
 
 TypeScript/JavaScript executes in its native Bun/Vitest runner. tsrs or the project's official TypeScript 6/7 API acquires semantic facts; common Rust judgments compare them with registrations and evidence. Backend parity and selection are specified in [TypeScript compatibility](../typescript-compatibility/design.md). There is no second TypeScript type-system implementation. tsrs internal types stay inside its adapter; no additional `oxc_parser` is introduced.
 

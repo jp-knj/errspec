@@ -29,6 +29,8 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: packages/report-tests
       - run: node scripts/build-mutation-driver.mjs --check
+      - run: node scripts/build-testkit.mjs --check
+      - run: node --test tests/testkit-build.test.mjs
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
@@ -111,4 +113,4 @@ jobs:
       - run: cargo build --locked
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: packages/analysis-driver
-      - run: node --test --test-concurrency=1 tests/mutation-runners.test.mjs tests/mutation-runner-matrix.test.mjs tests/mutation-runner-child-process.test.mjs tests/runner-packages.test.mjs
+      - run: node --test --test-concurrency=1 tests/mutation-runners.test.mjs tests/mutation-runner-matrix.test.mjs tests/mutation-runner-child-process.test.mjs tests/runner-packages.test.mjs tests/testkit-types.test.mjs

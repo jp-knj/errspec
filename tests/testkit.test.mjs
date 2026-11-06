@@ -4,7 +4,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-// TESTKIT_ENTRY=../packages/testkit/index.ts runs the same tests against the TypeScript copy.
+// TESTKIT_ENTRY=../packages/testkit/index.ts runs the same tests against the canonical source.
 const entry = new URL(process.env.TESTKIT_ENTRY ?? "../packages/testkit/index.mjs", import.meta.url);
 const { scenarioTest, scenarioTestName } = await import(entry.href);
 
@@ -124,6 +124,21 @@ test("duplicate ids and promise comparisons remain failures when caught", async 
       try { operation(s); } catch {}
     }), /failed check/);
   }
+});
+
+test("thenable rejection reads the same property as the package entry", async () => {
+  const thenable = new Proxy({}, {
+    has: () => false,
+    get: (_target, key) => key === "then" ? () => {} : undefined,
+  });
+  await assert.rejects(register(s => {
+    s.check("status", thenable, thenable);
+  }, "thenable", { withoutFaults: true }), /Await values/);
+  await register(s => {
+    s.check("number", 1, 1);
+    s.check("null", null, null);
+    s.check("undefined", undefined, undefined);
+  }, "ordinary", { withoutFaults: true })();
 });
 
 test("a rejection can be injected and checked by the application", async () => {

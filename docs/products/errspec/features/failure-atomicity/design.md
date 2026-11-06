@@ -20,6 +20,11 @@ operation with `deepStrictEqual`. Record successful outcomes separately as
 and cleanup failures are violations. Execute all cases, then throw an error
 carrying the report when violations exist.
 
+This implementation lives in the canonical `packages/testkit/index.ts` alongside
+scenario observations. The [testkit generation boundary](../failure-verification/design.md#responsibility-boundaries)
+produces the package's JavaScript and declarations; atomicity logic is maintained
+once and its same acceptance cases exercise the source and generated entry.
+
 ## Flow and data
 
 The sequence is fixture creation, operation, snapshot acquisition and cleanup;
