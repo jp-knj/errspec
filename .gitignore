@@ -3,7 +3,5 @@
 **/node_modules/
 *.log
 
-/.sdev/
-
 **/test-results/
 **/playwright-report/

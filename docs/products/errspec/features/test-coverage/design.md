@@ -1,44 +1,67 @@
-# 既存テストによるエラーの網羅確認の設計
+# Existing-test coverage design
 
-## このドキュメントについて
+This implements the [Requirements](requirements.md) with a Vitest setup file and
+temporary configuration, for maintainers of coverage acquisition and judgments.
 
-[Requirements](requirements.md)を、Vitestのsetup fileと一時設定で実現します。
+## Implementation
 
-### 対象読者
+1. Acquire type candidates as in `scan`. Merge re-exported duplicates of the same
+   type/tags. Exclude `external` candidates as types to test in their dependency
+   package, retaining their count. Keep types with empty `flows`: they may be
+   errors consumed from dependencies or non-error unions; distinguish them in the
+   display rather than excluding them.
+2. Search upward from tsconfig's directory for the nearest `vitest.config.*`, or
+   `vite.config.*`, and `node_modules/.bin/vitest`/`node_modules/vitest`, supporting
+   workspace-root installations.
+3. Write a temporary setup file and configuration that imports the consumer's
+   unchanged config and appends the recorder to `setupFiles`. Resolve a relative
+   root from the original config's directory.
+4. Run `vitest run --config <temporary-config> --reporter=json` in the configuration
+   directory, forwarding arguments after `--` unchanged.
+5. Wrap value-comparison matchers on the test's own Vitest chai. Only after the
+   original matcher succeeds, and only for a non-negated assertion, record string
+   discriminator values required by its expectation. Omitted partial-match
+   properties, asymmetric matchers and object reference equality are not evidence.
+   Direct string comparisons and string array-element comparisons remain recorded.
+6. Pure judgments classify a discriminator/tag pair or matching string record as
+   `asserted`. Otherwise, a quoted tag in the body of a runner-reported test file
+   is `mentioned`; the remainder is `missing`.
+7. Deduplicate totals by discriminator property and tag value. Several types with
+   one pair count once; equal values with different properties count separately.
 
-coverageを実装・変更する開発者とAI。
+## Exit states
 
-## 実装方針
+Keep runner success separate from record acquisition/validation/aggregation.
+Unreadable or invalid records produce `EC_RUNNER` and exit 2; an empty aggregate
+cannot stand in for successful verification. Retain actual execution and runner
+status even when evidence is invalid.
 
-1. `scan`と同じ解析で型候補を得る。再exportで同じ型とタグが重なる候補は一つにまとめる。
-   scanが`external`とした候補は、その依存パッケージ側でテストする型として除き、件数だけをレポートに残す。`flows`が空の型は、依存から受け取って処理するエラーやエラーでないデータの共用体があり得るため除かず、表示で区別する。
-2. 最も近い`vitest.config.*`（なければ`vite.config.*`）と`node_modules/.bin/vitest`、`node_modules/vitest`を、tsconfigのディレクトリから親へ探す。ワークスペースのルートに設定や実行ファイルがある構成に合わせるためです。
-3. 一時ディレクトリに記録用のsetup fileと設定を書く。一時設定は利用者の設定をそのまま読み込み、`setupFiles`の末尾に記録用ファイルを加える。相対の`root`は元の設定ファイルの位置から解決する。
-4. `vitest run --config <一時設定> --reporter=json`を設定のディレクトリで実行する。`--`以降の引数はそのまま渡す。
-5. 記録用ファイルは、テストと同じVitestのchaiに対して値の比較用マッチャーを包む。元のマッチャーが成功し、否定でない場合だけ、期待値で要求された識別プロパティの文字列を記録する。部分一致で省かれたプロパティ、非対称マッチャー、オブジェクトの参照一致は証拠にしない。文字列の直接比較・配列の文字列要素の比較は引き続き記録する。
-6. 判定は純粋関数で行う。記録に識別プロパティとタグが一致する値、または同じ文字列があれば`asserted`。なければ、ランナーのレポートにあるテストファイルの本文に引用符付きのタグがあれば`mentioned`。それ以外は`missing`。
-7. 集計は識別プロパティとタグの値の組で重複を除く。同じ組を複数の型が持つ場合は1件とし、識別プロパティが違う同じ値は別々に数える。
+After completed aggregation, runner failure, missing tags under `--fail-on-missing`,
+a baseline regression or new missing tag produces exit 1. Otherwise exit 0.
 
-## 失敗時の終了コード
+## Baselines
 
-ランナーの成否と、記録の読取・検証・集計の完了を別々に保持する。記録用ファイルの取得・検証で失敗した場合は`EC_RUNNER`と終了コード2を返し、空の集計を成功の根拠にしない。テスト実行済みの状態とランナーの成否は、記録の不備があっても実際の結果を維持する。
-集計が完了した場合、ランナーの失敗、`--fail-on-missing`で`missing`のタグがある場合、baseline比較で後退や新しい`missing`がある場合は終了コード1とする。それ以外は0とする。
+Do not save or compare a baseline when observations cannot be validated.
+`--save-baseline` stores per-type (`file#export#discriminant`) tag states without
+overwriting existing files. `--baseline` orders strength as `asserted`, `mentioned`,
+`missing`. Weaker tags are `regressed`, new missing tags are `newMissing`, and both
+fail. Stronger tags are `improved` and informational. Removing a type/tag is not a
+regression: it left the coverage inventory rather than losing a test assertion.
 
-## baseline
+## Reasoning
 
-記録を検証できない実行ではbaselineを保存・比較しない。
+Requiring `scenarioTest` would prevent existing assertions from supplying evidence.
+A string search or traversal of the whole received object would incorrectly count
+mock values or properties omitted by partial expectations. Prioritize values
+required by successful comparisons. Retain `mentioned` because a test that injects
+a dependency fault and asserts only its result can still check failure behavior;
+users need to see the difference in evidence strength.
 
-`--save-baseline`は型ごと（`file#export#discriminant`）にタグの状態を保存し、既存ファイルを上書きしません。`--baseline`は状態を`asserted`、`mentioned`、`missing`の順に強いとみなして比較します。弱くなったタグ（`regressed`）と、保存時になかった`missing`のタグ（`newMissing`）を失敗にし、強くなったタグ（`improved`）は報告だけにします。型やタグの削除は失敗にしません。網羅の対象から外れただけで、テストの後退ではないためです。
+## Limits
 
-## 判断理由
-
-- `scenarioTest`を必須にすると既存テストが証拠にならず、導入時にすべてのタグが未登録になるため、既存の比較が期待値として要求するタグを観測点にする。
-- 文字列検索や比較対象全体の走査では、モックに書いただけのタグや部分一致で検査していないプロパティまで確認済みになる。成功した比較が要求した値だけを優先する。
-- `mentioned`を残すのは、依存から障害を流し込み、結果だけを確かめるテストも失敗時の振る舞いを検証しているためです。強さの違いを利用者が判断できるよう区別して示す。
-
-## 制約
-
-- Vitestだけに対応する。bun:testのexpectはchaiではないため、別の方法が必要です。
-- 記録はランナーのファイルと完全なテスト名に照合し、一意に成功したテストのものだけを採用する。途中で成功した比較も、最終的にテストが失敗したら証拠にしない。
-- 同じタグを持つ異なるエラー型の発生元や、期待値自体の正しさは証明しない。非対称マッチャーは推測せず未確認に残す。
-- `toThrow`の対象関数は再実行しない。`rejects`で受け取ったErrorのプロパティは記録する。
+Vitest is supported; Bun's expect is not chai and needs different acquisition.
+Match records to file and full test name and accept only uniquely matched successful
+tests. A comparison in a test that ultimately fails is not evidence. Do not prove
+which error type originated a shared tag or whether an expectation is correct.
+Leave asymmetric matchers unresolved. Never rerun the function passed to `toThrow`;
+record Error properties received by `rejects`.

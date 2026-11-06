@@ -1,79 +1,80 @@
 # errspec
 
-仕様案。これまでの会話と試作を整理したもので、本文全体をknjが確認した記録はまだありません。
+## Overview
 
-## 概要
+errspec connects TypeScript error variants with explicit failure scenarios and
+test evidence. It helps developers and AI-assisted changes reveal a new error
+variant, an omitted failure case or a check that never executed. In addition to
+checking errors asserted by existing tests, it injects developer-specified faults
+into operations to reproduce partial business-state updates on failure.
 
-errspecは、TypeScriptのエラー型と、失敗時に期待する振る舞いの検証を対応付ける開発ツールです。
-開発者とAIが変更を進めるとき、増えたエラー種別や抜けた失敗ケース、実行されなかった検証に気づけるようにします。
-既存テストが要求しているエラーの確認に加え、利用者が指定した障害を操作へ差し込み、失敗時に業務状態が部分更新される不具合を再現します。
-機能の条件は[失敗シナリオ検証のRequirements](features/failure-verification/requirements.md)に定めます。
-[エラー候補と伝播経路の調査](features/discovery/requirements.md)で登録対象を探し、[配布と初期生成](features/distribution/requirements.md)で導入を進められるようにします。
+[Failure-verification requirements](features/failure-verification/requirements.md)
+define the initial contract. [Discovery](features/discovery/requirements.md) helps
+find candidate registrations, and [distribution and initial generation](features/distribution/requirements.md)
+helps consumers start from an existing type. Analysis preserves the project's
+TypeScript configuration and type interpretation through the
+[TypeScript backend contract](features/typescript-compatibility/requirements.md).
 
-利用先のTypeScriptの設定と型解釈を維持して検証できることを重視します。[TypeScript 6・7の解析backend選択](features/typescript-compatibility/requirements.md)で、対応条件を定めます。
+The product target includes every capability of
+[mutator 0.2.0 at the fixed comparison revision](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/README.md),
+alongside errspec's error-type and failure-scenario verification. The
+[capability matrix](mutator-coverage.md) distinguishes that target from implementation
+and validation evidence. [Base mutation testing](features/mutation-testing/requirements.md)
+provides generation, execution and verdicts through `mutate`;
+[additional workflows](features/mutation-workflows/requirements.md) define repeated
+use, selection, caching, adapters, reports and integration.
 
-製品目標は、[mutator 0.2.0](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/README.md)の全機能を包含し、errspecのエラー型・失敗シナリオ検証を併せて提供することです。
-[機能対応表](mutator-coverage.md)で、目標と実装済みの範囲を区別します。追加機能として個別のRequirements・Designで具体化します。
-最初の提供単位である[Vitestによる変異の生成・実行・判定](features/mutation-testing/requirements.md)は、`mutate`で提供します。差分実行や永続キャッシュなど、全機能提供へ向けた後続の機能とは区別します。
+The full implementation plan and feature scope are authorized. That approval is
+not evidence that every acceptance check, required CI platform or practical trial
+has completed. [Implementation status](implementation-status.md) records them.
 
-## 背景と解決する課題
+## Problem
 
-### 背景
+Adding a TypeScript error variant does not establish that tests cover its failure
+behavior. Passing tests may never produce the required fault or may omit the
+comparison that would detect an incorrect result. Developers need evidence that
+connects declared errors, failure cases, actual execution and observations.
 
-開発の出発点は、エラーハンドリングの価値を「エラーを表現できること」から「失敗時の振る舞いを確かめられること」へ広げたい、というknjとの議論です。
-テストを実行できることと、必要な失敗ケースを検証できていることの対応を明らかにしたいと考えています。
+The starting point was the discussion of extending error handling from expressing
+errors to checking behavior on failure. The tool reports omissions and unresolved
+analysis without claiming to discover every runtime failure.
 
-### 解決する課題
+## Users
 
-エラー型を追加しても、対応する失敗ケースがテストへ追加されたかは型だけでは分かりません。
-テストが成功していても、必要な障害を発生させていなかったり、確認すべき結果の比較が抜けていたりする場合があります。
-開発者がこうした不足の場所と根拠を確認できるようにします。
+Developers maintaining TypeScript/JavaScript tests, including those delegating
+implementation and test changes to AI. People determine expected business behavior;
+the tool supplies traceable evidence during local development and PR verification.
 
-## ターゲットエンドユーザー
+## Value and success
 
-### TypeScript/JavaScriptのテストを保守する開発者
+When failure-handling code or error types change, users can identify missing
+verification, understand its cause and choose the next test or fix. Test count and
+pass rate alone are not success measures. Mutation results should help explain
+why a change escaped detection; restoring a cache or executing code alone does
+not establish correctness.
 
-- **特性:** 人が期待動作を判断し、AIにも実装やテストの変更を任せる。
-- **抱える課題:** エラー型・失敗ケース・テスト結果の対応を変更のたびに確認する必要がある。
-- **利用文脈:** ローカル開発やPRの検証で、不足を確認して実装とテストを修正する。
+## Development principles
 
-## 提供価値
+- Never treat an unverified or incomplete result as success; state its scope.
+- Use the consumer's existing error representation and test environment.
+- Make results usable by people and agents without an editor integration.
+- Keep the expected behavior and adequacy judgment with the user. Tool success
+  does not prove the correctness of the application's business specification.
+- Distinguish a requirement change from an implementation improvement and explain
+  the reason for each change.
 
-### 変更で抜けた検証を根拠付きで把握する
+## Guarantees and reliability measures
 
-- **対象:** 失敗時の処理を変更する開発者と、その指示を受けるAI。
-- **内容:** 宣言されたエラー種別と失敗ケースを対応付け、登録と実行結果の不足を示す。
-- **提供理由:** 人が仕様を判断し、AIが修正する際に、何が確認できて何が未確認かを共有できるようにする。
+There is no availability or response-time SLA for this locally executed development
+tool. Numeric performance SLOs are not defined. Compare representative consumer
+projects before making speed or effectiveness claims; adopting Rust alone is not
+performance evidence. Acceptance conditions require that missing evidence cannot
+create a false success.
 
-## 成功の定義
+## Boundaries
 
-利用者がエラー型や失敗時の処理を変更したとき、必要な検証の不足とその理由を把握し、修正対象を判断できることです。
-テスト数や成功率だけを成果とせず、利用者の実際の変更で役に立つかを確認します。
-
-ミューテーション機能では、比較対象の全機能を利用でき、コード変更を検出できなかった理由から次の検証を判断できることを目指します。互換性は機能の包含を基準とし、既存errspecのCLI・終了コード・設定・JSON・testkit APIは維持します。
-
-## プロダクト開発を進める上での指針
-
-- 確認していないことを成功として扱わず、判定の範囲を示す。
-- 既存のエラー表現とテスト環境を利用できるようにする。
-- エディタを起動しなくても、人とAIが結果を利用できるようにする。
-- 期待動作と十分性の判断は人が担う。ツールの成功を業務仕様の正しさの証明にしない。
-- 仕様の変更と実装方法の変更を区別し、判断理由を残す。
-
-## SLA・SLI・SLO
-
-### SLA
-
-稼働率や応答時間の保証は設けません。利用者の環境で実行する試作の開発ツールであり、運用サービスを提供していないためです。
-
-### SLI・SLO
-
-性能の数値目標は未設定です。代表的な導入先での測定がなく、Rustの採用だけを高速性の根拠にはしません。
-誤った成功判定を防ぐ条件は、機能の受け入れ条件として確認します。
-
-## 未決事項
-
-初版の目的・保証範囲の文章がknjの意図と一致するかは、今回の仕様レビューで確認します。
-確認前はこの文書を新機能の追加や保証の拡大の根拠にせず、既存の依頼で確定している作業だけを進めます。
-ミューテーション機能の利用条件と実現方法は、個別のRequirements・Designでknjと具体化します。
-解析は可能性と未解決箇所を示し、すべての実行時エラーを把握したという保証へ広げません。
+A scan reports possibilities and unresolved areas; it does not prove exhaustive
+runtime-error coverage. Mutation inclusion preserves existing errspec interfaces
+and compares capabilities rather than identical CLI/configuration/JSON/plugin APIs.
+Repository migration, visibility changes, npm/crates publication and production
+deployment remain separate future work.

@@ -1,46 +1,57 @@
-# knjとAIで仕様を共有する進め方
+# Maintaining specifications
 
-仕様を固める間、[azu/sdev](https://github.com/azu/sdev)をerrspec自体の仕様を人とAIで作成・更新するために使います。
-利用者が検証対象アプリケーションに書く失敗シナリオとは役割が異なります。
+These documents describe errspec itself. The failure scenarios a consumer writes
+in `errspec.json` describe the application being verified; they have a different
+role.
 
-## 仕様を読む
+## Read the relevant contract
 
-まず`./bin/sdev help`で作業に対応するガイドを選び、[Product](../../products/errspec/product.md)、対象の[Requirements](../../products/errspec/features/failure-verification/requirements.md)、[Design](../../products/errspec/features/failure-verification/design.md)を読みます。
-日本語を正本とし、今回の目的と範囲は会話の明示的な依頼から確認します。
+Start from [the Product](../../products/errspec/product.md), the feature's
+Requirements and its corresponding Design. [The documentation index](../../README.md)
+links the feature pairs. English is the maintained specification language.
+Use the explicit request and existing approved scope to determine the task; do
+not ask again about decisions already made.
 
-## 判断を共有する
+Product explains users, problems, value and limits. Requirements define observable
+behavior, scope and acceptance conditions. Design explains responsibilities,
+interfaces, data and the reasoning that implements those conditions. Keep each
+responsibility in its own document and use links instead of copying the same rule
+into every feature.
 
-knjが目的・対象範囲・利用者に約束する振る舞いを判断し、AIは調査、代替案、仕様案、実装と検証の根拠を提示します。
-AIの提案、会話で確認できた決定、残る論点を区別します。
-既に依頼で確定している内容は聞き直さず、未解決の振る舞いの判断がある場合は、その部分を確定せずにknjへ確認します。
+## Keep decisions and evidence separate
 
-初版の文面はレビュー用の案です。AIの読み返し、lintやテストの成功、ファイルの作成を、人が確認した証拠として扱いません。
-確認された範囲はPRや会話で記録します。確認日時・承認者・決定内容をAIが推測して補いません。
+The user decides purpose, scope and promised behavior. Agents provide research,
+alternatives, implementation and verification evidence. Distinguish an approved
+decision from a proposal or an unresolved issue. Do not infer an approval date,
+approver or new agreement from a file's existence, a review tool or a passing test.
 
-## 変更を進める
+The full implementation plan and feature scope have been authorized. That does
+not turn unimplemented work, a failed CI run or an incomplete practical trial into
+completed validation. [Implementation status](../../products/errspec/implementation-status.md)
+records those distinctions.
 
-目的を変更するときはProduct、利用者の振る舞いを変更するときはRequirementsとDesignを先に更新します。
-要件を変えない実装方法の変更では、判断理由が変わる部分のDesignを更新します。
-テストを通す都合で期待動作、失敗ケース、必須の比較を黙って弱めません。
-差分の意味と理由を示し、依頼で任された範囲を超える変更は未決のまま残します。
+## Update the existing documents
 
-仕様の変更と実装・検証を同じPRで追えるようにします。文書の誤字修正や導入済みの手順の実行に、一律の承認待ちは設けません。
-新機能は合意した範囲に従って実装し、既存のコードがあることだけを仕様の採用理由にしません。
+Change Product when purpose or users change. Change Requirements and Design when
+observable behavior changes. For an implementation improvement that preserves the
+requirement, update Design when its responsibility boundaries or reasoning change.
+Do not weaken an expected failure, required comparison or acceptance condition
+merely to make tests pass.
 
-## 検査とレビュー
+Keep specifications, implementation and relevant evidence reviewable in the same
+change. Typo fixes and execution of already approved procedures do not require a
+new approval stage. New behavior outside the authorized scope needs an explicit
+decision; existing code alone does not make it an accepted requirement.
 
-`./bin/sdev lint`でリンクと参照方向を確認します。内容の妥当性は、受け入れ条件と設計理由を読んで確認します。
-実装を変えた場合は、READMEにある該当するテストを実行します。
-仕様の差分を読む場合は、`./bin/sdev help review`で使えるレビュー方法を確認してください。
+## Review and verify
 
-sdevの起動スクリプトは版とSHA-256を固定しています。`./bin/sdev update`による更新は差分をレビューして取り込みます。
-外部AIサービスを利用するレビュー機能は、今回の導入では設定しません。
-sdev由来の配布物には[上流のMITライセンス](../licenses/sdev-LICENSE.txt)を添付しています。
+Check Markdown links and read the changed Requirements against Design. Review
+inputs, successful results, failures, incomplete states and stated limitations.
+Keep executable acceptance links in the capability/status documents. Run the checks
+appropriate to a code change using the engineering guides and CI definitions.
+Document-only translation does not require rerunning unrelated runner suites.
 
-## 仕様が固まった後
-
-knjと確認した内容を、英語のProduct・Requirements・DesignとREADMEへ整理します。
-翻訳では保証範囲や受け入れ条件を広げず、日本語の案と意味を照合します。
-その後、sdevの起動スクリプト、言語設定、専用の参照指示とライセンスを外し、必要な開発手順は英語で残します。
-sdevを使わずにドキュメントを読め、通常のビルドとテストを実行できる状態を確認します。
-この切り替えは仕様の確認後の工程です。今回の導入でCIへsdevを追加しません。
+The temporary specification bootstrap and language configuration have been
+retired under the approved plan. Reading, editing, building and testing errspec
+requires no specification service, external AI review configuration or additional
+specification CLI. Git and PRs retain the earlier documents and decision history.

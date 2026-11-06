@@ -85,9 +85,9 @@ required. Reports and a compact acceptance record are retained as artifacts.
 [Test-only setup and verifiers](../../scripts/action-live-acceptance.mjs) have
 [local real-native and negative tests](../../tests/action.test.mjs), including
 wrong outputs, cache misses, wrong keys and corrupted content. Local copied-cache
-tests validate those helpers, not the GitHub service. The live proof remains
-pending until these Distribution jobs actually execute successfully; billing
-failures before job startup provide no evidence.
+tests validate those helpers, not the GitHub service. Successful Distribution
+jobs provide the live proof on each supported platform; a job that fails before
+startup provides no execution evidence.
 
 The cache steps use GitHub's [restore action](https://github.com/actions/cache/blob/main/restore/README.md)
 and [save action](https://github.com/actions/cache/blob/main/save/README.md).

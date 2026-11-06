@@ -1,43 +1,45 @@
-# TypeScript 6・7の解析backend選択の設計
+# TypeScript analysis-backend design
 
-## このドキュメントについて
+## About this document
 
-[Requirements](requirements.md)と[Product](../../product.md)に対応し、コンパイラ固有の値を各backend内へ限定します。
+This implements the [Requirements](requirements.md) under the [Product](../../product.md),
+keeping compiler-specific handles inside adapters. It is for analysis/CLI maintainers
+who distinguish compiler diagnostics from errspec judgments. Mutation generation
+and mutant typechecking remain separate.
 
-### 対象読者
+## Selection
 
-解析器とCLIを実装・変更する開発者。
+The Rust entry chooses tsrs or official APIs in Node. Node adapters support TS 6's
+traditional Compiler API and TS 7's `unstable/sync`. Convert responses to owned
+values and share Rust tag matching, propagation, static matching and reports.
 
-### 前提知識
+Automatic selection searches the project and parents for
+`node_modules/typescript/package.json`. Select official APIs for TS 6/7; preserve
+tsrs for absent or other-major installations. Explicit selection wins. Missing
+required APIs produce `EC_ANALYSIS_BACKEND`. Check version first because tsrs may
+succeed while resolving types differently; do not hide diagnostics with fallback.
 
-型とシンボル、AST、コンパイラの診断とerrspecの判定の違い。
+## Owned facts and positions
 
-### このドキュメントで扱わないこと
+- Each compiler resolves aliases and finite string sets for tag extraction.
+- Return functions, origins, edges and unresolved sites as `ScanFacts`, sharing
+  existing Rust fixed-point calculation and ordering.
+- Acquire registration discriminator values, positions and fault/check IDs from
+  test ASTs; share Rust `EC015`/`EC016`, including registrations inside describe.
+- Resolve entry exports/aliases into function IDs, return positions and tags.
+  Rust filters contract tags and uses shared propagation for `EC018`; Bun line
+  coverage matching shares `EC019`. Validate request IDs/counts/function references
+  so missing paths cannot become empty success.
+- Acquire declaration-based re-export grouping, external discriminator declarations
+  and error declaration/channel relationships for scan.
+- Never send compiler-native type/symbol/AST handles across Node/Rust boundaries.
 
-変異後の型検査と変異の生成規則は扱いません。
+Keep relative paths, UTF-8 byte offsets and existing LF-based line numbering.
+Check each API's position unit and convert UTF-16 from original source. Match BOM
+and CRLF against that source. Existing tsrs offsets count the text after removal
+of a leading UTF-8 BOM. Preserve function/edge/origin traversal order.
 
-## 実装方針
-
-Rustの解析窓口が、tsrsまたはNode内の公式APIを選択します。NodeにはTS 6の従来のCompiler APIとTS 7の`unstable/sync`用adapterを設けます。両者の結果は所有可能な値に変換し、Rustのタグ照合、伝播、静的照合、レポートを共用します。
-
-自動選択では、プロジェクトのディレクトリと親の`node_modules/typescript/package.json`を探索します。TS 6・7が見つかれば利用先のAPIを選び、未導入または他の版の場合は従来のtsrsを使います。明示指定は自動選択より優先します。必要なAPIがない場合はEC_ANALYSIS_BACKENDで停止します。
-
-先に版を確認するのは、tsrsでエラーが発生しなくても、版の違いによって型解釈や解決先が異なることがあるためです。backend内のコンパイラ診断を単に無視するfallbackは設けません。
-
-### 事実と判定
-
-- タグ抽出は、alias解決と有限の文字列集合の確認を各コンパイラで行います。
-- 走査は、関数・発生元・呼出辺・未解決箇所を`ScanFacts`として返します。固定点の計算と結果の順序は既存のRustを利用します。
-- 登録テストのASTから識別値、位置、fault/checkのIDを取得します。EC015・EC016の比較は共通のRustで行い、describe内の登録も同じ条件で扱います。
-- entryのexportとaliasを各backendで解決し、関数IDとreturn位置・識別タグを値として返します。Rustが契約タグで絞り、共通の伝播グラフからEC018を判定します。Bunの行カバレッジとの照合によるEC019も共用します。要求ID・件数・関数参照を検証し、欠落した経路の応答を空の成功へ変えません。
-- scanでは宣言位置によるre-exportの集約、外部の判別子宣言、エラー型の宣言とチャネルの対応も各backendで取得します。
-- Nativeな型、シンボル、ASTハンドルをNodeとRustの境界へ含めません。
-
-### 位置と順序
-
-相対パス、UTF-8 byte offset、LFに基づく既存の行番号を維持します。各APIのAST位置の単位を確認し、UTF-16の場合は元ソースからbyte offsetへ変換します。BOMやCRLFも元のファイルに照合します。byte offsetはtsrsの既存の定義に従い、先頭のUTF-8 BOMを除いた本文で数えます。関数・辺・発生元の順序は既存の走査規則に従います。
-
-## アーキテクチャ・シーケンス図
+## Flow
 
 ```mermaid
 sequenceDiagram
@@ -53,48 +55,46 @@ sequenceDiagram
     J-->>C: report and provenance
 ```
 
-## データモデル・ER 図
+## Protocol and interfaces
 
-単一の要求と応答で表せるためER図は省略します。応答はprotocol version、実際のengineと版、診断、タグ要求ごとの結果、任意の走査事実、静的照合の事実を持ちます。応答の欠落・重複・不明な要求IDは通信エラーです。
+A request/response pair needs no ER diagram. Responses carry protocol version,
+actual engine/version, diagnostics, per-tag-request results, optional scan facts
+and static-match facts. Missing, duplicate or unknown request IDs are protocol
+errors.
 
-既存レポートには省略可能な`analysis`を追加します。tsrsの既定経路では省略し、従来のJSONを維持します。公式API使用時は`engine`、`version`、`package`、`reason`を記録します。契約レポートの既存`engine`も実際の解析先を表します。
+Optional `analysis` is omitted on the default tsrs path to preserve native JSON.
+Official API results record `engine`, `version`, `package`, `reason`; the existing
+contract `engine` also identifies the actual provider.
 
-## API・インターフェース
+Semantic commands accept `--analysis-engine auto|tsrs|typescript`,
+`--typescript-package PATH`, `--analysis-node PATH`, defaulting to auto and node
+on PATH. Explicit paths resolve from the caller. `mutate` rejects semantic-analysis
+options and retains its own `--node`.
 
-`--analysis-engine auto|tsrs|typescript`、`--typescript-package PATH`、`--analysis-node PATH`を型解析を使うコマンドで受け付けます。既定はautoとPATH上のnodeです。明示パスは呼出元から解決します。`mutate`は意味解析の指定を受け付けず、既存の`--node`を維持します。
+The bundled Node bridge receives JSON stdin and returns results only on stdout,
+without mixed logs. Rust extracts it to a temporary directory and resolves API
+packages by absolute path; do not bundle or download the compiler package.
 
-Node bridgeはJSON要求をstdinで受け取り、結果だけをstdoutへ返します。診断とログを混ぜません。Rustはbridgeをバイナリへ同梱して一時ディレクトリから起動します。APIパッケージは絶対パスで解決し、bundleや自動取得は行いません。
+## Lifecycle and safety
 
-## 外部サービスとの連携方式
+Use no network. TS 6.0.3 Compiler API and TS 7.0.2 `unstable/sync` are the comparison
+baseline; the unstable API needs capability checks and per-version comparison.
+Open a project per request, convert results to values and close it. Release Node
+snapshots/APIs in `finally`; Rust owns temporary files and child-process lifetime.
+Bound waits to 300 seconds, stdout to 64 MiB and stderr to 4 MiB. Limits or
+SIGINT/SIGTERM produce incomplete results and terminate the process group. There
+is no between-run cache.
 
-ネットワークは使いません。TS 6.0.3のCompiler APIとTS 7.0.2の`unstable/sync`を比較の基準にします。TS 7 APIは変更の可能性があるため、APIの存在確認と対応版ごとの比較を必要とします。
+Use the consumer's local permissions, direct executable/argument arrays rather
+than a shell, and response/request validation. Never convert runner failure into
+empty success. No project-config or scenario-history migration is required.
+Tsrs-only use still needs no Node; selecting official APIs requires Node and the
+corresponding installed TypeScript.
 
-## データの取り扱い設計
+## Alternatives
 
-要求ごとにプロジェクトを開き、結果を値へ変換して終了します。Nodeのsnapshot/APIはfinallyで解放します。Rustは一時ファイルと起動したプロセスを所有し、応答待ちと終了を管理します。待機は300秒、stdoutは64 MiB、stderrは4 MiBを上限とし、超過・SIGINT・SIGTERMでは未完了を返してプロセス群を終了します。実行間のキャッシュは設けません。
-
-## 認証認可に関する特記事項
-
-なし。利用者のローカル権限で導入済みのパッケージを参照します。
-
-## セキュリティ上の留意事項
-
-shellを使わず実行ファイルと引数を配列で渡します。応答の形式と要求との対応を検証します。実行器の失敗を空の成功結果へ変換しません。
-
-## デプロイに関する特記事項
-
-利用先の設定やシナリオ履歴の移行は不要です。既存のtsrsだけの利用はNodeを要求しません。公式APIを選ぶ場合にNodeと対応するTypeScriptを必要とします。
-
-## 検討した代替手段
-
-### 設定だけを別の値へ変更する
-
-`node10`を`bundler`として扱う方法では、条件付きexportsなどの解決規則まで同じにはできません。公式APIの利用により元の設定と解決結果を維持します。
-
-### tscの終了コードだけで代替する
-
-型検査の成否は得られますが、タグ、呼出先、型に基づく静的照合の情報が必要なため、解析用APIを使います。
-
-## 未決事項
-
-なし。未確認の版への対応はAPIの確認と比較結果を前提に拡大します。
+Treating `node10` as `bundler` cannot preserve conditional exports and other
+resolution rules. Use the official API for original configuration semantics.
+A tsc exit code supplies typecheck success but not tags, callees or typed static
+matching facts, so compiler analysis APIs are needed. New version support requires
+capability checks and comparison; no other feature-scope decision is unresolved.

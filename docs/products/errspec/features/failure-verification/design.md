@@ -1,254 +1,128 @@
-# 基本設計：型・シナリオ・実行証拠の対応
+# Matching types, scenarios, and execution evidence
 
-[Product](../../product.md)と[Requirements](requirements.md)に対応する設計です。
-既存の設計書を移したレビュー用の案であり、knjによる文面の確認済みとは扱いません。
+This design implements [Product](../../product.md) and the [requirements](requirements.md). The value is the correspondence between type variants, registered behavior, tests, and execution evidence. Agent JSON carries diagnostics; fault injection and mutation testing alone are not claimed as distinctive inventions.
 
-## コンセプト
+## Responsibility boundaries
 
-エラー型の変更で増えた失敗種別と、登録された失敗時の仕様・テスト・実行証拠を照合する。
-Agent JSONは診断の受渡し手段であり、型・仕様・実行の対応に価値を置く。
-障害注入やミューテーションそのものに独自性を主張しない。
-
-## Rustを使う境界
-
-| モジュール | 責任 |
+| Module | Responsibility |
 |---|---|
-| analysis_backend | 利用先の版と明示指定から解析先を選び、公式APIの要求・応答とプロセスを管理する |
-| tsrs_adapter | tsconfig、診断、exportのsymbol解決、有限タグ集合の取得、ASTの位置・本文・走査 |
-| model / config | 外部形式のデータとenum、読取専用の検証済み設定 |
-| contract | 型タグとケース登録の比較。ファイル存在の確認結果を受け取る |
-| snapshot | 登録結果からの一覧生成、シナリオの追加・削除・変更差分 |
-| evidence | 解決済みのファイル識別情報＋完全名による照合、テスト状態の判定 |
-| vitest / bun | JSON/JUnitを共通のRunEvidenceへ変換 |
-| observation | 補助APIの記録の形式検証、登録・テスト結果・必須観測との照合 |
-| observation_io | 上限と読取順を守った観測ファイルの読取 |
-| report | 各段階の判定結果を出力用レポートへ変換 |
-| main / cli | CLI引数を内部リクエストへ変換し、実行と表示を呼び出す |
-| request | 引数パーサーに依存しない内部リクエストとランナーの種類 |
-| app | 内部リクエストの実行、共通の解析スレッド境界、設定・型解析・baseline・検証の順序 |
-| input | JSON読取、テスト前のファイル存在確認、実行後のパス解決 |
-| scenario_source | 登録テストファイルを型解析し、設定との確定的な食い違いを実行前に報告する |
-| runner | プロセス、環境変数、ランナーレポートの読取、今回の観測ファイルと実行IDの所有 |
-| verification | 実行後のパス解決、テスト照合、観測の読取と照合の順序、部分結果の受渡し |
-| output | 検証・走査・初期生成のtext/JSON表示、標準出力・標準エラーと終了コード |
-| packages/testkit | JSランナー内で障害用関数の実行と値の比較を記録。`index.mjs`を入口とし、複製用に同じ実装の`index.ts`を同梱する。両者は同じtestkitのテストで挙動を、選択したコンパイラのstrict検査で型を確認する |
+| `analysis_backend` | Select the backend from explicit options and installed versions; own official-API requests, responses, and processes |
+| `tsrs_adapter` | Read tsconfig/diagnostics, resolve exported symbols and finite tags, provide AST traversal, text, and positions |
+| `model` / `config` | External data/enums and immutable validated configuration |
+| `contract` | Compare type tags and registrations using acquired file-existence facts |
+| `snapshot` | Build inventories from registrations; compare added, removed, and changed scenarios |
+| `evidence` | Match resolved file identity plus full test name and judge test state |
+| `vitest` / `bun` | Convert JSON/JUnit into common `RunEvidence` |
+| `observation` | Validate helper records and compare them with registration, tests, and required observations |
+| `observation_io` | Read observation files in the required order and within limits |
+| `scenario_source` | Acquire definite pre-execution mismatches from registered test source |
+| `input` | Read JSON, check files before execution, resolve paths after execution |
+| `runner` | Own subprocesses, environment, runner reports, temporary observation files, and current run ID |
+| `verification` | Sequence post-run path resolution, test matching, observation loading/matching, and partial results |
+| `report` | Convert judgments into the external report |
+| `main` / `cli` / `request` | Convert arguments into parser-independent internal requests and runner choices |
+| `app` | Sequence configuration, shared analysis thread, registration, baseline, and verification |
+| `output` | Render text/JSON, separate stdout/stderr, select exit status |
+| `packages/testkit` | Record fault execution and value comparison inside JS runners; expose `index.mjs` and the same implementation in copyable `index.ts` |
 
-型解析は同梱のtsrsまたは利用先のTS 6・7の公式API、対象コードとテストの実行はBun/Vitestが担当する。タグと静的照合の事実は各backendで取得し、登録・実行記録との比較は共通のRustで行う。
-Oxcエコシステムのtsrsを使用しているが、追加のoxc_parserは入れていない。
-同じ型システムを再実装せず、tsrs内部APIへの依存はadapterに閉じ込める。
-TypeScript 7で廃止された`moduleResolution: node10`は、adapterがtsconfigの解析後に未指定へ戻してからProgramを作る。tsrsは未指定のCommonJSを`bundler`で解決するため、TS5108だけで解析を止めずに済む。置き換えはレポートの`assumptions`に記録し、`ok`には影響させない。ほかの廃止オプションは解決結果が変わるため置き換えない。
+TypeScript/JavaScript executes in its native Bun/Vitest runner. tsrs or the project's official TypeScript 6/7 API acquires semantic facts; common Rust judgments compare them with registrations and evidence. Backend parity and selection are specified in [TypeScript compatibility](../typescript-compatibility/design.md). There is no second TypeScript type-system implementation. tsrs internal types stay inside its adapter; no additional `oxc_parser` is introduced.
 
-共通関数と型の配置は[Rustコードの基準](../../../../engineering/guidelines/rust-code.md)に従います。ASTの位置・本文・走査はadapterが提供し、走査と実行前の静的照合が同じ規則を利用します。ソース位置の`Location`は共通モデルに定義し、`discovery::Location`も再公開で維持します。
-Git revisionとCargo.lockを固定する。arenaは単発CLIのプロセス寿命で管理し、常駐APIはまだ提供しない。
+The tsrs adapter substitutes an unspecified module-resolution option for removed `moduleResolution: node10` before creating its Program. tsrs resolves unspecified CommonJS using `bundler`; this avoids stopping only for TS5108. The report records the substitution in `assumptions` without changing `ok`. Other removed options are not substituted because their resolution behavior can differ.
 
-今回、並列化や高速キャッシュは追加していない。将来は所有可能なIRへ変換した後の処理や独立したプロジェクトの解析を候補にする。
-Rust採用だけで高速性や健全性が保証されるとは主張しない。
+Shared code follows the [Rust guide](../../../../engineering/guidelines/rust-code.md). Adapter traversal/position rules serve both discovery and source checks. `Location` belongs to the shared model and remains re-exported as `discovery::Location`. Git revision and Cargo.lock pin compiler dependencies. The arena lives for a one-shot process; this workflow does not expose a persistent analysis service. Rust alone does not establish speed or soundness.
 
-CLIの実行手順・ランナー制御・表示は、バイナリ内のモジュールに分けています。
-登録・テスト・観測の判定は、ファイルや完成後のレポートに触れず、結果と診断を返します。実行手順が診断を順番に集め、最後に従来の外部形式へ変換します。
-設定と明示パスの解決、stdoutとstderrの分離、登録不足があってもverifyやsnapshotへ進む条件、終了コードを互換性の確認対象にします。
+## Registration and scenario identity
 
-## 型・シナリオ・業務仕様を分ける
+Let E be type-derived tags and C registered tags. E−C is missing registration; C−E is stale registration. A scenario is identified by `(contract id, scenario id)`; multiple scenarios may share a tag. Equality of tag sets does not prove coverage of payloads, time, or all failure paths.
 
-Eを型から取得したタグ集合、Cをケースに登録されたタグ集合とすると、E−Cは登録漏れ、C−Eは不要な登録。
-シナリオは(contract id, scenario id)で識別する。複数シナリオが同じタグを持てる。
-この集合の一致は、payloadや時間的な状態を含む全失敗経路の網羅性を意味しない。
+Configuration v2 requires fault IDs and at least one assertion ID per case. An explicitly empty `faults` array permits an input-only scenario; omitting `faults` remains invalid. The matching test must declare `withoutFaults: true`. Without that declaration, zero faults fail; with it, calling `fault` fails. Both sides must agree. The observation protocol stays v1. `expect` is descriptive text, not executable code. Types are explicitly exported/registered; Result type arguments are not inferred by name.
 
-schemaVersion 2の各ケースには、必須のfault IDとassertion IDを明示する。
-assertionは1件以上を必要とする。faultは空の配列を明示した場合だけ0件を許可し、入力だけで決まるシナリオとして扱う。`faults`の省略は従来どおり設定エラー。
-0件のシナリオは、testkitの定義でも`withoutFaults: true`を宣言する。宣言がなければfault 0件でテストを失敗させ、宣言があれば`fault`の呼出を失敗させる。設定とテストの片方だけの指定を合格にしないためで、観測プロトコルv1の形式は変えない。説明文expectは実行可能な式として扱わない。
-指定したエラー型を公開して登録する方式を維持し、Resultの型引数を名前だけで推定しない。
+The helper's stable test name is `errspec ` followed by a JSON array `[contract id, scenario id]`. JSON prevents separator collisions. An optional nonempty single-line `description` follows one space. The helper acquires its file from `import.meta.url`; Rust canonicalizes it.
 
-## 識別子とテストの結び付け
+For v2, a runner's full name may contain the stable name after whitespace-delimited `describe` prefixes and before a whitespace-delimited description. Bun's nested JUnit suites and Vitest's full names join suite titles with spaces. Only one candidate may match. Multiple suite registrations are ambiguous. Because the helper does not know suite titles, its observed name must equal the full name's suffix starting at the stable identity. Legacy v1 names retain exact matching.
 
-補助APIが登録する名前は`errspec `とJSON配列[contract id, scenario id]の連結。
-区切り文字を含むIDでも衝突しない。ファイルはimport.meta.urlから取得してRust側でcanonicalizeする。
-定義に`description`があれば、固定名の後ろに空白1つと説明を連結した名前で登録する。説明は空でない1行に限る。
-v2のシナリオは、ランナーの完全名の中で固定名が空白区切りの一部として現れるものを候補にする。固定名の前は名前の先頭か空白（`describe`の題名）、後ろは名前の末尾か空白（説明）であることを条件にする。Bun（JUnitの入れ子のsuite）とVitest（`fullName`）は、どちらも`describe`の題名を空白でつないで前に付ける。JSON配列は`]`で閉じるため、別のシナリオの固定名とは一致しない。
-候補が1件のときだけ成功とし、同じシナリオが2つの`describe`にあれば曖昧とする。補助APIは`describe`の題名を知らないため、観測のテスト名は候補の完全名のうち固定名から後ろの部分との一致を要求する。v1の登録名は従来どおり完全一致とする。
-説明は設定にもsnapshotにも保存しない。説明の変更はchangedScenariosやEC014の対象外。
-テストの成功はランナーレポートで確認し、補助APIの自己申告だけを成功にしない。
-ファイル・名前が重複したテスト、同じシナリオの複数実行は曖昧として拒否する。
+Descriptions do not enter configuration or snapshots and do not produce `changedScenarios`/EC014. Runner evidence, rather than helper self-reporting alone, establishes test success. Duplicate file/name identities or repeated executions of one scenario are rejected. Retry/repeat and browser execution remain outside this failure-verification runner contract; distinct concurrent scenario IDs receive independent scopes and files.
 
-retry/repeat、ブラウザ内実行は現時点の対応範囲外。
-distinct IDのconcurrent実行は各callbackに独立したscopeと観測ファイルを与える。
+## Observation lifecycle
 
-## 観測のライフサイクル
+1. The CLI creates a new temporary directory and run ID.
+2. The helper starts a scenario with a `running` record.
+3. A fault wrapper increments calls, then completed on resolve/reject.
+4. `check` uses `deepStrictEqual` and records passed/failed. Catching its error does not clear failure.
+5. At body completion, the helper verifies required calls/completions/assertions and writes the final state.
+6. After runner exit, Rust matches the runner report and observations.
 
-1. CLIが新しい一時ディレクトリとrun IDを用意する。
-2. ランナーが補助APIのテストを開始すると、runningの記録を作る。
-3. fault wrapperが呼ばれるとcallsを増やす。resolve/rejectでcompletedを増やす。
-4. checkがdeepStrictEqualを実行し、passed/failedを記録する。catchされても失敗の印は消さない。
-5. body終了時に、障害の呼出・完了と比較の存在を確認し、最終状態を書き込む。
-6. ランナー終了後、Rustがレポートと観測を照合する。
+Each scenario execution uses a UUID filename, written by temporary-file rename. Interrupted `running` records, leftover temporary files, and broken JSON cannot pass. Limits are 1 MiB per file, 32 MiB total, and 10,000 files; violations produce EC_EVIDENCE. The run ID prevents accidental mixing, not malicious forgery.
 
-ファイルはシナリオ実行ごとのUUIDを使い、一時ファイルからrenameする。
-途中終了時のrunning記録、残った一時ファイル、壊れたJSONは合格にならない。
-読取上限は1ファイル1 MiB、合計32 MiB、10000ファイル。超過はEC_EVIDENCE。
-run IDは偶発的な古い記録の混入を検出するためで、認証用の秘密ではない。
+Success requires all tags registered, one current successful test per scenario, and all of the following:
 
-## 成功条件
+- Matching run, contract, scenario, tag, test file, and name.
+- Exactly one observation with state `passed`.
+- Every mandatory fault called at least once with all calls complete, or no observed faults for an explicitly fault-free case.
+- Every mandatory assertion passed.
+- No unknown scenario, fault, or assertion IDs.
+- Successful runner report and process exit.
 
-必要なタグがすべて登録され、対象テストが今回1件だけ成功し、以下をすべて満たすこと。
+Fault completion does not prove the semantic meaning of the injected value. Expected values, observed state, and specification sufficiency remain review responsibilities. The process, helper, and tests are trusted; arbitrary JS or activity outside the observation interval is not proved.
 
-- run ID、契約ID、シナリオID、タグ、テストファイル、テスト名が一致。
-- シナリオの記録が1件だけあり、stateがpassed。
-- 必須のfaultがそれぞれ1回以上呼ばれ、全呼出が完了。faultを空と明示したケースでは記録にもfaultがない。
-- 必須のassertionがすべてpassed。
-- 未登録のfault/assertion IDやシナリオがない。
-- ランナーレポートとプロセスの両方が成功。
+## States, baseline, and compatibility
 
-faultは開発者が選んだ関数の観測であり、その戻り値が意味的に正しい障害かどうかは証明しない。
-assertionの期待値、観測対象、仕様の十分性もレビュー対象。
-プロセス・補助API・テストコードを信頼する。任意のJS全体や観測期間外の処理を検証したとは扱わない。
+The report uses v2. Legacy configuration v1 does not require observations and reports `not_required`. `check` leaves them `not_run`; `verify` performs execution matching. Rust enums distinguish `TestStatus`, `ObservationStatus`, `ScenarioState`, and `AssertionStatus`. Unknown runner states retain their original text and never become success. Test and observation statuses stay separate because a test can pass while a required assertion is missing.
 
-## 状態と出力
+Configuration, report, snapshot, and observation protocol versions are independent. New snapshots use v2; old v1 snapshots remain readable. Existing `analysisComplete` also becomes false for runner/report failures. Its meaning is preserved rather than redefined as strictly static completion.
 
-JSONレポートはv2。v1設定では観測を要求せずnot_requiredとし、旧ワークフローを維持する。
-checkは型と登録だけを確認し、観測はnot_runのまま。verifyで初めてmissing等へ遷移する。
-TestStatus、ObservationStatus、ScenarioState、AssertionStatusにはRust enumを使用する。テストの未知の状態は元の文字列を保持し、成功へ変換しない。
-必須の比較が抜けていてもランナーはpassedになり得るため、testStatusとobservationStatusは分ける。
+A v2 snapshot stores tags and scenario ID, tag, expected behavior, test reference, and required observations. Removal produces EC013 even if another scenario still represents the tag. A changed existing scenario appears in `changedScenarios`. `--strict-baseline` adds EC014 per changed scenario to `check`/`verify`, with exit 1 if no infrastructure/configuration error supersedes it. Additions alone do not fail; existing EC007/EC013 removal rules remain.
 
-設定、snapshot、出力JSON、観測プロトコルのschemaVersionは、それぞれ独立したバージョン。
-観測プロトコルは新設のv1。snapshotはv2を生成し、旧v1も読み込む。
-既存のanalysisCompleteはワークフロー失敗も含むため、厳密な静的解析の完了指標にはまだ分離していない。
+Strict comparison requires `--baseline`, configuration v2, and snapshot v2 scenario history for every contract. Missing CLI baseline is an argument error; incompatible configuration or use with `snapshot` is EC_CONFIG; missing historical data is EC_BASELINE, exit 2. Snapshot conflicts are rejected before writing. Valid EC014 differences do not prevent `verify` from running tests/evidence, so both changes and current results are returned. Corrupt history or invalid configuration prevents execution. Old snapshots cannot identify pre-migration scenario deletion. A changed source-definition reference invalidates the baseline instead of assuming type identity.
 
-## ベースライン
+The caller controls baseline provenance. Creating/replacing a snapshot does not prove approval; CI must obtain its comparison source separately from the proposed change.
 
-v2 snapshotはタグとシナリオのID・タグ・expect・テスト参照・必須観測を保存する。
-シナリオの削除はEC013。タグが別シナリオによって残っていても検出する。
-同じシナリオIDで期待動作や必須観測が変わればchangedScenariosへ表示する。
-`--strict-baseline`を指定したcheck/verifyでは、changedScenariosの各シナリオにEC014を追加し、ほかの処理に異常がなければ終了コード1にする。
-このオプションは`--baseline`を必須とし、設定v2と、すべての契約にシナリオ履歴を持つsnapshot v2を要求する。設定形式・snapshotとの併用はEC_CONFIG、履歴不足はEC_BASELINEとして終了コード2にする。
-引数としてbaselineがない場合はCLIの引数エラーとする。snapshotとの併用は書込前に拒否する。
-差分比較は既存の規則を使い、シナリオの追加だけでは不合格にしない。削除は従来のEC007/EC013で扱う。
-verifyでは有効な履歴との差分にEC014があってもテストと観測を実行し、実行結果と仕様変更の診断を同時に返す。破損した履歴や設定不備では実行しない。
-比較元は呼出側が管理する。新しいsnapshotの作成や差替えを承認の証明として扱わず、CIでは比較元の版をレビュー対象の変更と分けて指定する。
-旧snapshotはシナリオ履歴を持たないため、移行前の削除は判断しない。
-ソース定義の参照先が変わった場合は、以前と同じ型だと推定せずbaselineを拒否する。
+## Owned input and pure judgments
 
-## 実装・リファクタリング方針（提案）
+Keep one Cargo package with explicit modules. CLI types exist only at conversion boundaries. Internal request variants distinguish contract operations, discovery, and generation. A shared one-shot analysis thread uses a 32 MiB stack, distinguishes spawn failure from panic, maps errors to existing command diagnostics, and never returns tsrs handles across the boundary.
 
-最初の目標は、現在の判定結果を保ちながら、入力の検証、外部処理、合否の判断を別々に変更できる構成にすることです。
-CLIの責任分離、検証済み入力の型付け、判定とレポートの分離を実装しています。
+External processing acquires files, compiler facts, subprocess outputs, and temporary resources as owned values. Pure judgments determine registration gaps, test matching, observation sufficiency, and snapshot changes without touching files, processes, or a partially assembled report. Final conversion produces the external report once. Snapshots derive directly from registrations, independently of test execution and report rendering.
 
-### 判定結果の受渡し
+Registration results borrow validated configuration and contain type tags and registered cases or missing tags. Test matching returns file/full-name keyed results; observation matching consumes those results. Each stage preserves its diagnostic order. A report-read success followed by observation-read failure retains test results and adds the observation error. A runner-report read failure retains the existing unexecuted display; this distinction does not newly define whether a subprocess physically started.
 
-登録結果は、検証済み契約への参照、型から得たタグ、登録済みケースまたは未登録タグを持ちます。設定を複製したり、不完全な出力用ケースを途中の作業状態にしたりせず、設定の寿命の中で参照します。
-テストの照合はファイル参照と完全名をキーにした結果を返します。観測の照合はこのテスト結果を入力に取り、契約IDとシナリオIDごとの観測結果を返します。診断は登録・テスト・観測それぞれの既存の順序を保ちます。
-最終レポートはこれらの値から一度だけ組み立てます。JSONの形式やフィールド省略条件は判定関数の責任に含めません。snapshotも登録結果から直接生成し、テスト実行やレポート生成に依存しません。
+`TryFrom<Config>` creates `ValidatedConfig` with private fields and immutable contracts/cases. Validated types expose neither `Deserialize` nor mutable references. An enum separates legacy and observation-enabled cases; the latter always has scenario identity, test reference, and requirements. Construction checks existing empty/duplicate/version rules in the same order and computes the stable test name once. Discovery/generation do not manufacture empty contract configurations to reach analysis.
 
-ランナーの結果を読めた後に観測の読取が失敗した場合、テストの結果と診断を残し、観測の失敗だけを追加します。ランナーの結果自体を読めなかった場合はテスト未実行の表示を維持します。これは既存の外部動作を保存するための区別で、実際に子プロセスが起動したかどうかを新しく定義するものではありません。
+`ValidatedObservations` holds format/run-validated records, including an empty collection's run ID. In-memory and filesystem validation use the same `RunContext`. Matching rejects a mismatched current run ID before returning judgments, without mutating registration or test inputs. Raw `Observation` cannot enter matching directly. The type establishes record validity, not scenario success, business meaning, or authentication.
 
-### 処理と依存の境界
+Test results distinguish passed, failed, unexecuted, missing, and duplicate. `pending`, `skipped`, `todo`, and unknown Vitest strings remain expressible in existing output. Unknown Bun report structures remain rejected. Recoverable file/input/runner failures use `Result`; ordinary failures do not become panics.
 
-単一のCargo packageを維持し、まずモジュールで責任を分けます。Rustは型解析・照合・診断と実行制御を担い、TypeScript/JavaScriptのコードは既存のランナーで実行します。
+## Execution ownership and ordering
 
-| 役割 | 責任と依存 |
-|---|---|
-| CLIと表示 | 引数を実行要求へ変換し、完成した結果からtext/JSONと終了コードを返す |
-| 実行手順 | 設定読取、型解析、登録照合、baseline照合、必要なテスト実行を現在と同じ順序で呼ぶ |
-| 外部処理 | ファイル確認、tsrs、子プロセス、一時ディレクトリを管理し、所有可能な値へ変換する |
-| 判定 | 登録の不足、テストとの対応、観測の充足、snapshot差分を値から判定する。ファイルやプロセスへ直接アクセスしない |
-| 出力への変換 | 各段階の結果と診断を既存のレポート形式へ変換する。判定ロジックを表示処理へ置かない |
+The runner has no dependency on contract verdicts. It returns common test/process results and an owning session whose private fields retain the observation directory and run ID. Files remain until verification finishes, then drop cleanup removes them. Startup or report-read failure also releases temporary resources.
 
-バイナリ側に実行手順・ランナー制御・表示のモジュールを設けています。tsrs adapterは引き続きバイナリ側に隔離し、判定用のライブラリへコンパイラ内部の型を持ち込みません。
-CLIの引数型は変換入口の中だけで扱い、実行処理にはパスやオプションを持つ内部リクエストを渡します。契約の検証・走査・初期生成をリクエストのenumで分け、契約の処理に走査や初期生成が渡らない形にします。
-実行入口は、32 MiBのスタックを持つ単発の解析スレッドを共通の処理で作成します。スレッド生成失敗とpanicを区別し、各コマンドが従来どおりの診断へ変換します。tsrsのハンドルをスレッドの外へ返しません。
-実行結果もenumで区別し、初期生成は動的JSONではなく型付きの結果を返します。表示側が各形式へ変換し、初期生成のJSONキー順・エラー時の出力先なども維持します。
+Verification first matches returned tests, then loads observations through the session, resolves observation paths, and matches them. Loading observations inside runner startup would change partial-result behavior and is avoided. Pre-test file existence and post-test evidence identity remain distinct acquisition stages. Unresolved paths cannot pass.
 
-これらはバイナリ内部の接点です。公開のJavaScript解析API、FFI、常駐セッションは追加しません。利用者との接点はCLIとESMのtestkitを維持し、別の呼出元が必要になった際に内部リクエストと結果を使う範囲を検討します。
+Argument conversion preserves validation order: scan/init baseline options fail before execution; a verify runner/executable mismatch is diagnosed after the existing configuration, analysis, and baseline stages. Enum/set refactors preserve visible ordering. Runner logs remain on stderr and never contaminate JSON stdout. Explicit executable resolution and PATH lookup for an unspecified Bun remain distinct.
 
-ランナーは現在のBun/Vitestのenumと関数で扱います。新しい実装先が必要になるまでは、プラグイン登録機構、汎用DI、async runtime、複数crateへの分割を導入しません。
+Before starting Bun, query that same executable's version. Versions through 1.2.18 fail with EC_RUNNER because JUnit omits file identity. An unreadable/unparseable version retains ordinary execution and strict report validation. Preflight rejection reports unexecuted tests and `analysisComplete: false`, matching report-read failure.
 
-ランナー起動は契約の登録や合否の判定に依存せず、共通のテスト結果・プロセスの成否・観測ファイルを所有するセッションを返します。セッションは一時ディレクトリと実行IDを非公開フィールドで保持し、そのIDを用いて観測を読みます。所有者が残る間はファイルを保持し、検証の終了時に削除します。起動やランナーレポート読取の失敗で結果を返せない場合も、一時ディレクトリは破棄されます。
+Registration gaps can still allow verify/snapshot to proceed under existing rules; invalid configuration or incomplete analysis stops them. Snapshot creation may write an inventory despite registration gaps but never overwrites. Default behavior reports expected-behavior/observation changes; strict mode fails them. Changing these contracts requires a separate requirement change.
 
-検証の実行手順は、ランナーから返された結果をまずテストへ照合し、その後でセッションから観測を読み、観測のパスを解決して照合します。この順序と部分結果の扱いを維持するため、ランナー起動の中で観測まで先に読み込むことはしません。
+These boundaries preserve CLI arguments/defaults/exit codes, configuration v1/v2, report v2, observation v1, snapshot compatibility, testkit API, diagnostic codes/order, omitted fields, stream routing, and generated JSON ordering/escaping. They do not create a persistent JS semantic API, FFI, generic DI/plugin framework, async runtime, or multiple crates for this workflow. Separate mutation APIs have their own [design](../mutation-workflows/design.md).
 
-ファイルパスの解決は、現在と同じ段階で外部処理が行います。テスト開始前のファイル存在確認と、実行後の証拠のパス照合を混同せず、未解決のパスを成功扱いしません。
-引数の変換は既存の検証順を変えません。scan/initのbaseline指定は実行前に拒否し、verifyのランナーと実行ファイル指定の不一致は、従来どおり設定・解析・baselineの確認後に診断します。
-比較結果と診断の並び順も保存します。集合の内部表現を変える場合でも、出力の順序が偶然変わらないようにします。
+## Static scenario matching
 
-### Rustの型で守る条件
+After type analysis, inspect registered v2 test files already in the tsconfig project. Do not add external tests to analysis or diagnose them merely for exclusion, because doing so could introduce test type errors that stop existing analysis.
 
-JSONの読取形式と判定用の型を分けます。既存の設定を読み取った後、`TryFrom<Config>`で非公開フィールドを持つ`ValidatedConfig`へ変換します。契約とケースも読取専用で参照し、登録の比較は検証済み契約だけを受け取ります。検証済みの型にはDeserializeや可変参照を提供しません。
-ケースは従来形式と観測付き形式をenumで分け、後者にはシナリオID・テスト参照・必須の観測条件を必ず持たせます。生成時に現在の空値・重複・バージョン条件を同じ順序で検査し、シナリオのテスト名を確定します。後段で同じ検査や名前の補完を繰り返しません。tsrsの接続はプロジェクトのパスだけを受け取り、走査と初期生成のために空の契約設定を組み立てません。
+Resolve `scenarioTest` through the called signature's declaration: its name must be `scenarioTest` and its module must export `ScenarioScope`. Resolve `fault`/`check` as methods declared on `ScenarioScope`; matching spelling alone is insufficient.
 
-観測についても、形式とrun IDを検証した記録の集合を`ValidatedObservations`に包みます。読取とメモリ内の検証は同じ`RunContext`を受け取り、同じ形式検査を通します。照合入口で検証時の実行IDと現在の実行IDの一致を確認し、不一致なら判定結果を返さずにエラーを返します。入力の登録・テスト結果は変更しません。空の記録集合にも実行IDを保持します。これは実行IDに基づく照合であり、悪意ある呼出元に対する認証ではありません。
-生の`Observation`は照合関数へ渡せないようにし、テストでも検証用の生成処理を通します。この型は記録の形式を保証するものであり、シナリオの合格や障害の業務上の意味を保証しません。
+Read object-literal definitions only. Extract finite string-literal sets from each property's initializer type, not the contextually widened whole object. Unbounded strings or unresolved spreads are skipped. Direct calls inside the fourth-argument body supply fault/check IDs by the same rule; helpers outside that body remain runtime-only.
 
-テストの照合結果はenumで成功・失敗・未実行・未発見・重複などを区別します。Vitestから受け取った未知の文字列は保持し、合格には変換しません。
-`pending`、`skipped`、`todo`などを出力時に勝手に統合せず、既存の`testStatus`文字列へ戻せるようにします。Bunの未知のレポート構造を拒否する振る舞いも維持します。
+EC015 covers unregistered contract/scenario combinations, wrong test file, wrong tag, and disagreement between `withoutFaults` and empty configured faults. EC016 covers concrete fault/assertion IDs absent from required IDs. Missing required IDs are not statically diagnosed because a helper could supply them. These conditions already fail runtime matching. `verify` reports them while still executing tests and matching observations.
 
-各段階は結果と診断を返し、前の段階の結果を次の入力にします。最終レポートを唯一の作業状態として共有せず、テスト結果と観測結果をそろえて出力へ変換します。
-回復可能な入力・ファイル・ランナーの失敗は`Result`で返し、通常の失敗をpanicへ置き換えません。tsrsのpanicをCLI全体の失敗として扱う境界と、解析用のスタック設定は維持します。
+## Explicit registered-file execution
 
-### 互換性を保つ範囲
+`verify --only-contract-tests` collects case test paths, resolves them from the configuration directory, deduplicates them, and passes them as runner file arguments. Empty selection is EC_CONFIG. Omitting the option supplies no extra file arguments and preserves full execution.
 
-このリファクタリングでは、CLIの引数・既定値・終了コード、設定v1/v2、レポートv2、観測プロトコルv1、snapshotの読み書き、testkitのAPIを維持します。
-診断コード・ケースと診断の順序・JSONのフィールド省略条件も対象です。テストランナーのログは引き続きstderrへ出し、JSONのstdoutへ混ぜません。
-明示した実行ファイルのパス解決と、Bun未指定時のPATH検索を別々に保持します。
-Bunは起動前に同じ実行ファイルの`--version`を読み、1.2.18以前ならEC_RUNNERで停止します。この版はsuiteの`file`属性を出力せず、どのケースも照合できないためです。版を取得・解釈できない場合は従来どおり実行し、レポートの検査で不正な形式を拒否します。実行前の拒否はレポート読取の失敗と同じく、テスト未実行・`analysisComplete: false`として出力します。
+## Validation and future boundaries
 
-現在の`analysisComplete`は、型解析が成功していても、ランナーの起動やレポート読取が失敗するとfalseになります。名前に合わせて意味を変更すると、出力と終了コードの互換性に影響するため、今回の整理では維持します。
-設定不備や解析不能で停止する段階と、登録不足を報告した後もverifyやsnapshotへ進む段階も変えません。snapshotは登録不足があっても一覧を書き出す場合があり、既存ファイルは上書きしません。
-既定では期待動作や必須観測の変更を差分表示にとどめ、strictモードで不合格にする規則も維持します。これらの振る舞いを改善する場合は、要件変更として別に扱います。
+The extraction sequence was CLI/execution/display boundaries, validated inputs, then pure judgments/report conversion. Each step must preserve external behavior and be independently reviewable. Shared Rust/JS fixtures use independent expectations for JSON-array names, Unicode/quotes, states, and counters. Testkit remains a small API without an assertion DSL or independent Result implementation.
 
-### 小さく移行する順序
+Validation includes Rust CLI analysis, report fixtures and actual Bun/Vitest runs, JS testkit tests, observation limits/stale IDs/corruption, incomplete and caught-failed assertions, baseline removals/changes, and representative CLI equivalence with normalization limited to environmental paths. Filesystem tests cover creation/deletion timing, symlink identity, partial reads, and diagnostic order. Required commands live in the [Rust guide](../../../../engineering/guidelines/rust-code.md), with current acceptance links in [implementation status](../../implementation-status.md).
 
-| 段階 | 変更 | 完了条件 |
-|---|---|---|
-| 1. CLIの責任を分ける | 実行手順、ランナー制御、表示を抽出する。既存の判定関数とデータ形式は保つ | 既存のCLI・Bun/Vitest受け入れテストが成功し、引数・実行順・終了コード・stdout/stderrの差がない |
-| 2. 検証済みの入力を型にする | 設定と観測の検証付き生成処理を導入し、生の入力を判定へ直接渡す呼び出しをなくす | 不正な設定、古いrun ID、壊れた記録、重複IDが従来どおり拒否される。検証経路を通したRust/JS共通の記録fixtureで形式の一致を確認する |
-| 3. 判定とレポートを分ける | ファイル確認を境界へ移し、登録・テスト・観測の結果を値として返す。snapshot処理を独立させる | 判定をファイルシステムなしで検証でき、同じ入力に対する合否・診断・レポートが移行前と一致する |
-
-各段階は独立してレビュー・差し戻しできる変更にします。境界を移すリファクタリングと新機能や依存更新を同じ変更に含めません。
-共通fixtureでは、シナリオ名のJSON配列、Unicode・引用符、観測状態・カウンターをRustとJSの両側で確認します。生成した期待値だけで自己一致を調べず、独立した期待結果を持たせます。
-testkitは現在の小さなAPIを保ち、この段階では比較式DSL、Resultライブラリの独自実装、Rustへの移植を追加しません。
-
-### 検証の方針
-
-既存のRustテスト、Nodeのtestkitテスト、実際のBun/Vitestによる受け入れテストを基準にします。判定関数の移動だけを確認するテストは追加せず、移す境界でまだ確認できていない外部の振る舞いを補います。
-
-| 守る振る舞い | 主な確認方法 |
-|---|---|
-| 有限な型タグ、登録不足、解析不能の区別 | RustのCLIテストでtsrsを実行 |
-| 未実行、skip/todo、名前の不一致、重複を成功にしない | ランナーレポートfixtureと実際のBun/Vitest |
-| 必須比較の欠落、未完了fault、捕捉された比較失敗を検出 | Rustの観測照合、JSのtestkit、両ランナーのシナリオ |
-| 今回の実行との一致、破損、読取上限 | 観測読取の境界テスト。上限の直前・到達・超過の未確認部分を補う |
-| 同一タグのシナリオ削除、期待動作変更、上書き拒否 | snapshot差分とCLIのテスト |
-| 引数・終了コード・出力の互換性 | 変更前後の代表的なCLI結果を比較。絶対パスなど環境差だけを正規化する |
-
-判定コード、実行制御、共有データ型を変更する各PRでは、READMEにあるfmt・clippy・Rustテスト・testkit・三つの受け入れスクリプトを実行します。
-実行前後のファイル作成・削除、symlinkによる同一性、途中の読取失敗をCLIから確認し、境界を移しても診断順序と部分結果が保たれることを確かめます。
-
-### 別途仕様を決める機能
-
-`analysisComplete`の意味の分離、テストのタイムアウトやログ保持の制限は、利用者が見る結果を変えるため別の要件として検討します。
-次の機能追加は、実プロジェクトで一つのエラー型を変更した際に足りなかった情報から選びます。まず型・シナリオ・実行結果の対応で役立つことを確認し、その後に解析範囲や連携先を広げます。
-常駐化、キャッシュ、並列実行は、処理時間やメモリ使用量を測定してから判断します。現在のプロセス寿命に依存するtsrsのリソース管理を、そのまま常駐APIへ転用しません。
-
-## 将来の機能候補（優先順位は未決）
-
-以下は既存の試作で挙げた案です。実装の約束ではなく、導入先での課題が分かった段階でknjと選びます。
-
-1. 明示したexported functionのsignatureと対象型の利用関係を、根拠位置付きで取得。
-2. 明示したResultライブラリごとの型抽出・実行時のエラー観測アダプター。
-3. 直接呼び出し、return、awaitから始める限定した伝播解析。動的dispatchやanyはunknownとして残す。
-4. ミューテーション結果との連携で、比較が実際の処理変更を検出する証拠を追加。
-5. 依存関係と設定・ランナー・バージョンを含むキャッシュキーを設計し、性能を実測。
-
-関係が分からない場合にテストを省くことはしない。誤った成功を減らすことを優先する。
-
-## 実行前の静的照合
-
-型解析が完了した後、v2のシナリオが参照するテストファイルのうち、tsconfigのプロジェクトに含まれるものを対象にする。プロジェクト外のファイルは対象外とし、診断も出さない。テストのために解析対象を追加すると、テスト側の型エラーで解析全体が止まるため。
-`scenarioTest`は解決した呼出シグネチャの宣言で特定する。宣言が`scenarioTest`という名前で、同じモジュールが`ScenarioScope`をexportしていることを条件にする。`s.fault`／`s.check`は、宣言が`ScenarioScope`インターフェースのメソッドであることで特定する。名前の一致だけの関数は対象にしない。
-定義はオブジェクトリテラルの場合だけ読む。各プロパティの初期化式の型から文字列リテラル型の集合を取り出す。オブジェクト全体の型は`ScenarioDefinition`の文脈で`string`へ広がるため使わない。集合を作れない値（`string`、spreadの可能性）は照合しない。
-本体（第4引数）の中で直接呼ばれた`fault`／`check`の第1引数を同じ方法で読み、設定の必須IDにないものをEC016とする。必須IDの欠落はヘルパー経由の呼出と区別できないため、静的には報告しない。
-contractとidの組合せごとに、未登録・テストファイルの不一致・タグの不一致・`withoutFaults`と空の`faults`の不一致をEC015とする。
-いずれも実行時の照合で必ず失敗する条件であり、合格の条件を新たに追加するものではない。verifyでも同じ診断を出し、テストの実行と観測の照合はそのまま続ける。
-
-## 登録済みファイルの選択実行
-
-`verify --only-contract-tests`では、設定の全ケースからテストファイルを集め、設定ディレクトリを基準に解決し、重複を除いてランナーの引数へ渡します。空ならEC_CONFIGで拒否します。省略時はファイルの引数を追加せず既存の全実行を維持します。
+Changing `analysisComplete`, timeouts, or log-retention limits is separate user-visible work. Persistent compiler resource management cannot reuse one-shot assumptions. Broader Result adapters, semantic fault observation, and stronger propagation need explicit evidence and requirements. Mutation discovery/caching are now specified separately; they must not silently expand the guarantees of this scenario verifier. Unknown relationships must not justify skipping required tests.

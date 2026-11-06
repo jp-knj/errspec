@@ -1,32 +1,27 @@
-<!-- sdev:begin -->
-## 仕様を起点にした開発
+# Working on errspec
 
-仕様の作成・変更、設計、実装、検証では、まず`./bin/sdev help`を実行し、表示される一覧から作業に対応するガイドを選んで読んでください。
-プロダクトの目的整理、機能の要件定義、実現方法の設計、文書の更新などが対象です。
+Read [the documentation index](docs/README.md), the Product and the relevant
+Requirements/Design before changing behavior. The approved scope includes the
+fixed mutator 0.2.0 capability matrix and errspec's failure verification. Preserve
+existing CLI, exit-code, native JSON and testkit contracts.
 
-「作りたい」だけで実装までの依頼と解釈せず、まず対話で目的と範囲を整理してください。
-文書作成だけの依頼は文書と要点の提示で区切り、実装まで任されている場合は要件・設計の要点を途中で示してください。
-目的・範囲・利用者の振る舞いについて未決の判断が必要なら、利用者へ確認してください。
-目的や条件を仮定で補わず、使える質問ツールを優先して質問し、回答に応じて具体例や条件を掘り下げてください。
-詳しい進め方は`./bin/sdev help workflow`を参照してください。
+Keep scope decisions, implementation evidence and outstanding validation distinct.
+A passing local test or a document edit does not establish human approval of a
+new requirement or completion of the practical trial. Do not ask again about work
+already authorized in the conversation. Explain a new behavior decision when the
+existing scope does not resolve it.
 
-利用先の指示・規約と既存の仕様を優先してください。
-新規文書に適用するテンプレートの指定がなければ、`./bin/sdev template`の一覧から対応するものを選んでください。
-既存文書の変更では、その構造を尊重してください。
+Use [the specification workflow](docs/engineering/guidelines/specification-workflow.md)
+for documentation responsibilities and updates. Specifications are maintained in
+English under `docs/products/errspec/`. Keep the root README exactly `# errspec`
+followed by one newline; detailed guidance belongs in `docs/` and package READMEs.
+Repository visibility changes, repository migration, npm/crates publication and
+production deployment are separate future work.
 
-仕様は、このプロジェクトのProduct・Requirements・Designを使います。
-配置の指定がなければ、`docs/products/`以下に作成してください。
-sdev.tomlの既定言語と翻訳言語に従い、既定言語は`.md`、別言語版は`.<言語>.md`を使ってください。
-各言語版は同じ内容として、同じ変更で更新してください。
-<!-- sdev:end -->
+## Rust development
 
-## 今回の仕様策定の範囲
-
-sdevはknjとAIが仕様を固める間の作業用です。恒久的な実行時依存やCIの必須条件に追加しません。
-仕様案の入口は[docs/README.md](docs/README.md)です。AIの検査だけで人との合意済みにしません。
-仕様の内容が確認された後、合意した内容を英語のドキュメントへ反映し、sdevの起動スクリプト・設定・案内を取り除きます。
-仕様の確認前に、その後の工程を完了したことにはしません。既存の会話で依頼された範囲は聞き直さずに進めます。
-
-## Rustの開発基準
-
-Rustの実装・変更では、[Rustコードとsnaptestの基準](docs/engineering/guidelines/rust-code.md)に従って、関数と型の配置、ファイル取得と判定の分離、期待値の確認を行ってください。
+Follow [Rust code and snapshot standards](docs/engineering/guidelines/rust-code.md)
+for function/type ownership, separation of acquisition from judgment, and review
+of expected results. Follow [mutation execution boundaries](docs/engineering/mutation-flow.md)
+when changing compilers, runners, caches or verdicts. Compiler/runner acquisition
+can remain JavaScript/TypeScript; shared planning and judgments remain native.

@@ -1,98 +1,41 @@
-# 配布と最初の検証の生成
+# Distribution and initial verification generation
 
-## このドキュメントについて
+[Product](../../product.md) requires developers to verify a first failure case in an existing project without installing Rust.
 
-[Product](../../product.md)に基づき、Rustを導入せず既存プロジェクトで最初の失敗ケースを検証できるようにします。
+## Scope
 
-### スコープ
+Provide npm packages, prebuilt binaries for supported platforms, configuration and test generation for an existing error type, and installation trials in an independent real project. Expected business behavior remains the developer's responsibility. Generation must not overwrite existing files. Creating public accounts or changing repository visibility is outside this work.
 
-npmパッケージ、対応OSのビルド済みバイナリ、既存エラー型に対応する設定・テストの生成と、別の実プロジェクトでの導入検証を扱います。
+## User stories and acceptance
 
-### スコープ外
+### Start with one existing type
 
-期待する業務動作の自動決定、既存ファイルの無断上書き、公開アカウントの作成、リポジトリの公開設定変更は行いません。
+Developers select one exported type, generate minimal configuration and tests, and supply the actual expected behavior.
 
-## ユーザーストーリー
+- A type with finite failure tags produces a case and test for every tag. Unfinished expectations fail in an ordinary test run.
+- If either output already exists, generation reports the conflicting path, preserves existing bytes, and leaves neither new output behind.
 
-### 既存の型を一つ選んで始める
+### Use the CLI without Rust
 
-開発者として、一つの型から最小設定とテストを生成し、実際の期待動作を追記して検証したい。
+Developers install the npm distribution and execute its native CLI.
 
-**受け入れ条件:**
+- On a supported platform, the launcher forwards arguments, standard streams, and exit status to the prebuilt native binary. It does not compile Rust on the user's machine.
+- An unsupported platform or missing binary produces a nonzero exit with a useful installation or platform explanation. The launcher must not execute a binary for another platform.
 
-Scenario: 有限タグ型を指定した場合、各タグの未完成テストを作る
+## Functional requirements
 
-- Given: 対象の公開型に有限な失敗種別がある。
-- When: 初期設定を生成する。
-- Then: 全タグのケースとテストを作成し、未記入の期待動作は通常のテスト実行でも失敗する。
+Inputs are a tsconfig, exported type, discriminator, runner, and output paths. Outputs are configuration, tests, and next steps. CLI, testkit, and platform binaries use matching versions; the wider package surface is described in the [workflow requirements](../mutation-workflows/requirements.md).
 
-Scenario: 出力先が既存ファイルの場合、上書きしない
+Generation does not execute tests or install dependencies. Unresolvable types, ambiguous candidates, and output conflicts fail before writing. Supported OS/CPU combinations and unpublished status are explicit. Acceptance uses built, packed, locally installed artifacts.
 
-- Given: 設定またはテストの出力先が存在する。
-- When: 初期設定を生成する。
-- Then: 衝突したパスをエラーとして示し、既存ファイルを変更せず、もう片方の生成物も残さない。
+## Evidence and data
 
-### Rustを導入せずCLIを利用する
+An independent project trial records the fixed project revision, commands, number of changed files, detection of an unregistered tag, and detection of a removed mandatory assertion. Installation time or savings are not claimed before measurement.
 
-開発者として、npmでインストールして実行したい。
+Generation uses type/tag/runner/path data locally. Distribution metadata includes version, OS/CPU, binary, license, and checksum. Matching versions connect the launcher, native package, and testkit.
 
-**受け入れ条件:**
+## External services and release boundary
 
-Scenario: 対応OSのパッケージがインストールされた場合、ネイティブCLIを起動する
+npm and GitHub Actions support distribution preparation. Local tarballs and CI artifacts can be prepared without publishing credentials. Scope ownership and first publication authentication are checked when publication is authorized. Unpublished artifacts must not be described as already available from the public registry.
 
-- Given: Node.jsと対応プラットフォーム用の配布物がある。
-- When: npmパッケージのCLIを実行する。
-- Then: 引数・標準入出力・終了状態をRust CLIへ引き継ぎ、利用者の環境でRustをビルドしない。
-
-Scenario: 非対応OSまたはバイナリ不足の場合、理由を示す
-
-- Given: 必要な配布物が存在しない。
-- When: CLIを実行する。
-- Then: 非ゼロで終了し、再導入または対応環境を示す。別OSのバイナリを実行しない。
-
-## KPI
-
-別の実プロジェクトを固定した版で使い、導入に必要なコマンド・変更ファイル数・型の登録漏れ・必須比較の削除の検出結果を記録します。実測前に導入時間や削減率を主張しません。
-
-## 機能要件
-
-### 初期生成と配布
-
-**入力:** tsconfig、公開型、識別子、テストランナー、出力先。
-
-**出力:** 設定・テストと次の手順。配布はCLI、testkit、プラットフォーム別バイナリを同じ版で用意します。
-
-#### 適用する条件
-
-初期生成はテストや依存インストールを実行しません。対応環境と未公開状態を明記し、ビルド・pack・インストールした配布物で確認します。
-
-#### 例外ケースでの振る舞い
-
-型解析不能、候補の曖昧さ、出力の衝突は生成前に失敗します。配布物は対応OS・CPUを明示します。
-
-## データ要件
-
-### 必要なデータ
-
-- **生成対象:** 型、タグ、ランナー、ファイル名。
-- **配布情報:** 版、OS・CPU、バイナリ、ライセンス、checksum。
-
-### データ間の関係
-
-同一版のCLIとプラットフォーム別パッケージ、testkitを対応させます。
-
-### 個人情報
-
-生成対象の識別子・パスはローカルで処理します。
-
-## 依存する外部サービス
-
-npmとGitHub Actionsを配布の準備に使用します。公開は権限と公開先が整った時に行い、未公開の成果物を利用可能と案内しません。
-
-## セキュリティ上の留意事項
-
-インストール時に任意URLから実行ファイルを取得するスクリプトは設けません。既存のソースやテストを自動で書き換えません。
-
-## 未決事項
-
-npmのscope所有権と初回公開認証は公開時に確認します。コード・配布物・PRの準備は公開せずに進められます。
+No install script downloads executables from arbitrary URLs. Existing source and tests are not automatically rewritten. Additional platforms require actual build and execution evidence before entering the supported list.

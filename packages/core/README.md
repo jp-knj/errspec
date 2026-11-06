@@ -1,8 +1,10 @@
 # @errspec/core
 
 Typed mutation configuration and programmatic execution through errspec's native
-planner and verdicts. Requires Node.js 24 or later. Package tarballs are available
-as CI artifacts; this package is not yet published to npm.
+planner and verdicts. Requires Node.js 24 or later. Packages can be built and
+packed as local artifacts; this package is not published to npm. See the
+[distribution guide](../../docs/engineering/guidelines/distribution.md) for
+installation and required platform validation.
 
 ```js
 import { defineConfig, runMutation } from '@errspec/core';
@@ -67,7 +69,10 @@ the CLI/API `node` option (or `node` on PATH), before a file can supply its own
 execution option. Loader logs go to stderr, with a 10-second deadline and 1 MiB
 output limits. Configuration scripts run as local project code.
 
-Additional runner packages are a subsequent implementation stage.
+The [Vitest](../vitest/README.md) and [Jest](../jest/README.md) packages fix their
+runner and delegate to this same native request. [Playwright](../playwright/README.md)
+ships extendable browser fixtures. The independent [typecheck package](../typecheck/README.md)
+returns compiler facts through the implementation shared with the embedded driver.
 `formatReport` shares the native presentation with the CLI; `defineMutator`,
 `defineIgnorer` and `definePlugin` define module plugins.
 
@@ -95,8 +100,10 @@ still kills a mutant. Removing a test removes its recommendation. Changed tests,
 helpers/configuration outside the mutation inventory, removed source lines,
 module effects and changed functions without an observed candidate conservatively
 include every currently collected test file. Uncollected or deleted changed tests
-remain visible in `warnings`. Failed acquisition returns exit code 2 and no file
-recommendations. The report distinguishes a current probe from validated probe
+remain visible in `warnings`. Failed current baseline/probe or final-input
+acquisition returns exit code 2 and no file recommendations. Unavailable Git-base
+source or syntax conservatively includes every current test file instead. The
+report distinguishes a current probe from validated probe
 reuse; an empty successful list means no related changes were found.
 
 ## Complete kill matrix
@@ -121,6 +128,12 @@ run afresh: ordinary first-detection and scope-cache outcomes cannot supply cell
 even with matching input stamps. Validated probe reuse is retained; `cache.reused`
 and `cache.saved` for result rows stay zero in matrix mode.
 
+Complete acquisition allows enough wall time for runner/browser restarts after
+failures while retaining per-test/hook and progress-stall deadlines. Actual
+per-test retries/repeats and timeouts leave rows incomplete. The
+[cross-runner acceptance](../../tests/mutation-runner-matrix.test.mjs) covers
+Jest, Vite+ and real Playwright projects; installed checks exercise the same APIs.
+
 ## Git selection
 
 Use `errspec mutate --since <revision> --diff-unit node` to select mutants whose
@@ -142,8 +155,9 @@ baseline always runs; `--cache` can reuse the instrumented probe separately.
 A completed diff report describes only its selected mutants; consult
 `selection.selected`, `omitted` and `fullRunReason` before interpreting its score.
 Exact-input result reuse is available separately with `--cache`; removing tests
-invalidates those results. Scope-aware reuse and experimental callgraph selection
-are subsequent stages.
+invalidates those results. Opt-in scope-aware reuse and experimental static-call
+reuse are documented below, with their conservative fallback and approximation
+limits.
 
 ## Partial runs and quality gates
 
@@ -227,7 +241,8 @@ until their external inputs and lifecycle can be acquired. Persistence errors
 remain visible as incomplete execution.
 
 By default, position-only edits keep mutant IDs but invalidate results and
-coverage. Experimental callgraph selection remains a subsequent stage.
+coverage. Opt-in scope reuse and experimental static-call reuse below can retain
+eligible results while still refreshing the full probe after raw source edits.
 
 ### Reusing unchanged functions after edits
 

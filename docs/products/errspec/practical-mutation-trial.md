@@ -2,7 +2,7 @@
 
 On 2026-11-05, isolated Journey use-case tests were used to check Git scope selection and follow up previously surviving mutants. The selected 29 mutants all survived the original tests. After adding 21 tests, the same 29 identities produced **23 Killed and 6 Survived**, with no implementation change. Confirmed new business bugs: **0**.
 
-This source-free record retains aggregate observations and generic classifications. Private paths, exports, type/tag names, test bodies, source, raw reports, and trial scripts remain outside repository artifacts. The [earlier full/repeat comparison](https://github.com/jp-knj/errspec/blob/af04b10/docs/engineering/benchmarks/journey-2026-11-05.md) records the separate fixed-reference baseline; the [failure-verification trial](practical-failure-trial.md) covers other KARTE scopes.
+This source-free record retains aggregate observations and generic classifications. Private paths, exports, type/tag names, test bodies, source, raw reports, and trial scripts remain outside repository artifacts. The [earlier full/repeat comparison](../../engineering/benchmarks/journey-2026-11-05.md) records the separate fixed-reference baseline; the [failure-verification trial](practical-failure-trial.md) covers other KARTE scopes.
 
 ## Conditions and preservation
 

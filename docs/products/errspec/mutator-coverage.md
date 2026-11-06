@@ -1,93 +1,88 @@
-# mutator 0.2.0との機能対応
+# Capability coverage against mutator 0.2.0
 
-[Product](product.md)の目標は、mutatorの全機能を包含し、errspecのエラー型・失敗シナリオ検証を併せて提供することです。この表は目標と実装済みの範囲を区別するために使います。Vitestによる生成・実行・判定を`mutate`で提供します。追加ワークフローの実装状況も下表に示します。全機能の条件は[追加のRequirements](features/mutation-workflows/requirements.md)に定めます。
+[Product](product.md) requires the fixed reference's user capabilities together with errspec's error-type and failure-scenario verification. This table describes implementation boundaries, not a declaration that every acceptance/release condition has passed. Follow the [workflow requirements](features/mutation-workflows/requirements.md), [design](features/mutation-workflows/design.md), and [acceptance/evidence index](implementation-status.md).
 
-比較対象は[mutatorのREADME](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/README.md)と同じcommitの[CLI package.json](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/cli/package.json)で確認した0.2.0です。commitは`025870640d46e93e97285d67e4c265074cf8b295`に固定します。コマンドと設定は[options.ts](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/cli/src/options.ts)、組み込みmutatorは[mutators.ts](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/core/src/mutators.ts)も確認しています。
+The reference is mutator 0.2.0 at `025870640d46e93e97285d67e4c265074cf8b295`: [README](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/README.md), [CLI package](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/cli/package.json), [options](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/cli/src/options.ts), and [mutators](https://github.com/mizchi/mutator/blob/025870640d46e93e97285d67e4c265074cf8b295/packages/core/src/mutators.ts). These are primary implementation references, not code to copy blindly.
 
-最初の提供単位を[Vitestによる生成・実行・判定のRequirements](features/mutation-testing/requirements.md)と[Design](features/mutation-testing/design.md)へ具体化しました。18種、基準実行、到達記録、状態別の判定、text / JSON、未検出を不合格にする任意の指定を対象にします。生成・実行・判定の範囲を実装し、下表へ反映しています。
+Inclusion means equivalent usable capability, not identical commands, configuration, JSON, exit codes, or plugin APIs. Existing errspec CLI/native JSON/configuration/testkit contracts remain. Separate feature scopes do not weaken the full product goal. New performance or correctness guarantees require evidence rather than a checked capability row.
 
-## 包含の基準
+## Generation, execution, and reuse
 
-利用者が利用できる機能の包含を基準にします。mutatorと同じCLI・終了コード・設定・JSON・プラグインAPIであることは目標に含めません。既存errspecのCLI・終了コード・設定・JSON・testkit APIは維持します。
+| Fixed-reference capability | errspec implementation and boundary |
+|---|---|
+| AST instrumentation, switching, formatting, source maps | tsrs runtime AST and MagicString in-memory emission; [generation design](features/mutation-testing/design.md) specifies safe placement. |
+| 18 built-in mutator families | All families below, with explicit safe-placement/exclusion reasons. |
+| Baseline, per-test reach, reached-test selection, initialization mutants | Ordinary baseline plus inactive probe; concurrent/static reach expands to file/suite when necessary. |
+| In-memory Vitest/Vite transform and reusable sessions | Opt-in `--reuse-session`, default fresh. globalSetup or missing public APIs falls back fresh with engine.sessionReuse reason. |
+| Stable identity and source/test/dependency/settings/environment/plugin-aware cache | Exact result/probe reuse is opt-in. Ordinary baseline always runs. Explicit relocation supports path-independent checkout copies; scope reuse uses validated function/entry cohorts and full current probes after edits. Comments, opaque calls, missing entries, and unknown inputs broaden revalidation. Plugin module/dependency/settings/data changes invalidate reuse. Partial probe refresh is a [deferred optimization](implementation-status.md#probe-reuse-audit), not a missing user feature. Mutation cache remains separate from scenario snapshots. |
+| Git node/scope selection, removed killing tests, uncollected changed tests | `--since`, `--diff-unit node/scope`; changed/deleted tests and outside-inventory edits broaden revalidation. Cache validates current covering/selected/killing-test references. Uncollected changed tests warn. |
+| Explicit mutant selection | `--only`; unknown IDs fail. |
+| Forced full probe | `--full-dry-run`/fullDryRun, independently of result reuse; negative flag clears configuration. |
+| Experimental callgraph pruning of old survivors | `--cache --cache-scope --experimental-callgraph`, default off; bidirectional acquired static calls/resolved imports. Unknown calls/entries revalidate. Warn about unmodeled through-test value flow and disclose omissions. |
+| Weak mutation, infection-based narrowing, disablement | Opt-in comparison/arithmetic acquisition distinguishes not infected. Unsupported/static/concurrent cases broaden to covering tests. |
+| Compiler checks and CompileError | Opt-in `--typecheck`/negative flag, tested with TS 5.9.3/6.0.3/7.0.2. Compare mutant-only diagnostic additions. |
+| Type-proved optional-chain exclusions | Require strictNullChecks, noUncheckedIndexedAccess, applicable receiver types, and an exact single optional-token edit. A family label cannot excuse additional property/index/argument/suffix changes. Direct, worker and installed TS6/TS7 regressions retain ordinary diagnostics for such edits. |
+| Arid logging heuristics/custom callees/disablement | Opt-in `--arid`, default off; callee patterns replace defaults. Logging names do not establish side-effect equivalence. |
+| Disable and Stryker comments | errspec-/mutator- line/next-line/region directives and Stryker disable/restore with family/reason/restore handling. Literal/template/regex/JSX false directives do not exclude. |
+| Reasoned acceptance and stale acceptance reporting | `accept --reason`, `errspec.accepted.json`; current verdict/gate applies acceptance separately. |
+| Custom module/package mutators/ignorers and cache invalidation | `plugins`, `--plugin`, typed defineMutator/defineIgnorer/definePlugin. Rust validates IDs/ranges/placement/reparse/reason precedence. Acquired import closure/settings/declared inputs bind deterministic cache; unknown inputs stay fresh. |
+| Parallel trials and splitting long runs | `-j`/concurrency uses independent owned workers with matching probes, default 1. `--shard INDEX/TOTAL` deterministically partitions post-Git/only candidates. Scores/gates/budgets remain per invocation/shard. |
+| Deterministic per-line sample and time budget | `--mutants-per-line`, `--time-budget`; unstarted candidates stay reasoned Pending with unknown overall score. |
+| Hit/stall/total limits and bounded confirmation | Shared native verdicts; at most one retry per mutant, extended timeout or same-condition RuntimeError confirmation. |
+| Signal cleanup and orphan recovery | Native supervisor owns runner groups, detects parent death, verifies recovery capabilities, and never signals saved PIDs directly. Unix endpoint restrictions retain parent monitoring and are reported. Deliberately detached descendants remain outside ownership. |
 
-失敗シナリオ検証のスコープ外にあるmutation testingとの連携は、その個別機能の範囲を表します。ミューテーション機能は追加機能としてRequirements・Designで具体化し、既存機能の約束を維持します。この表は実装の完了や、未作成の要件への合意を示すものではありません。
+## Built-in families
 
-## ミューテーションの生成・実行・再利用
+| Category | Families |
+|---|---|
+| Operators | ArithmeticOperator, AssignmentOperator, EqualityOperator, LogicalOperator, UnaryOperator, UpdateOperator |
+| Conditions and bodies | ConditionalExpression, BlockStatement |
+| Literals, arrays, and objects | BooleanLiteral, StringLiteral, ArrayDeclaration, ObjectLiteral |
+| Function values | ArrowFunction, FnValue |
+| Calls and access | CallExpression, MethodExpression, OptionalChaining |
+| Regular expressions | Regex |
 
-| mutator 0.2.0の機能 | errspecの実装状況・関連機能 |
-| --- | --- |
-| oxc ASTによるinstrumentation、mutation switching、書式の維持、sourcemap | `mutate`で提供。tsrs ASTとMagicStringを使用 |
-| 組み込み18種のmutator | `mutate`で提供。規則と安全な配置の条件は[Design](features/mutation-testing/design.md)を参照 |
-| dry run、テスト単位の到達記録、到達したテストだけの実行、モジュール初期化時のmutant | `mutate`で提供。concurrentや初期化時はファイル全体へ選択を広げる |
-| Vitest/Vite内のメモリ上の変換とセッション再利用 | メモリ上の変換と`--reuse-session`によるinstrumented session再利用を提供。既定はfresh。globalSetupがある場合や必要な公開APIがない版ではfreshへ戻し、理由をengine.sessionReuseに示す |
-| 位置に依存しないmutant ID、関数・テスト・依存・設定・環境・pluginの変更に応じた結果とcoverageの再利用 | 入力完全一致の結果・probe再利用に加え、明示的な`--cache-relocation`でproject位置に依存しないテストの別checkout再利用を提供。依存内容・外部path・その他の環境・provide値の照合は維持し、ordinary baselineは毎回実行。`--cache-scope`で、全probeを更新した上で位置だけの編集と到達test fileが独立な関数の結果を再利用。入口不足・opaqueな呼出し・commentを持つfileは保守的に再検査。custom pluginのmodule・依存・settings・追加入力を取得し、変更時に再検査。編集時は全probeを再取得する。固定版の部分再取得は、未実装の利用者機能ではなく延期した速度最適化の差として区別する（implementation-statusの監査根拠を参照）。契約snapshotと別形式 |
-| `--since`によるGit差分の限定、`node`/`scope`単位の選択、検出テストの削除による再検査、未収集の変更テストの警告 | `--since`と`--diff-unit node/scope`を提供。テスト変更・削除やinventory外の変更では全候補を再検査し、未収集の変更テストを警告。検出テストを保存する履歴との照合は後続 |
-| `--only`で指定したmutantだけの再検査 | `mutate --only`で提供。未知のIDはエラー |
-| `--full-dry-run`による到達記録の再取得 | 同名の指定と`fullDryRun`設定・APIを提供。結果cacheとは独立に、全テストでprobeを実行する |
-| `--experimental-callgraph`による生存mutantの再検査範囲の限定 | `--cache --cache-scope --experimental-callgraph`で既存の生存結果だけをstatic callの双方向到達で追加再利用。既定off、mode変更で再検証。実際のimport解決を取得し、未知call・入口不足は再検証する。call間の値の流れは表せず不正確になり得ることをwarningと省略件数に示す。 |
-| weak mutation、値の差によるテストの絞り込み、`not infected`の判定、無効化 | 比較・算術演算を`--weak-mutation`で提供。適用できない式と初期化・concurrentは全到達テストへ広げる |
-| 利用先のTypeScript 6以前／7以降でのmutantの型検査、`CompileError`、無効化 | `--typecheck` / `--no-typecheck`で提供。TS 5.9.3・6.0.3・7.0.2で検証 |
-| 型で同値と分かるoptional chaining mutantの除外と理由の提示 | 型検査で提供。strictNullChecksとnoUncheckedIndexedAccessを必要とする |
-| aridなログ専用コードの除外、calleeパターンの追加、無効化 | 明示的な`--arid`／`arid: true`でログ専用call・block・ifを除外。`--arid-callee`／`aridCallees`でpattern置換、`--no-arid`で設定を解除。従来の実行結果を維持するため既定off。命名によるheuristicであり、引数などの副作用が重要な場合は無効のまま使う |
-| disableコメントとStrykerコメントによる除外 | `errspec-`／`mutator-`のdisable-next-line・disable-line・disable/enable、Stryker disable/restoreを提供。family指定・region解除・理由の表示に対応。文字列・正規表現・template／JSX本文の偽指示は除外しない |
-| `accept`、理由付きの同値mutant承認、古くなった承認の案内 | `accept --reason`と`errspec.accepted.json`で提供 |
-| custom mutator／ignorer plugin、モジュール・パッケージからの読取、mutator単位の除外、plugin変更時のキャッシュ無効化 | module／packageの`plugins`と`--plugin`、`defineMutator`／`defineIgnorer`／`definePlugin`を提供。RustがID・範囲・placement・reparseと除外優先順位を管理。決定的なpluginはimport closure・追加入力・settingsをcacheへ反映し、取得できない外部入力は再検査。実行・再利用・変更の受け入れ検証とinstalled-core検証を追加 |
-| `-j`による並列実行、長い実行の分割 | `-j`／`concurrency`で独立した所有workerを起動し、probeを照合して同じ判定処理で並列実行する。既定1、予算は呼出し内で共有。`--shard INDEX/TOTAL`と設定・APIでGit／only後の候補を決定的に分割し、score・gate・予算は各shardの範囲 |
-| `--mutants-per-line`の決定的な標本選択、`--time-budget`、未実行の`Pending`表示 | 同名の指定と、理由付きの`Pending`で提供 |
-| hit limit、stall／total timeout、予算を延長した再実行、RuntimeErrorの再確認 | `mutate`で提供。再試行は一候補につき一度まで |
-| SIGINT／SIGTERM時の子プロセス終了、前回の孤立プロセスの検査と終了 | Native supervisorが所有するrunner groupを終了。親の異常終了を自動検出し、次回の起動でもcapabilityを照合して孤立groupを回収する。古いPIDへsignalを送らない。Unix endpoint禁止時は親監視を維持し、その状態をreportへ示す |
+Specific edits and inactive-state rules are in the [mutation requirements](features/mutation-testing/requirements.md) and [design](features/mutation-testing/design.md).
 
-## 組み込みmutator
+## Runners, reports, and quality decisions
 
-上記の固定commitにある18種を対象にします。各種の具体的な変換規則は、ミューテーション機能のRequirements・Designで定めます。
+| Fixed-reference capability | errspec implementation and boundary |
+|---|---|
+| Vitest 5/Vite+, automatic and explicit selection | auto/vitest/vite-plus/jest/playwright through CLI/configuration/API. Real Vite+ 1.5.0 fixture uses bundled Vitest 5.1.0 without root-level Vitest. |
+| Experimental Jest 30 native ESM | Real Jest 30.5.2 tests cover TS, custom async ESM transforms, duplicate IDs, skip/concurrent, parallel workers, and API parity. CommonJS and Jest multi-project configs are outside this adapter contract. |
+| Experimental Playwright/Vite, fixture extension, multiple projects | Real Chromium with Playwright 1.64.1/Vite 8.3.4 covers projects, fixture extension, navigation/frames, project selection, parallel probes, missing fixture, and real descendant cleanup. Vite server ownership and relative navigation are required; browser WebWorkers/custom servers are excluded. Unknown external inputs prevent cache reuse. |
+| Text, compatible JSON/HTML, output directory | Preserve default text and native `--format json`. `--reporter text/json/html` and `--report-dir` add MTE schema v2 and offline HTML. Real-report schema/viewer tests exercise output. |
+| Not detected / infected / reached and child-process risks | Distinct gap categories. Vitest, Jest, and Playwright Node worker launch facts attribute executable/relevant relative script closure to tests, including supported environment/fixture lifecycles. Remote platform acceptance remains required. No raw argv/env output, generic warning, dynamic/package/alias/shell-resolution claim, or automatic coverage promotion. |
+| Agent JSON with source/tests/fixes | `--reporter agent`/formatReport attaches validated available function source, covering tests, and assertion suggestions. Saved-report formatting does not refresh verdicts or prove complete old source identity. Stdout stays one JSON result, including under GitHub Actions. |
+| Simplify/removal candidates | Covered Survived deletion candidates with location/function/key/edit. Exclude NoCoverage, Ignored, and possible child-execution cases. |
+| Ranked related tests as files/JSON | `select-tests --since`/selectTests uses current baseline/probe coverage; historical kills are hints. Changed/deleted tests/code, helper/module changes, or insufficient observation fall back to current collected files. Final inventory is validated. |
+| Complete kill matrix and no-kill/subsumed/duplicate relations | Execute all covering tests; complete rows alone establish relations. No first-detection/scope row reuse; compatible probe reuse remains. Fresh matrix rows each run; no safe-deletion proof. [Nine cross-runner cases](implementation-status.md#cross-runner-acceptance) and offline installed matrix/Git-selection checks passed locally; remote platforms remain required. |
+| High/low/break thresholds and fail-on-survived | Dedicated quality gate, exit 1 for completed failure; baseline/infrastructure errors exit 2. |
+| Critical globs/comments require detection or approval | `--critical` and preceding errspec-critical/mutator-critical comments, with reasoned acceptance. |
+| GitHub warning annotations on changed lines | Shared annotation formatter and Action emit escaped file/line warnings; actual Git/GitHub fixtures cover them. |
 
-| 分類 | mutator | errspec |
-| --- | --- | --- |
-| 演算子 | `ArithmeticOperator`, `AssignmentOperator`, `EqualityOperator`, `LogicalOperator`, `UnaryOperator`, `UpdateOperator` | `mutate`で提供 |
-| 条件・本体 | `ConditionalExpression`, `BlockStatement` | `mutate`で提供 |
-| リテラル・配列・オブジェクト | `BooleanLiteral`, `StringLiteral`, `ArrayDeclaration`, `ObjectLiteral` | `mutate`で提供 |
-| 関数の戻り値 | `ArrowFunction`, `FnValue` | `mutate`で提供 |
-| 呼出・アクセス | `CallExpression`, `MethodExpression`, `OptionalChaining` | `mutate`で提供 |
-| 正規表現 | `Regex` | `mutate`で提供 |
+## Configuration, distribution, and agent workflows
 
-## ランナーとレポート
+| Fixed-reference capability | errspec implementation and boundary |
+|---|---|
+| ts/mts/mjs/js/json config, defineConfig/schema, precedence and negative flags | `errspec.mutation.config.{ts,mts,mjs,js,json}`, explicit CLI/API over validated config over defaults; arrays replace, paths retain documented roots. |
+| Programmatic execution/formatting/plugin APIs and package separation | Public core runMutation/formatReport/selectTests and definition helpers use the same native JSON request/verdict path without CLI reconstruction. [Vitest](../../../packages/vitest/README.md) and [Jest](../../../packages/jest/README.md) entries, [Playwright fixtures](../../../packages/playwright/README.md), and the independent [typecheck package](../../../packages/typecheck/README.md) are integrated with source and installed acceptance. Remaining platform validation is tracked in [status](implementation-status.md). |
+| CLI/adapter artifacts, Node 24 | Embedded mutation drivers require Node 24. Legacy Node 22 launcher/testkit contract remains. Packages are unpublished; artifact validation does not imply registry availability. |
+| GitHub Action, base fetch, save-on-failure history, copied checkout reuse | Composite Action uses native/installed artifacts, fetches missing base commits, restores/saves official cache with always-save, and delegates fingerprints/verdicts. Shallow/failing-gate/copied-input/installed fixtures pass locally; live service and three-platform CI remain distinct evidence. |
+| Agent Skills, skills-npm layout, init-skill, setup/test-loop/Playwright | Three package skills share native-embedded bytes. Preflight/identical-file preservation/explicit force/symlink boundaries/rollback retain project notes. Real mutation loop and installed native-only initialization are tested. |
 
-| mutator 0.2.0の機能 | errspecの実装状況・関連機能 |
-| --- | --- |
-| Vitest 5、Vite+、ランナーの自動選択と設定指定 | auto / vitest / vite-plus / jest / playwrightを設定・CLI・APIから選択。Vite+ 1.5.0の実fixtureはproject直下のVitestに依存せず、同梱Vitest 5.1.0で検証 |
-| Jest 30のnative ESM adapter（実験的） | Jest 30.5.2の実fixtureで共通native判定、TypeScript、独自async ESM変換、重複ID、skip/concurrent、並列実行とCLI/API同等性を検証。CommonJSとJest複数projectは対象外 |
-| Playwright TestとVite dev serverのbrowser adapter、fixture、複数project（実験的） | Playwright 1.64.1＋Vite 8.3.4のChromium実fixtureで複数project、既存fixture拡張、遷移・iframe、project選択、並列probeとSIGINT/SIGKILL後の実browser子孫回収を検証。外部入力が不明なcacheは再検証 |
-| text、mutation-testing-elements形式のJSON・HTML、保存ディレクトリの指定 | 従来の`--format json`を維持。`--reporter text/json/html`、`--report-dir`、MTE schema v2、外部リソース不要のHTMLを提供。実Vitest結果のupstream schema検証・HTML viewer実行を受入テストで確認 |
-| `not detected`／`not infected`／`not reached`の分類、子プロセス内で実行された可能性の警告 | レポートで3区分を表示。実際のNode子プロセス起動をテストへ関連付け、相対script依存のAST閉包に警告。raw argv/envは公開しない。動的な依存名・package/alias・shell展開は推測しない |
-| `--reporter agent`の不足・関数本文・到達テスト・修正案、stdoutとstderrの分離 | `--reporter agent` / `formatReport`で未検出区分、ASTの関数本文、到達テスト、修正案を単一JSONへ出力。GitHub環境でもannotationを混在させない |
-| `--reporter simplify`で削除してもテストが失敗しないコードを一覧化 | 到達済みの生存削除変異を、位置・関数・変異ID・削除内容とともに提示。未到達・Ignoredは含めない |
-| `select-tests`で変更に関係するテストを順位付けし、files／JSONで出力 | `select-tests --since`と公開`selectTests`。現在のbaseline／probeによるcoverageを取得し、過去のkillは明示したhintとして順位付け。変更test・削除code・観測不足・helper/module変更は全収集fileへ戻し、削除testと最後のinventory変更も検査。CLI／API／filesとinstalled-coreで検証 |
-| `--kill-matrix`による全検出テスト、検出なし・包含・重複テストの一覧、各実行方式での結果再利用 | 全covering testを実行し、complete rowだけで関係を判定。遅いkiller・weak mode・matching stampのfirst-detection排除・未実行予算・retry/timeoutを実fixtureで検証。結果rowは毎回再実行し、照合済みprobeだけ再利用。installed-coreも検証 |
-| high／low／breakの閾値、`--fail-on-survived`、baseline失敗とquality gate失敗の区別 | `--threshold-high/low/break`と`--fail-on-survived`を提供。quality gateは終了1、基準実行の異常は終了2 |
-| critical領域のglob／コメント指定、全mutantの検出または承認の要求 | `--critical`と直前の`// errspec-critical` / `// mutator-critical`で提供 |
-| GitHub Actionsの差分上のwarning annotation | 未実装 |
+## Additional errspec verification
 
-## 設定・配布・開発支援
+| Capability | Interface and contract |
+|---|---|
+| Candidate error types, throw/rejection/Result propagation and unknowns | [scan](features/discovery/requirements.md) |
+| Configuration and unfinished tests for one exported type | [init](features/distribution/requirements.md) |
+| Finite tags, case registration, definite source mismatches | [check](features/failure-verification/requirements.md); verify shares checks |
+| Current Bun/Vitest tests, fault completion, mandatory assertions | [verify and testkit](features/failure-verification/design.md) |
+| Saved scenarios, additions/removals/changes, strict baseline | [snapshot/baseline](features/failure-verification/requirements.md) |
+| Observed tag assertions in existing Vitest tests | [coverage](features/test-coverage/requirements.md) |
+| Explicit escaping paths and registered entry reach | [failure paths](features/failure-paths/requirements.md) |
+| Fresh-fixture fault sweep and state-preservation comparison | [failure atomicity](features/failure-atomicity/requirements.md) |
+| Installed TS 6/7 semantic backends | [TypeScript compatibility](features/typescript-compatibility/requirements.md) |
 
-| mutator 0.2.0の機能 | errspecの実装状況・関連機能 |
-| --- | --- |
-| `mutator.config.ts`／mts／mjs／js／json、`defineConfig`、JSON Schema、CLI優先順位と否定フラグ、root／include／exclude | `errspec.mutation.config.{ts,mts,mjs,js,json}`、`defineConfig`、JSON Schema、明示CLI/API優先、否定フラグを提供。受け入れ検証は`tests/mutation-options.test.mjs` |
-| `runMutation`、report formatter、plugin定義などのprogrammatic APIとcore／runner／typecheck／CLIのpackage分離 | `@errspec/core`の`runMutation`と`defineConfig`を提供。共通の版付き要求をRustへ渡しCLIと同じ判定を使う。`formatReport`も同じRust formatterを使用。plugin定義APIも提供。runner/typecheck package分離は後続 |
-| npm CLIと各adapterの配布、Node.js 24以降での利用 | `mutate`のdriverをネイティブバイナリへ同梱。Node 24以降を要求。errspecの配布物は準備中、npm/crates.io未公開 |
-| GitHub Action、差分のbase取得、失敗時も保存するsnapshot cache、別checkoutでの再利用 | composite Actionが不足baseを取得し公式cacheをrestore/save。失敗時もalwaysで保存。既存native APIへ委譲し、実shallow clone・quality failure・同一inputs/環境の別checkout再利用・installed CLIの受入を提供。環境変化は指紋へ反映し、live workflowはCI実行待ち |
-| Agent Skillsの同梱、skills-npm、`init-skill`、導入・反復修正・Playwrightの手順 | CLI packageのskillsへ3手順を同梱しnativeにも同じ本文を埋め込む。init-skillは全件衝突検査・同一本文保持・明示force・rollbackを実装。構造/実CLI/実mutation loopとinstalled byte一致の受入を提供 |
-
-## errspecが追加する検証
-
-| 機能 | 実装状況 |
-| --- | --- |
-| エラー型候補・throw／rejection／Result・伝播経路・未解決箇所の調査 | `scan`で提供 |
-| 指定した型の設定と未完成テストの生成 | `init`で提供 |
-| 有限タグ集合と契約登録の照合、テスト本文の確定的な食い違いの診断 | `check`で提供。`verify`も同じ照合を実行 |
-| Bun/Vitestの実行結果と、障害用関数の完了・必須比較・今回の実行記録の照合 | `verify`とtestkitで提供 |
-| シナリオ一覧の保存、追加・削除・変更、strict baseline | `snapshot`と`--baseline`で提供 |
-| 既存Vitestテストが確かめたエラータグの集計 | `coverage`で提供 |
-
-ミューテーション機能は個別のRequirements・Designで具体化し、実装と検証に合わせてこの表を更新します。
-
-全仕様の実装・受け入れ検証の追跡は[implementation status](implementation-status.md)を参照してください。
+Every implementation claim needs its linked [acceptance evidence](implementation-status.md). Current local results do not substitute for blocked CI jobs or remaining practical evaluation.

@@ -1,22 +1,29 @@
-# @errspec/testkit（未公開）
+# @errspec/testkit (unpublished)
 
-Bun testとVitestで、失敗シナリオの観測をRust CLIへ渡す小さなESMパッケージです。
-実装は通常のJavaScriptで、型定義はindex.d.mtsです。実行時の外部依存はありません。
-同じ実装をTypeScriptで書いた`index.ts`も同梱しています。パッケージの入口は`index.mjs`のままです。
-Node.jsの標準モジュールを使うため、ブラウザ内テストは対象外です。
+A small ESM package that records failure-scenario observations for the Rust CLI
+from Bun test and Vitest. The runtime is ordinary JavaScript with declarations in
+`index.d.mts` and no external runtime dependencies. The equivalent TypeScript
+implementation is included as `index.ts`; the package entry remains `index.mjs`.
+Node standard modules are required, so browser tests are outside this API's scope.
 
-このリポジトリでは相対パスでimportしています。別のプロジェクトではこのディレクトリをコピーし、ローカル依存として追加できます。
-例えばプロジェクト直下の`vendor/errspec-testkit`へ置いた場合、package.jsonに
+This repository uses relative imports. Another project can copy the directory and
+add it as a local dependency. For example, after placing it in
+`vendor/errspec-testkit`, add
 `"devDependencies": { "@errspec/testkit": "file:./vendor/errspec-testkit" }`
-を追加し、利用中のパッケージマネージャーでインストールします。公開済みnpmパッケージを指す指定ではありません。
+to package.json and install with the project's package manager. This refers to a
+local copy, not a published registry package. Prepared tarballs are another local
+installation option described in the [distribution guide](../../docs/engineering/guidelines/distribution.md).
 
-JavaScriptのファイルを置けないプロジェクトや、依存を追加せずテストの隣に置きたい場合は、`index.ts`だけを複製できます。
-このファイル1つで型定義も含みます。テストからは`import { scenarioTest } from "./errspec-testkit"`のように読み込みます。
-strictな型検査とBun/Vitestでそのまま動きます。`node:`モジュールの型には`@types/node`または`@types/bun`が必要です。
-`index.ts`と`index.mjs`は同じテストを両方に対して実行し、挙動の一致を確認しています。複製した後に手で編集すると、上流の版との対応が分からなくなるため、取得元のcommitを記録してください。
+Projects that cannot retain JavaScript files, or want a helper beside their tests
+without an added dependency, can copy `index.ts` alone. It includes declarations;
+import it with `import { scenarioTest } from "./errspec-testkit"`. It works with
+strict typechecking and Bun/Vitest. Node module types require `@types/node` or
+`@types/bun`. The same tests run against `index.ts` and `index.mjs` to check their
+behavior. Record the source commit when copying: manual changes can obscure which
+upstream version the copy represents.
 
 ```ts
-import { test } from "bun:test"; // または vitest
+import { test } from "bun:test"; // or vitest
 import { scenarioTest } from "@errspec/testkit";
 
 scenarioTest(test, import.meta.url, {
@@ -29,20 +36,22 @@ scenarioTest(test, import.meta.url, {
 });
 ```
 
-この短い例ではstubの動作を示しています。実用時は`fetchUser`をアプリケーションへ依存注入し、その応答や副作用を観測します。
+This short example demonstrates the stub. In application tests, inject `fetchUser`
+into the operation and observe its response or side effects.
 
-## 直接importしている依存に障害を差し込む
+## Faults in directly imported dependencies
 
-依存を引数で受け取らず、モジュールから直接importしているコードもあります。
-製品コードを依存注入の形へ書き換えなくても、テストランナーのモジュールmockで差し込めます。
-mockは差替え可能な参照へ転送するだけにします。各シナリオがその参照へ`s.fault`の戻り値を代入します。
+Some operations import dependencies instead of receiving them as arguments.
+Runner module mocks can supply faults without rewriting production code for
+dependency injection. Let the mock forward through a replaceable reference; each
+scenario assigns its own `s.fault` wrapper to that reference.
 
 Bun:
 
 ```ts
 import { mock, test } from "bun:test";
 import { scenarioTest } from "@errspec/testkit";
-import { notify } from "../src/notify"; // 内部で "./mailer" の deliver をimportしている
+import { notify } from "../src/notify"; // imports deliver from "./mailer"
 
 const mailer = { deliver: async (_to: string) => ({ accepted: true }) };
 mock.module("../src/mailer", () => ({ deliver: (to: string) => mailer.deliver(to) }));
@@ -60,62 +69,97 @@ import { test, vi } from "vitest";
 import { scenarioTest } from "@errspec/testkit";
 import { notify } from "../src/notify";
 
-// vi.mockはimportより前へ巻き上げられるため、参照はvi.hoistedで作ります。
+// vi.mock is hoisted before imports, so create the reference with vi.hoisted.
 const mailer = vi.hoisted(() => ({ deliver: async (_to: string) => ({ accepted: true }) }));
 vi.mock("../src/mailer", () => ({ deliver: (to: string) => mailer.deliver(to) }));
-// scenarioTest の中身は Bun と同じ
+// Use the same scenarioTest body as the Bun example.
 ```
 
-- mockの戻り値に`s.fault`を直接書くことはできません。mockはシナリオより先に評価され、`s`がまだないためです。
-- 各シナリオの先頭で参照へ代入し直します。前のシナリオの障害が残ったまま次のシナリオを実行しないためです。
-- mockが効いていないと実際の依存が呼ばれ、障害は未呼出の扱いになります。CLIは`EC009`で失敗します。
-- 動作する一式は[examples/module-mock](../../examples/module-mock)です。両ランナーで実行するには`node scripts/demo-module-mock.mjs`を使います。
+- Do not call `s.fault` while constructing the module mock: the mock is evaluated
+  before the scenario, when `s` does not exist.
+- Reassign the reference at each scenario's start so earlier faults do not leak.
+- If the mock is ineffective, the real dependency runs and the required fault
+  remains uncalled. The CLI fails with EC009.
+- [examples/module-mock](../../examples/module-mock) contains a complete example.
+  Run `node scripts/demo-module-mock.mjs` for both runners.
 
 ## API
 
-### 単一障害で状態の原子性を検査する
+### State preservation under single faults
 
-`checkFailureAtomicity({ setup, faults, isFailure, only? })`は、正常系の依存呼び出しを観測し、各呼び出しへ障害を一回ずつ差し込みます。`setup`は実行ごとに独立したfixtureを返し、fixtureは`run(scope)`と`snapshot()`、任意の`dispose()`を持ちます。`scope.wrap(dependency, implementation)`で検査対象の非同期依存を包みます。ラッパーは引数とthisを保ち、選んだ呼び出しでは実装の代わりに障害関数を実行します。
+`checkFailureAtomicity({ setup, faults, isFailure, only? })` observes ordinary
+dependency calls, then injects one fault at each call ordinal. `setup` returns an
+independent fixture for each execution with `run(scope)`, `snapshot()`, and optional
+`dispose()`. `scope.wrap(dependency, implementation)` wraps an async dependency,
+preserving arguments and `this`; the selected call runs the fault function instead
+of the real implementation.
 
-`faults`は一意の`id`、`dependency`、有効な失敗値を返すか例外を投げる`inject`関数の配列です。`isFailure(result)`は操作の戻り値が失敗かをbooleanで返します。注入した例外はアプリケーションで処理して戻り値へ変換します。操作自身が例外を投げた場合は検査を失敗させます。
+Each fault has a unique `id`, a `dependency`, and an `inject` function returning a
+valid failure value or throwing. `isFailure(result)` judges the operation's return
+value. Applications handle injected exceptions and convert them into results;
+an exception escaping the operation fails the check.
 
-失敗値を返したら、複製した前後のスナップショットを比較します。参照が同じでも変更を検出し、ロールバック後の状態が同じなら成功します。保護対象の業務状態を返し、ログや時刻、秘密情報は含めないでください。
+For failure values, compare cloned before/after snapshots. Shared references do
+not hide mutations; a rollback restoring the same state passes. Snapshot the
+business state to preserve, excluding logs, timestamps, and secrets.
 
-結果の`baseline.calls`は正常系の依存別呼び出し回数、`cases`は障害ごとの`fault`、`status`、`before`、`after`、`result`を持ちます。`preserved`は失敗時の状態維持、`recovered`は障害後の成功、`violated`は状態変更や未注入・例外・後処理の失敗です。違反があれば全ケースの実行後に`FailureAtomicityError`を投げ、その`report`から根拠を読めます。`only: { fault, call }`にケースの値を渡すと単一ケースを再実行します。
+`baseline.calls` reports ordinary calls by dependency. Each case has `fault`,
+`status`, `before`, `after`, and `result`. `preserved` means state equality after a
+failure, `recovered` means a successful result after the fault, and `violated`
+includes state change, missing injection, exceptions, or cleanup failure. Execute
+all cases before throwing `FailureAtomicityError`; its `report` retains evidence.
+Pass a case's `only: { fault, call }` values to replay that one case.
 
-`recovered`は成功値を返したという観測で、正しく回復したという証明ではありません。エラーを握り潰して成功値を返すバグを見つけるには、成功時の出力・状態も既存テストで確認してください。
+`recovered` records a success value, not proof of correct recovery. Existing tests
+must also check successful outputs/state to detect swallowed errors. An ordinary
+baseline failure, unused registered dependency, empty/duplicate faults, or
+unfinished dependency call cannot pass. `dispose()` runs on failure too. This API
+does not stop background activity: operations must await dependencies and fixtures
+must isolate external state.
 
-正常系の失敗、登録した依存を通らないケース、空・重複の障害、未完了の依存呼び出しは成功にしません。fixtureの`dispose()`は失敗時も呼びます。テスト対象のバックグラウンド処理を停止する機能はないため、操作は依存をawaitし、fixtureが外部状態を隔離してください。
+The API does not infer arbitrary fault values or business expectations from types.
+It explores single faults at the ordinary baseline's observed call ordinals.
+Existing tests judge recovery and snapshot adequacy. Reports hold JavaScript values
+and are not guaranteed to be JSON-serializable.
 
-型から任意の障害値や業務仕様を推測するAPIではありません。正常系の呼び出し回数に対する単一障害だけを探索します。回復成功の出力や、守る状態の選び方は既存テストで確認します。レポートはJavaScript値を含むため、JSONに変換できるとは限りません。
+### Scenario execution evidence
 
-### シナリオの実行記録
+- `scenarioTest(test, fileURL, { contract, id, tag, withoutFaults? }, body)` registers
+  a top-level or nested `describe` test. Await all required async work in its body.
+  `withoutFaults: true` explicitly declares an input-only scenario and pairs with
+  configuration `observe.faults: []`. With this flag, calling `fault` fails; without
+  it, a scenario with zero faults fails.
+- `scenarioTestName(contract, id)` builds the stable name used by configuration.
+- Optional `description` appends one space and a nonempty single-line explanation
+  to the test name. The CLI matches the stable identity without that explanation;
+  observations retain the runner's corresponding full name.
+- `scope.fault(id, fn)` returns an async wrapper preserving arguments and `this`,
+  recording call/completion counts. Both resolve and reject count as completion.
+- `scope.check(id, actual, expected)` performs `deepStrictEqual`. It rethrows and
+  internally retains comparison failure.
 
-- `scenarioTest(test, fileURL, { contract, id, tag, withoutFaults? }, body)` — テストを登録する。トップレベルでも`describe`の中でもよい。bodyは必ず必要な非同期処理をawaitする。
-  `withoutFaults: true`は入力だけで結果が決まるシナリオの宣言です。設定の`observe.faults: []`と組み合わせます。指定すると`fault`の呼出が失敗になり、指定しないとfaultが0件のシナリオは失敗します。
-- `scenarioTestName(contract, id)` — 設定照合に使うテスト名を生成する。
-- 定義の`description`は、テスト名の後ろに空白1つを挟んで付く表示用の説明です。1行の空でない文字列に限ります。CLIは説明を除いた固定部分で照合し、観測にはランナーと同じ完全な名前を記録します。
-- `scope.fault(id, fn)` — 引数とthisを渡してfnを呼ぶasync wrapperを返す。fnの呼出回数と完了回数を記録。resolve/rejectとも完了と数える。
-- `scope.check(id, actual, expected)` — deepStrictEqualによる実際の比較を実行。失敗は投げ直し、内部にも失敗を保持する。
+Fault and assertion IDs are separately unique nonempty strings within a scenario;
+the same spelling can appear in both namespaces. Repeated/retried execution of one
+scenario is ambiguous to the Rust verifier and is rejected. Distinct scenario IDs
+can use `test.concurrent`.
 
-各シナリオ内の障害IDと比較IDは、それぞれ一意な非空文字列です。
-2種類のID空間は独立しているため、障害と比較に同じ名前を使うことはできます。
-同じシナリオをretry/repeatで複数回実行した証拠は、初版ではRust側が曖昧として拒否します。
-別々のシナリオIDを持つ`test.concurrent`は利用できます。
+## Recording lifecycle
 
-## 実行の記録
+The CLI supplies `ERRSPEC_OBSERVATIONS` and `ERRSPEC_RUN_ID` to its child process.
+Each scenario creates a UUID file with starting state, then records final state,
+fault counts, and assertions through temporary-file rename. Parallel runs do not
+mix JSON lines. Setting only one variable is a configuration error. With neither,
+the helper behaves as an ordinary unit test and creates no evidence files.
 
-CLIから実行すると`ERRSPEC_OBSERVATIONS`と`ERRSPEC_RUN_ID`が子プロセスへ渡されます。
-各シナリオはUUIDの異なるファイルに開始状態を記録し、終了時に完了状態・障害回数・比較結果を保存します。
-一時ファイルからrenameするため、並列実行でJSON行が混ざりません。
-片方の環境変数だけがある場合は設定エラーです。どちらもなければ通常の単体テストとして動き、ファイルを生成しません。
+Do not hardcode these variables into project settings; old observations cannot be
+submitted as current execution. Scope operations after test completion fail and
+mark evidence incomplete. Activity after process exit or after CLI evidence
+acquisition cannot be traced.
 
-これらの環境変数を通常のプロジェクト設定に固定しないでください。古い記録をCLIへ渡す機能はありません。
-テスト終了後のscope操作は失敗し、記録を未完了へ変更します。ただし、プロセス終了後やCLIが観測し終えた後の処理の追跡はできません。
+## Meaning and trust
 
-## 観測の意味
-
-faultの完了は「開発者が障害用に指定した関数が実行され、値を返すか例外を投げた」という事実です。
-任意のResult型の意味や、戻り値が対象のエラー種別に該当することは、この汎用補助APIでは判定しません。
-checkは実際に値を比較しますが、期待値と観測対象の妥当性はレビューする必要があります。
-プロトコルは信頼するテストコードからの報告であり、悪意あるテストコードの改ざんに対する証明ではありません。
+Fault completion establishes that a developer-selected function ran and returned
+or threw. This helper does not interpret arbitrary Result libraries or prove that
+the returned value belongs to the intended failure category. Comparisons execute,
+but expected values and observed-state adequacy still need review. Evidence comes
+from trusted tests; it is not proof against malicious test-code tampering.

@@ -1,191 +1,158 @@
-# ミューテーションの差分検証・再利用・追加ランナーの設計
+# Incremental workflows and runner integration design
 
-## このドキュメントについて
+This design implements the [requirements](requirements.md) and [Product](../../product.md) using the existing generator, inactive switches, and common verdict model. It does not change scenario registration or failure-verification guarantees.
 
-[Requirements](requirements.md)と[Product](../../product.md)に従い、既存のRustによる候補生成と判定へ、反復検証の機能を追加します。
+## Responsibilities and compatibility
 
-### 対象読者
+Rust owns resolved requests, validated compiler/runner facts, selection/reuse planning, bounded trials, verdicts, gates, and reports. JS/TS adapters own compiler/runner acquisition and return owned values; orchestration belongs in the language appropriate to the underlying API. This is not a plan to move every responsibility into Rust.
 
-変異の生成・実行・判定、追加ランナーと配布を実装する開発者。
+Additional behavior is enabled through explicit options/configuration. Existing arguments preserve native output/exit contracts. New reasons/statistics are optional where required. Unexecuted work never becomes a kill.
 
-### 前提知識
+## Compiler checks
 
-変異候補、基準実行、到達記録、入力の指紋、有限の状態分類。
+The typecheck request identifies tsconfig, installed TypeScript, and candidates. TS 6 uses LanguageService text overlays; TS 7 uses the official API's virtual files. Apply each edit to original text and compare diagnostic multisets against original diagnostics. Only new diagnostics produce `CompileError`.
 
-### このドキュメントで扱わないこと
+Restore text between candidates and close compiler state in `finally`. Reject `noCheck` as typechecking. Optional-chain equivalence requires strictNullChecks, noUncheckedIndexedAccess, and a receiver type excluding null/undefined. The complete replacement must match exactly one optional-token removal from the original expression; altered property names, indices, arguments, call shapes, suffixes, or multiple removals require normal diagnostic acquisition. Semantic discovery backend options remain distinct from mutation typecheck options.
 
-errspecの契約登録・失敗シナリオの条件は変更しません。
+## History and probe reuse
 
-## 実装方針
+Mutation history is a versioned format separate from error-contract baselines. It stores input fingerprints, acquisition mode, reach, and eligible verdicts by location-independent key. Write through temporary-file rename. A key match alone never permits reuse.
 
-Rustが実行要求を受け取り、設定の確定、候補の選択、型検査、履歴の照合、実行計画、判定、レポートを担当します。Node内のadapterはコンパイラやランナー固有の情報を取得し、所有可能な値を返します。既存の候補生成と非有効状態の切替は共用します。
+`--cache`/`cache` is opt-in. Run a current ordinary baseline every time. Reuse only first-attempt assertion kills or all-selected-test success, with matching key, reach/selection, acquisition, and fingerprints. Mark each reused candidate. Timeout, RuntimeError, retries, and typecheck require fresh validation. Save pre-acceptance verdicts; apply current approvals and gates again.
 
-追加機能は明示指定または追加設定で有効にします。従来の引数だけで起動した場合は、既存の結果形式と終了コードを維持します。新しい状態・理由・統計は省略可能な項目として追加し、未実行を検出済みへ変換しません。
+`coverage-v1.json` separately stores reach/infection acquisition. Reuse requires a successful current ordinary baseline, matching inputs, every test's ID/name/file/state/start fact, and valid candidate references. Rebind current task IDs and use the larger current/previous duration for deadlines. Invalid references/counts/states or deleted tests force a full probe. Report `cache.coverageReused`. `--full-dry-run`/`fullDryRun` forces all-test probe acquisition independently of result cache; its negative flag clears configured true.
 
-### 型検査
+Raw input changes intentionally refresh the complete probe, including scope mode. Same-input reuse and changed-input revalidation satisfy the accepted feature contract. Partial probe refresh remains a deferred performance optimization; see the [audit](../../implementation-status.md#probe-reuse-audit).
 
-型検査用の要求は、利用先のtsconfig、TypeScriptパッケージと変異候補を持ちます。TS 6はLanguageServiceのメモリ上の本文、TS 7は公式APIの仮想ファイルを使います。各候補へ元の本文から変更を適用し、診断の多重集合を元コードと比較します。新しい診断があればCompileErrorにし、元コードにもあった診断を変異によるエラーへ数えません。
+Fingerprints bind build-fixed Rust/driver/lock/compiler configuration identity, Node/runtime/environment, resolved runner options, project files, acquired runtime files, and resolved packages/content. Preserve graph edges for cyclic/shared packages, including edges into already acquired packages. Exclude own cache output and current temporary directory. Unreadable/opaque inputs disable reuse. Default reuse requires exact inputs in the same checkout, including position-only edits.
 
-候補間で本文を元へ戻し、finallyでコンパイラを解放します。noCheckは型検査として受け付けません。optional chainingの除外は、strictNullChecksとnoUncheckedIndexedAccessが成立し、受信式の型からnullとundefinedを除外できる場合に限ります。
+Even an all-cache-hit run re-enumerates current files before completion without another test run, rechecks fingerprints, and rejects changes during reuse. Corrupt/inconsistent cache falls back to fresh execution. Save only after final validation. Uncontrolled external-state-dependent tests are outside the cache contract.
 
-### 履歴・差分・承認
+Acquire resolved compile values from Vite root/environments, including resolved defines when Vitest injects them. Changes to define, resolve, compiler, env, or optimizer invalidate reuse even if config bytes match. Runtime define scripts, opaque asset matchers, unacquired transform/load/resolve plugins, duplicate builtin plugin names, or unserializable compiler values disable reuse. With CSS disabled, use the resolved CSS policy; required CSS processing with opaque callbacks falls back fresh. Only known project paths enter relocation normalization; never rewrite define expressions/runtime values.
 
-履歴はエラー型のbaselineと別の版付き形式を使います。関数本文・テスト・依存・設定・環境・pluginの指紋、取得方式、結果と到達記録を保存します。位置を除いた変異識別子を照合し、入力または取得方式が異なる結果を再利用しません。保存は一時ファイルのrenameで行います。
+### Explicit checkout relocation
 
-cacheは明示した`--cache`／`cache`だけで有効にし、専用ディレクトリへ保存します。plain baselineは今回の実行から取り、初回の比較失敗または全選択テスト成功の結果だけを再利用します。候補key・到達テスト・選択テスト・取得方式と入力の指紋を一致させ、reusedを候補へ明示します。timeout、RuntimeError、再試行と型検査は再検査します。
+`--cache-relocation`/`cacheRelocation` is opt-in. Tests/dependencies must not depend semantically on project absolute location, cwd, PWD, or INIT_CWD. Convert known project-internal paths to tagged relative identities consistently across package edges, runtime/start locations, and known runner setup paths. External paths, other environment values, provide values, arbitrary settings, and file contents must still match. Unresolved paths containing `..` are not normalized.
 
-probeの到達・感染記録は`coverage-v1.json`へ別のkindと取得方式で保存します。今回のplain baselineが成功し、入力・全テストのID／名前／file／状態／開始有無・候補参照が一致した場合にだけ再利用し、cache.coverageReusedを示します。task IDは今回の値へ結び直し、timeoutの基準は今回と以前の長い方を使います。不正な参照・件数・状態や削除テストがあれば全probeを取り直します。`--full-dry-run`／`fullDryRun`は結果cacheから独立してprobeを全実行し、`--no-full-dry-run`で設定のtrueを解除できます。
+Only fingerprints change; runtime paths and user code do not. Fingerprint the mode itself and report `cache.relocation`. Preserve current ordinary baseline, registration matching, task rebinding, and final acquisition by real paths. Changed CI metadata can prevent reuse: restoration alone never proves an identical environment.
 
-この指紋はビルド時に固定したRust・driver・依存lockとコンパイラ設定の識別子、Node/runtime・環境、実行設定、projectのファイル、今回取得したruntimeファイル、実際に解決したpackageとその内容を結びます。packageの循環と共有を扱い、すでに収集したpackageへの辺も同じ解決先へ結びます。cacheの自己出力と今回の一時ディレクトリを除外し、読み込みにくい入力は再利用しません。既定は同じcheckoutで入力が完全に一致する場合だけとし、位置だけの変更も再検査します。別checkoutと関数単位の再利用は下記の明示指定で扱います。
+## Git selection and scope reuse
 
-cacheが全件に命中しても、終了前にテストを実行せずファイル一覧を再収集します。実行後に指紋を再取得し、再利用中の入力変化を未完了にします。cacheの破損や証拠の不一致は今回の実行で検証し直します。保存は最終検証の後に一時ファイルからrenameし、人の承認を適用する前の比較結果を保存します。現在のquality gateと承認は再計算します。外部の制御されない状態に依存するテストはcacheの対象にしません。
+Resolve the requested Git revision to a commit from project root, then collect staged, unstaged, and untracked changes. Use NUL-delimited names and literal pathspecs rather than quoted/colorized output parsing. Bound acquisition to 30 seconds and 16 MiB per stream; shared owned-process handling supports interruption.
 
-解決済みのcompile値はViteのrootと各environmentから取得します。Vitestがdefineをruntime注入へ移す場合は解決済みdefinesも含め、設定ファイル本文が同じでも置換値、resolve、compiler、env、optimizerの変化で再検査します。実行時define script、opaqueなasset matcher、取得できていないtransform/load/resolve pluginや重複したbuiltin名、serializeできないcompiler値は再利用を停止します。CSS処理が無効な場合はVitestの解決済みCSS方針だけを使い、処理が必要でcallbackを含む場合はfreshへ戻します。project内部の既知pathだけを移設identityへ写し、defineの式・runtime値は書き換えません。
+Node mode matches changed lines against mutated expression/statement ranges. Scope mode uses the nearest named function/method/function-value binding, or the module for top-level code. `--only` intersects this selection. Changed/deleted tests and changes outside candidate inventory broaden to all candidates because dependency effects cannot be ruled out. Include candidates whose killing test disappeared and warn for changed tests not collected. Reacquire the diff after execution; changes during the run prevent completion. Selection alone never skips the ordinary baseline.
 
-project移設は`--cache-relocation`／cacheRelocationの明示指定で許可し、既定は同じcheckoutに限定します。利用条件はproject絶対位置、cwd・PWD・INIT_CWDにテスト・依存の意味が依存しないことです。project内部のpathをtag付き相対identityへ変換し、package間の辺、runtimeと起動位置、既知のrunner setup pathにも同じ境界を適用します。外部path、その他の環境、provide値、設定の任意の値と全ファイル内容は一致を要求します。`..`を含む未解決pathを移設対象にしません。実行pathや利用先のコードは変換せず、指紋だけを変換し、mode自体も指紋とcache.relocationへ記録します。今回のordinary baseline・登録照合・task IDの再結合・終了時の実pathによる入力再取得を維持します。CI固有値が変わる場合も既定では再利用せず、cache保存だけで環境の同一性を推定しません。
+Owned syntax metadata v2 includes original UTF-8 SHA-256 and entry candidates for direct function bodies. The native parser acquires it; common Rust validation checks text, candidate original ranges, scope hashes/relationships, complete AST tree, and entry ownership/placement. A changed source after acquisition is an input error. Do not treat a nested callback body as its outer entry, or ignored/non-generated guards as entries.
 
-Gitの基準と変更行を取得し、nodeまたはscope単位で候補を選択します。検出テストがなくなった候補を再検証へ含め、未収集の変更テストを診断します。callgraph選択は明示した実験的な指定に限定します。承認は識別子と理由の別データとし、古いIDを案内します。
+Scope reuse derives current entry-reaching test-file cohorts from the full probe, including static hits. Missing entries never establish unused functions. Unknown changed scopes, missing entries, or opaque calls force revalidation. For known scopes, revalidate when the union of previous/current changed-scope cohorts overlaps a candidate's covering files. File cohorts conservatively include sharing between different test IDs in one file.
 
-Git差分の取得はproject rootを基準にし、指定したrevisionをcommitへ解決してから、staged・unstaged・未追跡のファイルを収集します。ファイル名はNUL区切り、pathspecはliteralで取得し、quoted pathや色付きの出力を解析しません。取得は30秒・各stream 16 MiBに制限し、中断と所有するprocess groupの終了は設定読み込みと共通の取得処理にします。
+Require matching input envelope, candidate owner, function hash, selected tests, and existing eligible first-attempt verdict. Enable through `--cache --cache-scope`/`cacheScope`, with a negative flag to clear it. The contract assumes deterministic isolated test files; source text, positions, and stack-trace dependent tests are excluded. Until compiler comment attachment is acquired, files with comments retain raw text in the module envelope, so location-only edits revalidate. Anonymous default function declarations, including async/generator forms, also retain body text because no independent function owner exists.
 
-nodeは変異する式・文の範囲、scopeは最も近い名前付き関数・method・関数値bindingの範囲と変更行を照合します。module直下はmodule全体をscopeにします。`--only`との併用は積集合です。テストの変更・削除、候補inventory以外の変更は依存の影響を否定できないため全候補へ広げます。未収集の変更テストはquality gateと別のwarningとして報告します。実行後に差分を再取得し、取得開始時から変わった場合は完了にしません。この段階ではbaselineを毎回取り、永続的な再利用は別の機能として接続します。
+Build raw/scope fingerprints from one acquisition. Substitute only validated inventory module effects; test/helpers, dependencies, settings, environment, package edges, and external runtime inputs must match. Changed raw input takes a full probe and rebinds current entry cohorts. Store in separate `scope-results-v1.json`; expose optional `cache.scope`/`scopeReused`. Retain unselected old rows only with matching complete context. Final raw acquisition uses the same projection before atomic save.
 
-関数単位の再利用に向け、所有されたsyntax metadataの内部版2は元のUTF-8ソースのSHA-256と、直接の関数bodyに対応するentry candidateを持ちます。native parserが取得し、Rustの共通境界で本文、候補のoriginal範囲、scopeのhashと親子関係、ASTの完全な木、entryの所有者・配置を検証します。取得後にソースが変われば入力変化として未完了にします。ネストしたcallbackのbodyを外側のentryへ流用せず、ignoredまたは生成対象外のguardはentryとして扱いません。
+`--experimental-callgraph` additionally limits old-survivor revalidation using bidirectional static call relations and actual resolved imports. It remains off by default, mode changes revalidate, and unknown calls/entries broaden. This graph does not model all value flow through tests; report its warning and omission counts instead of claiming soundness.
 
-再利用モデルは全probeから今回のtest IDとfileを取得し、entryに到達したtest fileの集合をstatic hitも含めて作ります。entryのない関数を未使用とは見なしません。前後の変更scopeの集合が不明、entryが欠落、opaqueな呼出しがある場合は再検査し、既知の場合も前後の到達fileの和集合と候補の到達fileが重なれば再検査します。同じfileの異なるtest ID間の状態共有もこの単位で扱います。入力envelope・候補所有者・関数hash・選択テストを一致させ、既存cacheと同じ初回比較結果だけを適用します。既定は完全一致方式を維持し、`--cache --cache-scope`／cacheScopeでこの判定を実行計画へ接続します。`--no-cache-scope`で設定を解除します。deterministicな隔離済みtest fileを対象とし、source本文・位置・stack traceへの依存は対象外です。compiler commentの付着を取得できるまで、commentを持つfileのmodule envelopeにはraw本文も含め、位置変更でも再検査します。
+## Weak mutation and exclusions
 
-独立したfunction ownerを持たない匿名default function宣言は、本文もmodule envelopeへ保持します。通常・async・generatorの匿名宣言を対象とし、名前付き関数のように本文を省略しません。
+Acquire reach separately from changed values. Apply weak mutation only when evaluation count, receiver, and short-circuit semantics are preserved; otherwise execute covering tests. Initial comparison/arithmetic support does not imply support for every expression. Static/concurrent/ambiguous observations broaden conservatively.
 
-scope指紋は完全一致のraw指紋と一回の入力取得で作ります。inventory内の本文だけを検証済みmodule effectへ置き換え、test/helper・依存・設定・環境・package間の辺と外部runtime入力は同じ値を要求します。raw指紋が変われば全probeを取り直し、entry cohortを今回の候補へ結びます。別kindのscope-results-v1.jsonへ保存し、cache.scopeとscopeReusedを省略可能な統計として示します。未選択の古い記録はcontext全体が一致する場合だけ保持します。終了時は同じprojectionを用いてraw指紋を再取得し、実行中の変更を未完了にしてから保存します。
+Acquire real comment trivia and discard apparent directives overlapping strings, regexes, template/JSX text. Pure Rust interpretation supports errspec-/mutator- disable-next-line, disable-line, disable/enable and Stryker disable/restore. Line directives take priority over regions; regions use the last directive per family. Next-line starts after a multiline comment's ending line; regions start after its ending offset. Preserve key and add disabled reason in `candidate.ignored`. Existing builtin safety reasons win. Excluded candidates do not instrument, execute, or enter scores/gates. Removing a directive changes input and invalidates cache.
 
-### weak mutationと除外
+Arid is off by default to preserve prior results. `--arid`/`arid` enables it; the negative flag clears it. Default patterns cover console/logger/log receivers, debug/trace properties, and debug functions. `aridCallees`/repeatable `--arid-callee` replaces the pattern set; empty means no matches, null restores defaults. Match acquired dotted callee paths, excluding computed access/casts. Memoize call-only nonempty blocks/ifs and walk candidate ancestors, stopping at mixed statements, declarations, return, or function boundaries. Explicit comments/builtin reasons take priority. Fingerprint enablement/patterns. This naming heuristic does not prove equivalence of side effects in arguments or conditions.
 
-基準実行で到達と値の差を分けて取得します。値の差を確認できる式についてだけweak mutationを適用し、評価回数、受信オブジェクト、短絡を維持できない式は実行による検証へ進めます。arid、disable、Strykerコメント、pluginの除外は理由を候補へ含めます。
+Acceptance stores mutant key plus mandatory human reason separately, reports stale keys, and is reapplied to current evidence rather than cached as a detector verdict.
 
-除外コメントはparserのtriviaから位置・本文を取得し、string・regex・template・JSX textの範囲と重なる偽指示を除きます。所有されたコメントの値をRustの純粋な判定へ渡し、`errspec-`／`mutator-`のdisable-next-line、disable-line、disable/enableと、Stryker disable/restoreを解釈します。line指定をregionより優先し、regionは指定familyごとの最後の指示を使います。next-lineは複数行commentの終了行の次、regionはcomment終了offsetから適用します。IDを維持してcandidate.ignoredへdisabledと任意の理由を入れ、既存のignored経路でinstrumentation・trial・score・gateから除きます。builtinの安全な除外は元の理由を優先します。指示の削除はproject入力の変化としてcacheを無効にし、再検査します。
+## Custom mutators and ignorers
 
-aridは既存結果を維持するため既定offとし、`--arid`／設定・APIのaridで明示的に有効化します。`--no-arid`で設定のtrueを解除します。console/logger/logのreceiver、debug/traceのproperty、debug関数を既定とし、aridCalleesと反復可能な`--arid-callee`でpattern集合を置換します。空集合は一致なし、nullは既定へ戻す指定です。ASTからcalleeのdotted pathを取得し、computed accessやcastは照合しません。callと、それだけからなる非空block／ifをaridとしてmemo化し、candidateの祖先をたどります。mixed statement・宣言・return・function境界では伝播を止め、candidate.ignoredへ理由を入れます。明示commentとbuiltin理由を優先し、有効化とpatternはcache指紋に含めます。これはloggingに関する命名heuristicであり、引数・条件を含む副作用の同値性は保証しません。
+`plugins` accepts module strings or `{module, settings}` entries; CLI repeats `--plugin`. Resolve relative modules from project root and package names using project module resolution. Default exports are objects/arrays from typed identity helpers `defineMutator`, `defineIgnorer`, or `definePlugin`. Do not serialize callbacks to JSON or generated executable source.
 
-### 独自mutatorとignorer
+Node supplies native-acquired syntax node kind, relationships, UTF-8 positions, and text to visitors. Mutators return node-contained edits; ignorers return reasons. Rust validates nodes/ranges, reparses edited files, finds safe runtime expression/statement/body placements, and creates ordinary keys. Lift callee/assignment-reference edits to the complete expression. Type/declaration-token anchors incapable of runtime switching are errors; otherwise unsupported switch contexts become reasoned `Ignored`. Custom/builtin names must be unique and support per-family exclusion.
 
-`plugins`はmodule文字列または`{module, settings}`の配列とし、CLIでは`--plugin`を繰り返します。相対moduleはproject root、package名はprojectのmodule解決を基準にします。moduleのdefault exportは`defineMutator`、`defineIgnorer`、`definePlugin`で定義したobjectまたはその配列です。定義helperは型付きidentity関数とし、callbackをJSONや生成した実行可能sourceへ変換しません。
+Reason priority is builtin safety, disable/Stryker comment, arid, then ignorer. Plugin `aridCallees` adds patterns only when arid is enabled.
 
-Nodeはmoduleを取得し、Rustが取得した構文nodeのkind・親子関係・UTF-8位置・本文をvisitorへ渡します。mutatorは訪問node内の置換を返し、ignorerは除外理由を返します。Rustはnodeとrangeを照合し、置換後のファイルを再parseし、安全なruntime expression／statement／bodyへ配置して従来と同じIDを生成します。calleeやassignment referenceは全体のexpressionへ持ち上げます。型や宣言tokenなどruntime switchを置けないanchorはエラー、switch自体が成立しないcontextは理由付きのIgnoredとします。builtinと独自mutatorの名前は重複できず、`excludeMutator`で個別に除外できます。builtin安全規則、disable／Strykerコメント、arid、ignorerの順で理由を優先します。pluginの`aridCallees`は追加規則とし、`arid`が無効なら適用しません。
+Node module hooks acquire import/require dependencies and package manifests and detect changes during generation. Explicit plugin `inputs` and context `readInput` join the same input record. `cache: "deterministic"` is the author's contract to depend only on acquired modules/settings/environment/declared inputs. Time, randomness, or undeclared reads require conservative cache disablement. All acquired plugin inputs remain in exact and scope fingerprints; changes force fresh results and reach.
 
-moduleのimport／requireとpackage manifestはNodeのmodule hookで取得し、世代中の内容変化を検査します。明示の`inputs`とcontextの`readInput`も同じ入力記録へ加えます。`cache: "deterministic"`は、取得済みmodule・settings・環境・追加入力から決定的に動くというplugin作者の契約です。時刻、乱数、未宣言の外部読取に依存するpluginは指定せず、cacheを保守的に無効化します。設定、plugin本体、依存module、追加入力の変更はnativeの指紋を変え、実行結果と到達記録を再取得します。scope cacheでもpluginの取得済み入力を省きません。
+## Test selection and complete kill matrices
 
-### テスト選択と完全なkill matrix
+`select-tests --since` and `selectTests({since})` use the same native request/configuration/baseline/probe path without CLI argument reconstruction. Current test IDs/reach are authoritative; only matching probe input can be reused. Selection executes no mutation trials and ignores trial budgets/gates/weak narrowing/typechecking/shards. Git base is required.
 
-`select-tests --since`と`selectTests({since})`は、CLI解析を経由せず同じnative要求・設定解決・baseline／probe経路を使います。現在の収集test IDと到達記録を取得し、入力が一致したprobeだけ再利用します。変異trialは実行せず、予算・品質gate・weak絞込・型検査・shardを推薦へ適用しません。Git基準は必須で、function scopeの変更に対する現在のcoverageを順位付けします。過去のkillは現在のcovering test IDと一致したときだけhistorical hintとして先行させ、今回も検出できる証拠とはしません。削除されたtestは除き、変更test・helperや設定などinventory外の変更・削除行・module領域・観測できないfunctionは現在の全test fileへ戻します。削除だけのhunkはGit取得で事実として保持し、元scopeが消えた場合に隣接scopeだけへ限定しません。
+Rank current coverage of changed function scopes. Historical killing IDs may rank ahead only if still current covering tests; they are hints, not proof of current killing. Remove deleted tests. Changed tests/helpers/settings, outside-inventory changes, deleted lines, module edits, or unobserved functions fall back to all current files. Preserve deletion-only hunks; a removed old scope must not select only its neighbor.
 
-変更fileはGit基準の本文と構文も取得し、前後それぞれの関数scopeのbyte範囲を除いたmodule本文を比較します。同じ行に関数とimportやmoduleの文があっても、関数外の変更・削除を見落として隣の関数のcoverageだけへ推薦を絞りません。旧本文や構文を取得できない場合も全test fileへ戻します。
+Acquire the Git-base text and syntax for changed inventory files. Compare the old
+and current module text after excluding each version's function byte spans. An
+import or module statement changed or removed on the same line as a function
+therefore cannot restrict recommendations to that function's coverage. Missing
+old text or syntax also falls back to all current files; function-only edits keep
+their bounded recommendations.
 
-選択結果は`errspec/test-selection`のJSONとfile一覧で提供し、変更testの未収集warningと保守的なfallback理由を残します。最後にも現在のsource／test inventoryを収集して、Gitが無視するfileがprobe中に追加された場合を含めて照合します。取得や最終照合が失敗した場合は未完了・exit 2とし、file推薦を空にします。
+Return `errspec/test-selection` JSON or files with uncollected-test warnings/fallback reasons. Re-enumerate final source/test inventory, including ignored-by-Git files added during acquisition. Failed current baseline/probe acquisition or a final input mismatch returns incomplete exit 2 and no file recommendation.
 
-`killMatrix`／`--kill-matrix`は全covering testの実行を要求し、`--no-kill-matrix`で設定を解除できます。adapterはcomplete取得能力を明示し、bailと全体retryを0にして遅い検出testも実行します。強制後の値をcache指紋にも使います。weak mutationの感染testだけへの絞込は行いません。nativeは全selected IDにstartedな通常pass／failがあり、module／runner error・timeout・native再試行・観測されたtest単位retry／repeatが無いことを確認してcompleteを付けます。未実行・予算・標本・未到達・取得不足はcomplete cellを作りません。runの入力照合を完了できなければ全rowのcompleteを解除します。
+`--kill-matrix`/`killMatrix` requires complete all-covering-test acquisition, with a negative flag. Adapters declare complete capability and force bail/global retry to zero so late killers execute; fingerprint the forced settings. Do not narrow to weak-infected tests.
 
-既存のfirst-detectionとscope結果はmatrix cellへ再利用せず、行を毎回実取得します。入力照合済みのprobe再利用は維持します。matrixの結果rowは既存のfirst-detection保存形式へ書き込まず、cache.reused／savedは0とします。純粋な分析関数はcomplete rowだけから検出なし・strictな包含・同じ非空kill集合を求めます。件数と除外理由はJSONへ残し、Git・ID・shardなどで選んだ変異集合に対する観測として扱います。test削除の安全性の証明にはしません。
+A complete row requires every selected ID to have started and returned ordinary pass/fail, without module/runner error, timeout, native retry, or observed test retry/repeat. Unexecuted/sample/budget/unreached/insufficient acquisition does not create complete cells. Failed final input validation clears every row's completeness.
 
-全件取得では失敗ごとにrunnerやbrowserが再起動するため、成功したbaselineの時間だけではcohortの総時間を見積もれません。nativeの全体deadlineは従来の算出値と「選択test数×既存の進捗停止deadline」の大きい方を使います。test開始間の進捗停止検査とrunnerのtest／hook timeoutは維持し、timeout後の確認実行をcompleteへ格上げしません。Jest／Playwrightのtest・hook期限切れもRustでtimeoutとして解釈し、通常のexpect／locatorの失敗と区別します。
+Do not reuse first-detection or scope result cache as matrix cells. Acquire rows afresh; compatible probe reuse remains allowed. Do not write matrix verdict rows into first-detection storage; `cache.reused`/`saved` stay zero. Pure analysis uses complete rows only to find no-kill tests, strict subsumption, and identical nonempty kill sets. Report incomplete counts/reasons. Relations apply only to the selected Git/ID/shard mutant set and do not prove safe test deletion.
 
-### ランナーと実行計画
+Complete acquisition may restart a runner/browser after each failing test, so the successful baseline duration alone cannot estimate cohort wall time. The native total deadline is the larger of the existing estimate and selected-test count multiplied by the existing progress-stall deadline. Per-test/hook deadlines and progress-stall checks remain active; native retries never upgrade a row to complete. Rust recognizes Jest/Playwright test/hook deadline forms while retaining ordinary expect/locator assertion failures as kills.
 
-`-j`／`--concurrency`と設定・APIの`concurrency`は1〜64の整数とし、既定1を維持します。2以上ではRustのqueueから各workerへ候補を割り当て、逐次実行と同じtrial・再確認・判定を使います。samplingとcache照合は配分前に行い、時間予算は要求全体の開始時刻で共有します。開始済みのtrialは完了させ、開始前の候補はPendingにします。完了順によらずinventory順へ結果を戻し、engine.parallelに要求数と起動したtrial worker数を示します。
+## Concurrency, shards, and sessions
 
-各workerは独立したdriver・run ID・一時領域・所有process groupを持ち、追加workerは全probeを取り直します。テスト登録・状態・到達・感染をprimary probeと照合し、task IDと実行記録をworker内へ結びます。timeout再起動でもprobeを照合し直します。1workerの失敗はpeerを中断し、SIGINT／SIGTERM／親のSIGKILLは全所有groupを終了します。cache保存前には全workerのruntime入力を結合し、設定の差は保存を停止、入力内容の競合や再利用済み証拠の不一致は未完了にします。外部サービスの状態は隔離しないため、利用先は同時実行に耐えるテストを用意します。
+Concurrency is integer 1–64 through `-j`/`--concurrency`/configuration/API, default 1. Rust queues candidates to independent drivers using the same attempt/confirmation/verdict code. Sampling/cache decisions precede allocation. Time budget uses the request's common start time; started trials finish, unstarted candidates become Pending. Restore inventory result order independent of completion order. `engine.parallel` records requested and started trial workers.
 
-`--shard INDEX/TOTAL`はGit・onlyの後の候補を、keyの先頭64-bit値modulo totalで分けます。設定・APIは`shard: {index,total}`とし、1始まりの範囲を検証します。選択と省略の件数・方式をreport.shardに示し、scoreとgateをその要求範囲に限定します。baseline／probeはproject全体、型検査とtrialはshard内です。共通cacheの指紋からshard指定を外し、全候補keyの記録を保持して逐次実行の結果を集めます。並行保存のatomicityは保ち、lost updateは再検査へ戻します。標本と予算は各shard呼出し内で適用します。
+Each worker owns driver/run ID/temp directory/process group. Extra workers take full probes and match test registration/state/reach/infection against the primary, rebinding task IDs locally. Restarted timeout workers revalidate probes. One worker's failure interrupts peers. SIGINT/SIGTERM or parent SIGKILL stops all owned groups. Before cache save, merge runtime inputs: incompatible settings disable save; input-content conflicts or inconsistent reused evidence make the run incomplete. External service state is not isolated; users need concurrency-safe tests.
 
-ランナー選択は`runner`（auto / vitest / vite-plus / jest / playwright）、`runnerConfig`、`runnerProject`、`runnerPackage`で受け取ります。既存のVitest指定も維持します。自動選択はrootのVitest/Vite設定、Jest設定またはpackage.jsonのjest、Playwright設定、導入済みpackageの順に確認します。ViteとPlaywright設定が共存する場合はPlaywrightを明示します。
+`--shard INDEX/TOTAL` partitions candidates after Git/only selection using first 64 key bits modulo total. Configuration/API use one-based `{index,total}`. `report.shard` discloses selected/omitted counts and method; score/gate apply only to that request's shard. Baseline/probe cover the project; typecheck/trials cover the shard. Exclude shard setting from common cache fingerprint and retain all-key records for sequential aggregation. Atomic writes prevent corruption; concurrent lost updates require fresh work rather than assumed evidence. Samples/budgets apply within each shard invocation.
 
-Vitest、Jest、Playwrightは共通の実行要求と結果へ変換します。Jestはnative ESM、PlaywrightはViteとfixtureを使う方式に限定します。Jestは利用先のESM変換をwrapし、元ソースに共通emitterのswitchを適用してから変換します。変換未設定のTypeScriptはNodeの型除去を使います。共通generator、probe、Rustの試行と判定を共用し、ランナーごとの判定loopは作りません。Vite+は導入先が同梱するVitest 5の公開APIへ接続します。
+Pending from budgets/samples leaves the overall score null and cannot pass break/fail-on-undetected. Partial execution must not manufacture 100% overall success.
 
-Playwrightでは全projectを列挙し、projectを含むテストidentityを持ちます。各owned workerのVite serverを異なる一時portで起動し、利用先のfixtureを拡張できる自動fixtureでpage/frameの到達とinfectionを取得します。browser bindingでdocumentの破棄前に観測をNode側へ渡し、遷移後も保持します。fixtureを取得できなかった実行を検出にしません。追加adapterでは完全な外部入力を取得できるまでconfigurationHashをnullとし、結果と到達記録のキャッシュを再検証します。
+`--reuse-session`/`reuseSession` is opt-in; default fresh. Keep ordinary baseline separate and retain only instrumented context from probe onward. Each attempt refreshes request/output/provided context/test IDs and clears public collection cache before re-enumeration. Keep forks/isolation. Reset timeout from original values each time; triple only confirmation attempts.
 
-各実行器は独立した状態を持ち、並列枠数、分割、標本、時間予算を実行計画へ反映します。予算で開始しなかった候補はPendingとし、標本と予算の理由を区別します。Pendingが残る場合は全体スコアをnullにし、break閾値とfail-on-undetectedを合格にしません。実行済みの一部だけで100%の全体判定を作りません。
+Root/selected-project globalSetup forces fresh to preserve setup/teardown per attempt. Missing public collection-cache APIs also forces fresh. `engine.sessionReuse` explains availability/fallback. Out-of-run events or old request metadata make the run incomplete rather than counting as detection. Close retained context and propagate cleanup failures.
 
-Vitest sessionの再利用は`--reuse-session`／`reuseSession`で有効にし、既定はfreshとします。plain baselineは独立させ、probe以降のcontextだけを保持します。試行ごとにrequest・結果の格納先・provided context・test IDsを更新し、公開APIでテストファイルの収集cacheを消して再列挙します。workerはforks・isolateを維持し、timeoutは保存した初期値から毎回設定します。確認用の試行だけ3倍にし、次の候補へ持ち越しません。
+## Runner adapters
 
-ルートまたは選択projectにglobalSetupがある場合は、各試行のsetup・teardownを維持するためfreshにします。公開の収集cache初期化APIを持たない版もfreshとし、利用可能／globalSetup／API不足の理由をengine.sessionReuseへ示します。保持中のcontextへ実行外のeventや古いrequestのmetadataが届いた場合、今回の検出として数えず未完了にします。closeでは保持中のcontextを終了し、cleanupの失敗を成功に変換しません。
+Options are `runner` (auto/vitest/vite-plus/jest/playwright), `runnerConfig`, `runnerProject`, and `runnerPackage`; legacy Vitest options remain. Auto selection checks Vitest/Vite config, Jest config/package field, Playwright config, then installed packages. Explicitly select Playwright when Vite and Playwright config coexist.
 
-実行器は今回のプロセス群と所有情報を管理します。孤立プロセスの終了には保存した実行IDと起動情報の一致を必要とします。kill matrixでは途中の検出による省略を行わず、最初の検出で終了して得た結果をmatrixとして再利用しません。
+Adapters return common execution facts and use the shared generator/emitter/probe/Rust trial loop. Jest 30 is native ESM: wrap project ESM transforms and apply switches before transformation; otherwise use Node type stripping for TS. Vite+ uses its bundled Vitest 5 public API. These are acquisition adapters, not independent verdict implementations.
 
-Native supervisorをgroup leaderとし、Nodeは同じgroupとstdioを継承します。親はsupervisorをreapする前にgroupを終了し、supervisorはkernelの親関係が変わった場合に自分のgroupを終了します。privateなUID別registryには版・run ID・256-bit token・owner／supervisor・Unix endpointを保存します。次回の起動は3秒・256件まで照会し、生きているsupervisor自身が親とgroupを確認して終了します。保存PIDへ直接signalを送らず、active・不一致・未確認の記録を終了しません。Unix endpointが禁止された場合も親監視は維持し、workers.endpointUnavailableを示します。実行器と生成器のengine fingerprintも照合して、起動中のbinary差替えを未完了にします。
+Playwright uses Vite and `@errspec/playwright` fixtures, enumerates all projects, and includes project in identity. Each owned worker starts Vite on a different temporary port. Automatic fixtures extend existing base fixtures and collect page/frame reach/infection, sending observations through browser bindings before document destruction and retaining them across navigation. Missing fixture acquisition cannot count as a kill. Browser WebWorkers are outside acquisition. Relative navigation is required for per-worker baseURL. Existing vite/vp dev webServer commands are replaced by adapter-owned Vite; custom servers are rejected. Runner entry points and exact supported versions are documented with [Agent Skills](../../../../integrations/agent-skills.md) and package guides.
 
-### レポート・API・配布
+Additional adapters leave `configurationHash` null and revalidate results/probes until complete external-input acquisition exists. Support does not imply cache safety for unobserved inputs.
 
-`@errspec/vitest`と`@errspec/jest`はrunnerを固定してcoreの同じ内部要求へ委譲し、引数列の再構築や別の判定loopは持ちません。`@errspec/playwright`は既存testを拡張できるfixtureを独立配布し、Playwright本体は利用先が導入します。`@errspec/typecheck`へ実際のcompiler・overlay取得を配置し、埋込driverも同じ実装を使います。公開APIは元の本文とUTF-8範囲を確認してdiagnostic・型によるequivalenceの事実だけを返し、CompileErrorやIgnoredへの分類はRustが担当します。worker threadでの同じ取得と中断も提供します。
+`@errspec/vitest` and `@errspec/jest` fix the runner and delegate to the same core request; they do not reconstruct CLI arguments or implement a second verdict loop. `@errspec/playwright` independently distributes extendable fixtures, while the project supplies Playwright. `@errspec/typecheck` owns compiler and overlay acquisition, which the embedded driver also imports. Its public API verifies original source and UTF-8 spans and returns diagnostic/equivalence facts; Rust assigns CompileError and Ignored. The same acquisition is available in a cancellable worker thread.
 
-JestとViteのscratch cacheは各owned workerのprivate temp下へ置き、projectの既定cacheを共有しません。孤立回収はrun identity、所有UID、private modeとcanonicalなdirectory identityを確認し、既知の内部directoryだけをnofollowで削除します。rootのkeep.txtなど未知のproject生成物を再帰削除せず、外部へ向くsymlinkを辿りません。
+Jest and Vite scratch caches live inside each owned worker's private temporary directory. Orphan recovery validates run identity, owner UID, private permissions and canonical directory identity, then removes only known generated namespaces without following links. Unknown project-created root files and directories remain, and external symlink targets are never traversed.
 
-Rustの結果からtext、mutation-testing-elements形式、agent、simplify、テスト選択、kill matrixを生成します。表示とquality gateは別の判定にし、保存先とstdoutを区別します。追加のnpm APIは機械可読の内部要求を使い、CLI引数の解析を実装の契約に含めません。
+## Process ownership
 
-Actionは基準の取得と履歴の復元・保存を行い、失敗時も保存します。ActionのNode coordinatorはJSON optionsを既存のrunMutationへ直接渡し、判定・cache同一性・終了コードを再実装しません。差分baseはPRのbase SHAを既定とし、shallow checkoutで不足するcommitをoriginから取得します。GitHub公式cacheのrestore/saveを分け、失敗時もalwaysで専用mutation historyを保存します。既存のplatform配布物のnative executable、またはprojectへ導入済みのCLIを利用し、未公開npmへfallbackしません。native/agent/MTE JSON、offline HTML、summaryとdiff annotationは共通formatterから取得します。環境の指紋を緩めず、restored cacheの再利用可否はnative判定へ委ねます。
+Use a native supervisor as process-group leader; Node inherits group/stdio. Stop the group before reaping the supervisor. A supervisor detects changed kernel parentage and stops its own group. A private per-UID registry records version, run ID, 256-bit token, owner/supervisor facts, and Unix endpoint.
 
-Skillと初期生成は同じ導入・反復修正・Playwrightの手順を提供します。skills-npm形式のCLI package内skillsを単一の本文とし、nativeへも同じファイルを埋め込みます。init-skillは既存ファイルを全件取得してから衝突を判定し、同一本文を変更しません。明示forceの場合だけbundled fileを更新し、無関係なproject notesは保持します。後続writeが失敗した場合は今回の変更だけをrollbackし、並行更新を上書きしません。初期化は依存取得・テスト実行・ソース変更を行いません。
+At startup, query at most 256 records within three seconds. A live supervisor verifies its own parent/group before stopping. Never signal a saved PID directly, or terminate active/mismatched/unverified records. If endpoint creation is prohibited, retain parent monitoring and report `workers.endpointUnavailable`. Match driver/generator engine fingerprints so replacing binaries mid-run causes incompletion. Detailed control flow is in [mutation flow](../../../../engineering/mutation-flow.md).
 
-## アーキテクチャ・シーケンス図
+## Formatting, APIs, Action, and Skills
 
-```mermaid
-sequenceDiagram
-    participant C as CLI or API
-    participant R as Rust coordinator
-    participant A as Compiler and runner adapters
-    participant H as History
-    C->>R: request and options
-    R->>H: read fingerprints and results
-    R->>A: collect candidates, types and coverage
-    A-->>R: owned facts and diagnostics
-    R->>R: plan reuse, selection and execution
-    R->>A: execute planned mutants
-    A-->>R: execution evidence
-    R->>R: judge states and gates
-    R->>H: atomically save reviewed format
-    R-->>C: reports and exit status
-```
+Render text, MTE JSON/offline HTML, agent/simplify, and matrix data from owned Rust results. Keep formatting separate from gates and stdout separate from saved output. Public native JSON remains the established format; additional reporters do not alter default payloads.
 
-## データモデル・ER 図
+`formatReport` can acquire bounded in-root source or explicit snapshots. Validate original spans/locations before attaching source; matching a slice is not proof of complete historical source identity. Formatting saved reports never refreshes verdicts/gates. Missing source remains missing. No generic child-process warning is emitted without relevant observed facts; public attribution exposes executable and relevant project paths, not raw arguments/environment. Child-loaded static dependency closure is a possible execution risk, not assertion proof or complete dynamic/package/shell resolution. Reporter/schema/boundary tests are linked in [implementation status](../../implementation-status.md).
 
-変異識別子へ入力の指紋、到達テスト、検出テスト、判定状態と理由を関連付けます。履歴の版と取得方式を必須にし、互換性を確認できない履歴は再実行へ進めます。エラー型のシナリオ履歴とは別の形式です。
+The Action's Node coordinator forwards JSON options to existing runMutation/formatReport without reimplementing verdicts, fingerprints, or exit status. Default PR base is the event base SHA; fetch missing shallow commits from origin. Separate official cache restore/save with `always()` save, including failed runs. Use a prebuilt native artifact or project-installed CLI, never unpublished-registry fallback or consumer Rust compilation. Save native/agent/MTE JSON, offline HTML, summary, and diff annotations through shared formatters. Native fingerprints decide restored-cache eligibility. See the [Action guide](../../../../integrations/github-action.md).
 
-## API・インターフェース
+Skills use one skills-npm-compatible set under the CLI package, embedded byte-for-byte in native init-skill. Acquire every existing target before conflict planning; identical files are unchanged. Only explicit force updates bundled files; preserve unrelated project notes. On a later write failure, roll back owned changes without overwriting concurrent edits. Initialization installs no dependencies, executes no tests, and changes no project source. See the [Skills guide](../../../../integrations/agent-skills.md).
 
-既存のmutateの引数は維持し、型検査、差分、履歴、予算、追加ランナー、レポートの指定を追加します。型検査は--typecheck、--no-typecheck、--typecheck-project、--typecheck-packageで指定し、既存の--nodeを使います。意味解析用の--analysis-engineなどとは区別します。
+## Configuration and public request protocol
 
-mutation専用設定は`errspec.mutation.config.{ts,mts,mjs,js,json}`から1つを選び、`--config-file`で明示できます。親ディレクトリを探索せず、複数ある場合はエラーにします。設定ファイル全体を検証してから、明示されたCLI/APIのプロパティだけを上書きします。policyはプロパティ単位で、配列は置き換えます。否定フラグは設定のtrueを解除でき、型検査を無効にすると明示されなかったコンパイラパスも解除します。
+Choose one root-local `errspec.mutation.config.{ts,mts,mjs,js,json}`, or explicit `--config-file`. Do not search parents; multiple discovered files are an error. Validate the entire configuration before applying explicitly supplied CLI/API properties. Precedence is per property, arrays replace, and negative flags override configured true. Explicitly disabling typecheck also clears non-explicit compiler paths.
 
-設定のrootは設定ファイルからの相対パス、設定内のパスは有効なproject rootからの相対パスです。明示CLI/APIのroot・パスは呼び出し元ディレクトリを基準にします。script設定はNode 24のtype strippingで取得し、JSON互換のdefault exportを要求します。取得の期限は10秒、出力上限は1 MiBで、ログはstderrへ送ります。子をreapする前に所有するprocess groupを終了し、reap後のPIDへsignalを送りません。
+Configuration root is relative to the configuration file; its paths are relative to effective project root. Explicit CLI/API root/paths resolve from caller cwd. Script config uses Node 24 type stripping and a JSON-compatible default export, with 10-second/1-MiB limits and logs on stderr. Stop its owned process group before reap; never signal a reaped PID.
 
-共通の`mutation::options::Options`をCLIとAPIで使用します。`@errspec/core`の`runMutation`はprotocol 1のJSON要求をnative binaryへ送り、CLI解析を経由しません。`defineConfig`は型付きidentity関数で、最終的な入力検証と判定はRustが行います。設定・品質不合格はreportとexitCodeを返し、起動失敗や不正な応答はPromiseのrejectにします。公開型とJSON Schemaはpackageに同梱します。
+CLI/API share `mutation::options::Options`. `@errspec/core` runMutation sends protocol-1 JSON directly to native execution, not CLI argument parsing. defineConfig/plugin helpers are typed identity functions; native code validates final input and judges. Configuration/quality failures return report plus exitCode; startup/invalid response rejects the Promise. Ship declarations/schema. Typecheck options are `--typecheck`, `--no-typecheck`, `--typecheck-project`, `--typecheck-package`, using mutation `--node`; semantic-analysis options remain separate.
 
-内部要求と応答は版・実行ID・要求ID・件数を照合します。候補IDの欠落・重複・不一致、壊れた診断、実行していない対象の結果をエラーとします。型検査の状態は既存のengine.typecheckと追加の版情報で示します。
+Validate internal version/run/request IDs, counts, duplicate/missing/mismatched candidates, diagnostics, and executed targets. Typecheck status stays in engine.typecheck plus acquired version facts. History binds fingerprints and acquisition mode and never becomes scenario history.
 
-## 外部サービスとの連携方式
+## Security, distribution, and alternatives
 
-コンパイラとランナーは導入済みのパッケージを使います。GitHub Actionは公開のcheckout/cache機能を使用します。ローカル実行のためのソース送信や自動公開は行いません。
+Use installed compilers/runners; do not upload source or auto-publish. Configuration/plugins execute trusted local code. Typecheck overlays never alter originals. History, acceptance, and reports have separate purposes/versions. Keep acquisition effects out of pure judgments and protocol output free of logs.
 
-## データの取り扱い設計
+GitHub permissions come from the Action environment; no new secret store is created. Existing CLI/testkit need no migration. Verify API/Action/package behavior using locally packed artifacts before publication. Publishing, billing changes, visibility changes, and repository migration remain later work.
 
-型検査は仮想の本文で行い、元のファイルを変更しません。履歴、承認、レポートはそれぞれ用途と版を分けて保存します。設定とpluginの取得を、取得済み値に対する判定関数へ含めません。
-
-## 認証認可に関する特記事項
-
-ローカルの権限で実行します。GitHubの権限はActionの実行環境から受け取り、新たな秘密情報の保存は行いません。
-
-## セキュリティ上の留意事項
-
-実行器のプロセス群を限定して終了し、実行IDと所有情報が異なる過去のプロセスを終了しません。設定・pluginの評価は利用者のコードの実行として扱います。機械可読の出力へログを混ぜません。
-
-## デプロイに関する特記事項
-
-既存のCLIとtestkitの移行は不要です。追加したnpm APIとActionは配布前のローカル成果物から検証します。npm公開や支払い設定の変更は行いません。
-
-## 検討した代替手段
-
-### mutator 0.2.0全体を実行エンジンとして同梱する
-
-固定版の機能を直接再利用できますが、oxcのネイティブ依存と別の判定モデルを配布へ追加します。既存のRustによる候補と判定を共用する方針を採用し、この案は利用者から指示があった場合に再検討します。
-
-## 未決事項
-
-機能の範囲に未決事項はありません。追加の実装方針について利用者から指示があれば反映します。
+Bundling the whole fixed mutator was considered: it reuses capability directly but adds its oxc native dependencies and a second verdict model. The chosen implementation shares existing candidates and common judgments, retaining JS/TS acquisition where appropriate. Scope is approved; this design does not invent additional product guarantees. Local acceptance and outstanding CI/practical evidence remain separate in [implementation status](../../implementation-status.md).

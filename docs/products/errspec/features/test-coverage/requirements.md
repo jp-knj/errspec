@@ -1,101 +1,78 @@
-# 既存テストによるエラーの網羅確認
+# Error-tag coverage from existing tests
 
-## このドキュメントについて
+## About this document
 
-[Product](../../product.md)に基づき、errspec専用のテストAPIを書かずに、既存のVitestテストがどのエラータグを確かめているかを示す機能を追加します。
+Following the [Product](../../product.md), report which error tags existing Vitest
+tests assert without requiring errspec-specific test APIs.
 
-### スコープ
+### Scope
 
-有限タグ型について、プロジェクトのVitestを実行し、成功したテストのアサーションが期待値として要求したタグを集計します。比較対象に含まれるだけのタグは確認済みにしません。テストファイルに文字列として現れるだけのタグと、どのテストにも現れないタグを区別して示します。
+For finite tagged types, run the project's Vitest and aggregate tags required by
+successful tests' assertion expectations. A tag appearing only in the received
+value is not asserted. Distinguish quoted tags mentioned in a test file from tags
+absent from all test files.
 
-### スコープ外
+### Outside scope
 
-障害の呼出完了や必須比較の保証は`scenarioTest`と`verify`に残します。Bun、型の意味的な選別（業務上のエラーかどうか）、テストの自動生成は扱いません。
+`scenarioTest` and `verify` retain the stronger fault-completion and required-
+comparison guarantees. Bun, semantic classification as a business error, and
+automatic test generation are outside this feature.
 
-## ユーザーストーリー
+## User stories
 
-### 設定なしで未確認のエラーを知る
+### Find unverified errors without rewriting tests
 
-開発者として、テストを書き換えずに、どのエラーがテストで確かめられていないかを知りたい。
+**Scenario: a successful assertion requires an exact tag.** Given a passing test
+with `expect(result.error).toEqual({ type: "NOT_FOUND" })`, running
+`errspec coverage` marks `NOT_FOUND` as `asserted` and names the test.
 
-**受け入れ条件:**
+**Scenario: received tags alone are insufficient.** Given only
+`toMatchObject({ ok: false })` or a `toHaveProperty` that does not specify the tag,
+coverage does not count a tag in the received result as `asserted`.
 
-Scenario: 成功したテストがタグの一致を要求した場合、確認済みとする
+**Scenario: a later test failure invalidates an earlier successful comparison.**
+Given a matching tag assertion followed by a test failure, coverage does not use
+that comparison as asserted evidence and also reports the runner failure.
 
-- Given: `expect(result.error).toEqual({ type: "NOT_FOUND" })`が成功するテストがある。
-- When: `errspec coverage`を実行する。
-- Then: `NOT_FOUND`を`asserted`とし、確かめたテスト名を示す。
+**Scenario: a tag is mentioned but not compared as a value.** Given a test writes
+a tag only in a mock return and compares the HTTP status, `errspec coverage`
+classifies it as `mentioned`, not `asserted`.
 
-Scenario: 比較対象にタグがあっても期待値が要求しない場合、確認済みにしない
+**Scenario: no test mentions a tag.** Given an implementation tag absent from every
+test, `errspec coverage --fail-on-missing` reports `missing` and exits 1.
 
-- Given: タグを含む戻り値に対して、`toMatchObject({ ok: false })`やタグを指定しない`toHaveProperty`だけを実行する。
-- When: 網羅確認を実行する。
-- Then: そのタグを`asserted`には数えない。
+**Scenario: equal values with different discriminators remain distinct.** Given
+`code: "Shared"` and `kind: "Shared"` types and a test asserting only the former
+without spelling the tag directly in its body, coverage reports the former as
+`asserted` and the latter as `missing`; `--fail-on-missing` exits 1.
 
-Scenario: 比較の後にテストが失敗した場合、確認済みにしない
+**Scenario: invalid observation data cannot produce a successful aggregate.**
+Given tests pass but the record file contains invalid JSON or cannot be read,
+coverage reports `EC_RUNNER` and exits 2. Actual execution and runner success
+remain reported separately from the invalid record.
 
-- Given: タグの比較が成功した後、同じテストが失敗する。
-- When: 網羅確認を実行する。
-- Then: 失敗したテストの比較を`asserted`の根拠にせず、ランナーの失敗も報告する。
+**Scenario: negative and failed assertions are not evidence.** Given a failed
+assertion or `.not` receives a tagged value, do not count it as `asserted`.
 
-Scenario: タグがテストに現れるが値として確かめていない場合、区別する
+### Prevent regression while retaining known gaps
 
-- Given: モックの戻り値としてだけタグを書き、結果のHTTPステータスだけを比較するテストがある。
-- When: `errspec coverage`を実行する。
-- Then: そのタグを`mentioned`とし、`asserted`とは数えない。
+**Scenario: a saved state becomes weaker.** Given a baseline saved with
+`errspec coverage --save-baseline coverage-baseline.json`, compare with
+`--baseline coverage-baseline.json`. An `asserted` tag becoming `mentioned` or
+`missing`, or `mentioned` becoming `missing`, is a reported regression and exit 1.
 
-Scenario: どのテストにも現れない場合、漏れとして示す
+**Scenario: a new tag is unverified.** Given a newly added tag absent from all
+tests, baseline comparison reports a new `missing` tag and exits 1.
 
-- Given: 実装が返すタグを、どのテストも扱っていない。
-- When: `errspec coverage --fail-on-missing`を実行する。
-- Then: そのタグを`missing`とし、終了コード1にする。
+**Scenario: unchanged gaps and improvements pass.** Given a retained gap or a
+stronger state, baseline comparison reports improvements and exits 0 when there
+is no regression. It does not overwrite the existing baseline.
 
-Scenario: 識別プロパティが違う同じ値のタグを、それぞれ集計する
+## Functional requirements
 
-- Given: `code: "Shared"`と`kind: "Shared"`の型があり、テストが前者だけを確かめている。テスト本文にはタグの値を直接書いていない。
-- When: `errspec coverage --fail-on-missing`を実行する。
-- Then: 前者は`asserted`、後者は`missing`として別々に集計し、終了コード1にする。
+**Input:** tsconfig, discriminator properties, discovered or explicit Vitest
+executable/configuration, and extra `vitest run` arguments.
 
-Scenario: テスト成功後に記録を検証できない場合、集計を成功としない
-
-- Given: テストは成功したが、記録用ファイルに不正なJSONがある、またはファイルを取得できない。
-- When: `errspec coverage`を実行する。
-- Then: `EC_RUNNER`と終了コード2を返す。テストの実行済み状態とランナーの成否は実際の結果で報告する。
-
-Scenario: 失敗・否定のアサーションは証拠にしない
-
-- Given: 失敗したアサーション、または`.not`のアサーションがタグを含む値を受け取る。
-- When: `errspec coverage`を実行する。
-- Then: その値を`asserted`の根拠にしない。
-
-### 今ある漏れを認めたまま、後退だけを止める
-
-開発者として、既存の漏れをすぐには直せなくても、新しい漏れや確認の後退をCIで止めたい。
-
-**受け入れ条件:**
-
-Scenario: 保存した状態から後退した場合、失敗にする
-
-- Given: `errspec coverage --save-baseline coverage-baseline.json`で現在のタグの状態を保存した。
-- When: テストの変更で、`asserted`だったタグが`mentioned`か`missing`に、または`mentioned`だったタグが`missing`になり、`--baseline coverage-baseline.json`で実行する。
-- Then: 後退したタグを示し、終了コード1にする。
-
-Scenario: 保存時になかったタグが未確認で現れた場合、失敗にする
-
-- Given: 型に新しいタグが加わり、どのテストにも現れない。
-- When: `--baseline`付きで実行する。
-- Then: 新しい`missing`として示し、終了コード1にする。
-
-Scenario: 改善や変わらない漏れは通す
-
-- Given: 保存時から漏れが残っている、または確認が強くなった。
-- When: `--baseline`付きで実行する。
-- Then: 改善を示し、終了コードは後退がなければ0にする。既存のbaselineファイルは上書きしない。
-
-## 機能要件
-
-**入力:** tsconfig、識別プロパティ、Vitestの実行ファイル・設定（省略時は探索）、`vitest run`への追加引数。
-
-**出力:** 型ごとのタグと状態（`asserted`・`mentioned`・`missing`）、確かめたテスト、集計、ランナーの成否。
-
-アサーションの結果やテストの成否を変更しません。利用者のVitest設定とテストファイルを書き換えません。
+**Output:** per-type tags classified `asserted`, `mentioned` or `missing`, asserting
+tests, aggregates and runner status. Do not alter assertion outcomes, test results,
+consumer configuration or test files.

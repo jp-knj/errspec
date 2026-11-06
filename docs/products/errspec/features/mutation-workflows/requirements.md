@@ -1,264 +1,69 @@
-# ミューテーションの差分検証・再利用・追加ランナー
+# Incremental mutation workflows, reuse, and additional runners
 
-## このドキュメントについて
+This feature completes the approved [Product](../../product.md) scope beyond [basic generation/execution/judgment](../mutation-testing/requirements.md). The [capability matrix](../../mutator-coverage.md) fixes the reference at mutator 0.2.0 commit `025870640d46e93e97285d67e4c265074cf8b295`.
 
-[Product](../../product.md)の全機能提供を実現する追加機能です。[機能対応表](../../mutator-coverage.md)のmutator 0.2.0固定版を基準とし、基本の生成・実行・判定に加え、開発とCIで反復して検証するための機能を定めます。
+## Scope
 
-### スコープ
+Include Git/history selection, weak mutation, compiler checks, exclusions/acceptance/plugins, parallelism/sharding/sampling/budgets, Jest/Playwright/Vite+, reports, test selection and complete kill matrices, configuration/API/packages, GitHub Action, and Agent Skills. Existing errspec failure verification remains usable alongside mutation testing.
 
-差分と履歴に基づく実行、weak mutation、型検査、除外と承認、plugin、並列実行と予算、JestとPlaywright、各種レポート、設定・API・配布・Agent Skillsを含みます。対応表の全項目を利用可能にし、errspecの失敗シナリオ検証を併用できます。
+Reference features added after the fixed revision, arbitrary runners/browser environments, and proof of universal runtime equivalence are outside scope. Experimental adapters expose their limitations. Inclusion means usable capability, not identical CLI names, configuration, exit codes, JSON, or plugin API.
 
-### スコープ外
+## User stories and acceptance
 
-固定版以後のmutatorの機能、任意のブラウザ・任意のランナーへの対応、すべての実行時の同値性の証明は含みません。実験的なadapterは固定版と同じ制約を明示します。
+### Revalidate relevant changes and reuse evidence
 
-## ユーザーストーリー
+- Identical function/test/dependency/configuration/environment/plugin inputs allow result and reach reuse, visibly distinguished from fresh execution. Location-only edits preserve mutant identity.
+- Changed functions, killing tests, dependencies, settings, environment, or plugins invalidate relevant results. Deleted killing tests require revalidation.
+- `--since` selects changed node/scope candidates and necessary revalidation. Changed tests absent from collection produce warnings.
+- Explicit IDs report only those candidates; forced full probe ignores reach cache independently of result cache.
+- Experimental callgraph selection limits revalidation of old survivors using known static relations while warning that value flow through tests may be missed.
 
-### 変更に必要な検証を選び、確認済みの結果を再利用する
+Reuse correctness is required; partial probe refresh is not. A changed raw input may intentionally trigger a full current probe, including scope reuse. Partial refresh is a deferred performance optimization under the accepted design, as audited in [implementation status](../../implementation-status.md#probe-reuse-audit).
 
-開発者として、コード・テスト・依存や設定の変更を反映しながら、必要な変異を再検証したい。
+### Separate reach, infection, and type validity
 
-**受け入れ条件:**
+- Weak mutation distinguishes reached-but-not-infected from unreached candidates and explains skipped trials. Disabling it executes covering tests.
+- Opt-in typechecking compares original and mutated diagnostics using the project's TypeScript/tsconfig. New mutant-only diagnostics become `CompileError` and skip trials; disabling typecheck permits execution. Support TS 6/7 API paths and validated compatible versions.
+- Optional-chain equivalence exclusions require applicable strict options and receiver types excluding null/undefined. Do not assume array indexing stays in range.
 
-Scenario: 入力が同一の場合、実行結果と到達記録を再利用する
+### Record intended exclusions and human acceptance
 
-- Given: 関数・テスト・依存・設定・環境・pluginの入力が前回と一致する。
-- When: 反復検証する。
-- Then: 再利用した結果と今回実行した結果を区別し、位置だけの変更でも同じ変異を識別できる。
+- Opt-in arid rules, replacement callee patterns, disable/Stryker comments, and ignorer rules retain exclusion reasons. Disabling the applicable rule restores eligible candidates.
+- `accept --reason` saves mutant identity plus a nonempty developer reason and displays it in later reports. Stale acceptances are visible; acceptance without a reason is rejected.
+- Module/package plugins supply custom mutators/ignorers, allow per-family exclusion, and include plugin inputs in cache invalidation.
 
-Scenario: 入力が変わった場合、関連する結果を再検証する
+### Select execution resources and runners
 
-- Given: 関数、検出テスト、依存、設定、環境またはpluginが変わった。
-- When: 前回の履歴を使って検証する。
-- Then: 影響する結果を再利用せず、検出テストの削除でも再検証する。
+- Configured concurrency executes independent candidates with separate evidence. Deterministic sharding supports splitting a long run.
+- Per-line samples are deterministic. Candidates not started because of sample/time budgets remain `Pending` with distinct reasons and cannot count as success.
+- Hit/stall/total limits and a bounded retry/confirmation stop nonterminating trials and expose reasons. SIGINT/SIGTERM stop owned descendants.
+- Orphan recovery requires verified ownership and must not stop unrelated processes.
+- Explicit/automatic runner selection supports Vitest 5, Vite+, Jest 30 native ESM, and Playwright Test with Vite. Session reuse, ESM transformation, fixtures, and multiple browser projects retain their stated adapter limits; unsupported conditions fail clearly.
 
-Scenario: Gitの基準を指定した場合、変更したnodeまたはscopeを検証する
+### Turn results into tests and quality decisions
 
-- Given: Gitで基準との差分を取得できる。
-- When: 差分の基準と選択単位を指定する。
-- Then: 差分の変異と再検証が必要な変異を区別し、収集されなかった変更テストを警告する。
+- Select text, mutation-testing-elements JSON, or self-contained HTML and save the requested outputs. Preserve status, source location, and evidence; distinguish not detected, not infected, and not reached. Warn about actually observed, relevant child-process execution risks.
+- Agent JSON includes gaps, available function source, covering tests, and actionable assertion suggestions. Simplify identifies covered surviving removal candidates. Machine-readable stdout stays free of logs.
+- Test selection returns ranked related files/JSON based on changes and current reach.
+- Complete kill matrix executes all covering tests rather than stopping at the first kill and reports no-kill, subsumed, and duplicate relationships. Reused evidence must match its acquisition mode.
+- High/low/break thresholds, fail-on-survived, and critical globs/comments distinguish completed quality failure from baseline/infrastructure failure. Critical candidates require detection or reasoned acceptance.
+- In GitHub Actions, undetected changed-line candidates produce file/line warning annotations.
 
-Scenario: 候補または到達記録の再取得を指定した場合、その指定だけを適用する
+### Integrate through configuration, APIs, artifacts, and skills
 
-- Given: 既存の変異IDと履歴がある。
-- When: IDの指定または全テストによる到達記録の再取得を要求する。
-- Then: ID指定ではその候補だけを報告し、再取得指定では到達記録のキャッシュを使わない。
+- Validate ts/mts/mjs/js/json configuration and apply explicit CLI/API properties over configuration over defaults. Negative flags can override configured true values.
+- `runMutation`, formatting, and plugin-definition APIs expose the same native behavior without parsing CLI arguments. Core, runner, and typecheck entry points are available as the package plan requires.
+- The Action obtains the Git base, restores/saves mutation history, and saves after a failed run so later execution can revalidate/reuse compatible evidence.
+- `init-skill` installs setup, iterative test improvement, and Playwright instructions; the same skills are discoverable through skills-npm-compatible package layout.
 
-Scenario: 実験的なcallgraph選択を指定した場合、制約を示して再検証範囲を限定する
+## Compatibility and data
 
-- Given: 関数間の静的な関係を取得できる。
-- When: callgraph選択を有効にする。
-- Then: 変更との関係に基づいて生存変異を選び、テストを介した値の伝播を省略する可能性を明示する。
+Existing CLI, exit-code, configuration, native JSON, testkit, and scenario-history contracts remain. Add optional fields only as required. Unexecuted work never becomes detection evidence. Invalid configuration/API/runner/history cannot pass; disclose unsupported/experimental conditions.
 
-### 到達・値の差・型の成立を別々に確認する
+Mutation data associates position-independent identity, edit, state, covering/killing tests, and reasons. History associates results with source/test/dependency/configuration/environment/plugin fingerprints and acquisition mode. Human acceptance is separate identity/reason data. Reports carry scores, gates, recommendations, and observed relationships. Process records retain only necessary ownership/termination facts. Mutation history remains separate from scenario baselines.
 
-開発者として、実行する必要がある変異と、型から除外できる変異を把握したい。
+## Services, security, and completion evidence
 
-**受け入れ条件:**
+Local execution uses installed packages and local privileges. GitHub is required only for Action/annotations. No automatic source upload, npm publication, repository migration, or billing-setting changes are part of this implementation. Settings/plugins/tests execute trusted user code. Never signal unverified processes, and never write mutated typecheck contents to original source.
 
-Scenario: 値を変えない到達しかない場合、not infectedとして分類する
-
-- Given: テストが変異へ到達するが、その入力では値の差がない。
-- When: weak mutationを有効にして検証する。
-- Then: 未到達と区別し、実行を省略した根拠を報告する。無効化した場合は到達テストを実行する。
-
-Scenario: 変異後だけに型エラーがある場合、CompileErrorにする
-
-- Given: 利用先のTypeScriptとtsconfigを使用できる。
-- When: 変異後の型検査を有効にする。
-- Then: TS 6・7の各APIで元コードと変異後を比較し、新たな型エラーがある変異を実行対象から除外する。型検査を無効化した場合は実行へ進む。
-
-Scenario: optional chainingの同値性を型から確認できる場合、理由とともに除外する
-
-- Given: nullとundefinedを除外でき、必要な厳格オプションが有効である。
-- When: optional chainingの変異を検査する。
-- Then: 除外理由を報告する。配列の範囲外アクセスを安全と仮定しない。
-
-### 意図した除外と、人の承認を記録する
-
-開発者として、ログ専用コードや承認済みの同値変異を理由付きで管理したい。
-
-**受け入れ条件:**
-
-Scenario: 除外規則が一致する場合、理由を報告する
-
-- Given: aridなログ専用コード、追加calleeパターン、disableまたはStrykerコメントがある。
-- When: 変異を生成する。
-- Then: 該当する変異を除外し、規則を無効化した場合は対象に含める。
-
-Scenario: 同値と判断した変異を承認した場合、理由を次の実行へ引き継ぐ
-
-- Given: 未検出の変異と、人が指定した理由がある。
-- When: 変異IDを承認する。
-- Then: 承認した理由とIDを保存し、次回のレポートに含める。存在しなくなった承認を案内し、理由なしの承認を受け付けない。
-
-Scenario: pluginを指定した場合、独自の変異または除外規則を適用する
-
-- Given: モジュールまたはパッケージのpluginが利用できる。
-- When: pluginを指定して検証する。
-- Then: 独自のmutatorとignorerを利用でき、mutator単位で除外できる。pluginの変更はキャッシュへ反映する。
-
-### 実行時間と実行器を選ぶ
-
-開発者として、プロジェクトのランナーと時間に合わせて検証したい。
-
-**受け入れ条件:**
-
-Scenario: 実行枠数を指定した場合、複数の変異を独立した実行器で検証する
-
-- Given: 並列実行できるプロジェクトがある。
-- When: 実行枠数を指定する。
-- Then: 各候補の結果と根拠を独立して集め、長い実行を分割できる。
-
-Scenario: 行ごとの標本数または時間予算を指定した場合、未実行をPendingにする
-
-- Given: 予算を超える候補がある。
-- When: 標本数または時間予算を指定する。
-- Then: 標本を決定的に選び、未実行を成功へ数えず、未実行の理由を報告する。
-
-Scenario: 実行が停止しない場合、制限と再試行で判定する
-
-- Given: hit limit、stallまたはtotal timeout、実行時エラーが発生する。
-- When: 変異を検証する。
-- Then: 制限で停止し、延長予算による再試行や実行時エラーの再確認を報告する。SIGINT・SIGTERMでは子プロセス群を終了する。
-
-Scenario: 前回の孤立プロセスを確認できる場合、その所有情報に従って終了する
-
-- Given: 過去のerrspec実行に属するプロセスの記録がある。
-- When: 新しい実行を始める。
-- Then: 所有情報を検証して前回のプロセスを終了し、無関係なプロセスを終了しない。
-
-Scenario: ランナーを指定または自動選択する場合、対応する検証を実行する
-
-- Given: Vitest 5、Vite+、Jest 30 native ESM、またはPlaywright TestとViteを利用できる。
-- When: 対応ランナーを選ぶ。
-- Then: Vitestのセッション再利用、JestのESM変換、Playwrightのfixture・複数projectを使って変異を検証する。未対応条件では原因を報告する。
-
-### 結果から修正するテストを判断する
-
-開発者として、未検出の理由と変更に関連するテストを把握し、CIの判定基準を指定したい。
-
-**受け入れ条件:**
-
-Scenario: 保存用レポートを指定した場合、指定先へJSONとHTMLを保存する
-
-- Given: 完了または一部未実行の検証結果がある。
-- When: text、mutation-testing-elements形式のJSON・HTMLを指定する。
-- Then: 状態・位置・根拠を出力し、not detected・not infected・not reachedを区別する。子プロセス内の実行の可能性を警告する。
-
-Scenario: agentまたはsimplifyレポートを指定した場合、次の修正に必要な情報を示す
-
-- Given: 生存または削除しても検出されない変異がある。
-- When: 対応するレポートを指定する。
-- Then: agentでは未検出・関数本文・到達テスト・修正案をJSONへ含め、simplifyでは削除候補を示す。stdoutの機械可読出力へログを混ぜない。
-
-Scenario: テスト選択を要求した場合、変更に関連するテストを順位付きで返す
-
-- Given: 変更と到達記録がある。
-- When: テスト選択を要求する。
-- Then: 関連テストを順位付きのfilesまたはJSONで得られる。
-
-Scenario: kill matrixを指定した場合、全検出テストとテスト間の関係を示す
-
-- Given: 変異に到達する複数のテストがある。
-- When: kill matrixを指定する。
-- Then: 早期終了で検出テストを省略せず、検出なし・包含・重複するテストを示す。再利用する結果は取得方式と一致する。
-
-Scenario: 閾値またはcritical領域を指定した場合、基準実行失敗と区別して不合格にする
-
-- Given: 未検出の変異がある。
-- When: high・low・break閾値、生存時の不合格、またはglob・コメントによるcritical領域を指定する。
-- Then: その基準で判定し、criticalでは全候補の検出または理由付きの承認を必要とする。基準実行の失敗とquality gate失敗を区別する。
-
-Scenario: GitHub Actionsで差分を検証する場合、差分上へwarningを出力する
-
-- Given: GitHub Actionsの環境で、未検出の変異が差分にある。
-- When: レポートを生成する。
-- Then: 差分のファイル・行を含むwarning annotationを得られる。
-
-### 設定・API・配布物を使って導入する
-
-開発者として、CLI以外の利用やCI・エージェントからも同じ機能を利用したい。
-
-**受け入れ条件:**
-
-Scenario: 設定ファイルとCLIを併用する場合、CLI指定を優先する
-
-- Given: ts・mts・mjs・js・jsonの設定とCLI指定がある。
-- When: 検証を開始する。
-- Then: Schemaに従って検証し、CLI、設定、既定値の順に適用する。否定フラグでも設定値を変更できる。
-
-Scenario: プログラムから要求した場合、同じ機能をAPIで利用できる
-
-- Given: npmパッケージを利用できる。
-- When: runMutation、formatter、plugin定義APIを呼び出す。
-- Then: CLIを解析せずに同じ検証・レポートを利用でき、core・runner・typecheckを必要に応じて利用できる。
-
-Scenario: CI Actionから呼び出す場合、基準取得と履歴の再利用を行う
-
-- Given: 別checkoutまたは前回のCIの履歴を取得できる。
-- When: Actionから差分検証する。
-- Then: 基準を取得し、失敗時も履歴を保存して次回へ利用する。
-
-Scenario: Skillの初期生成を要求した場合、反復修正の手順を導入できる
-
-- Given: エージェント用の作業ディレクトリがある。
-- When: Skillの初期生成を要求する。
-- Then: 導入・反復修正・Playwrightの手順を生成でき、skills-npmでも導入できる。
-
-## KPI
-
-### 機能対応表の包含
-
-- **現状値:** 基本のVitest生成・実行・判定を提供。追加の意味解析backendも実装済み。
-- **目標値:** 固定版の機能対応表の全項目を、実装と受け入れ検証へ対応付ける。
-- **計測方法:** 項目ごとにCLI・API・配布物の実行結果を確認する。
-- **計測期間:** 本機能の実装と、比較対象の版を変更するとき。
-
-## 機能要件
-
-### 追加機能と既存機能の互換性
-
-**概要:** 全機能を追加し、既存のerrspecの利用を維持します。
-
-**入力:** ソース、テスト、設定、Gitの基準、履歴、plugin、各機能の指定。
-
-**出力:** 実行結果と再利用の根拠、レポート、選択テスト、承認、履歴、終了コード。
-
-#### 適用する条件
-
-固定版の機能の包含を基準とし、同じCLI名・設定名・JSON・plugin APIであることは要求しません。既存のerrspecのCLI・終了コード・設定・JSON・testkit APIを維持します。新しい機能に必要な指定は追加し、実行の省略を成功の証明へ変更しません。
-
-#### 例外ケースでの振る舞い
-
-設定・API・ランナー・履歴の破損を成功にしません。未対応の実行方式や実験的な方式の制約を明示し、未実行を検出済みと同じ状態へ数えません。
-
-## データ要件
-
-### 必要なデータ
-
-- **変異と結果:** 位置に依存しない識別子、変更内容、状態、検出テストと到達テスト、判定理由。
-- **履歴と指紋:** ソース・テスト・依存・設定・環境・pluginと結果の関係。
-- **承認:** 変異識別子と人が指定した理由。
-- **レポートと選択:** 状態別の情報、スコアと閾値、修正候補、テスト間の関係。
-- **プロセス記録:** 実行の所有情報と終了に必要な識別情報。
-
-### データ間の関係
-
-履歴と承認は変異の識別子へ関連付けます。結果の再利用は入力の指紋と取得方式の一致を必要とします。errspecの失敗シナリオ履歴と、変異実行の履歴は別々に管理します。
-
-### 個人情報
-
-ローカルのソース、テスト名、パス、Git情報を扱います。ソースを外部へ送信しません。
-
-## 依存する外部サービス
-
-GitHub Actionとwarning annotationを使う場合はGitHubを利用します。それ以外の検証はローカルで実行します。npmへの公開や外部サービスの支払い設定の変更は、この実装依頼に含めません。
-
-## セキュリティ上の留意事項
-
-設定・plugin・ランナーは利用者の権限で実行します。所有を確認できないプロセスを終了しません。ソースを変更する型検査では、元の内容を維持します。
-
-## 未決事項
-
-機能の範囲に未決事項はありません。実装は既存仕様のRust中心という方針で進めます。固定版を同梱する代替案について利用者から指示がある場合は、その変更をDesignへ反映します。
+The completion criterion is traceability from every fixed-reference capability to implementation and acceptance evidence, including CLI/API/installed artifacts where applicable. [Implementation status](../../implementation-status.md) separates local evidence, required three-platform CI, and remaining practical work. Feature scope is approved; additional guarantees require an explicit specification change. Compiler/runner acquisition naturally remains JS/TS where appropriate, while shared validation, verdicts, gates, and planning belong to Rust.

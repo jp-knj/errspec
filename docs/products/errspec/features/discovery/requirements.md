@@ -1,96 +1,85 @@
-# エラー候補の発見と伝播経路の調査
+# Discover error candidates and propagation paths
 
-## このドキュメントについて
+## About this document
 
-[Product](../../product.md)に基づき、契約を登録する前にプロジェクト全体から失敗箇所と伝播先を調べる機能を追加します。
+Under the [Product](../../product.md), investigate failure sources and their
+propagation across a project before registering contracts.
 
-### スコープ
+### Scope
 
-TypeScriptプロジェクトの型付きソースについて、有限の識別子を持つ型、明示的なthrow、Promise.reject、構造的なerrorプロパティを持つ戻り値を発見します。関数・メソッド・arrow function、モジュールをまたぐ呼出、再帰、await、return、catchを調べ、発生元と呼出側の関係を示します。
+For typed TypeScript sources, discover finite discriminator types, explicit
+throws, `Promise.reject`, and returned values with a structural `error` property.
+Inspect functions, methods, arrows, cross-module calls, recursion, await, return
+and catch, relating origins to callers.
 
-### スコープ外
+### Outside scope
 
-任意のJavaScriptプログラムの全実行時エラーを完全に列挙する保証はありません。動的dispatch、外部実装、callbackの実行規則、getter/proxy、eval、暗黙の実行時例外、全経路の到達可能性は不明として範囲を明示します。有限タグを持つ型が業務上のエラーであるかは利用者が選びます。
+Do not guarantee exhaustive runtime errors in arbitrary JavaScript. State unknown
+behavior for dynamic dispatch, external implementations, callback execution rules,
+getters/proxies, eval, implicit exceptions and whole-path feasibility. Users decide
+whether a finite tagged type represents a business error.
 
-## ユーザーストーリー
+## User story: choose types and failure sources from evidence
 
-### 登録する型と失敗箇所を見つける
+**Scenario: exported finite tagged types become usable candidates.**
 
-開発者として、型名を先に指定せずに候補を探し、根拠を見て検証対象を選びたい。
+- Given a project with imports/re-exports and a finite tagged type.
+- When scanned.
+- Then report file, public name, discriminator and tags. Do not present an arbitrary
+  string as a finite inventory.
+- Merge aliases/re-exports of one declaration into one candidate, preferring the
+  declaring file's public name and listing other export paths.
+- Mark, without excluding, a type whose discriminator declarations all belong to
+  dependencies or files outside the project as external.
+- Show Result/throw/rejection channels when the type occurs at a failure source.
+  Keep candidates that do not occur at such a source.
 
-**受け入れ条件:**
+**Scenario: a failure traverses several functions.** Given a throw in another
+module reached through aliased imports or recursion, scanning shows its origin
+and call path and terminates even with cycles.
 
-Scenario: 公開された有限タグ型がある場合、設定に使用できる候補を示す
+**Scenario: awaited failures and directly returned promises differ.** Given one
+function catches an awaited failure and another directly returns a Promise,
+scanning distinguishes the catch boundary from rejection propagation. Show
+rethrows and transformed errors as sources too.
 
-- Given: importや再exportを含むプロジェクトに有限タグ型がある。
-- When: プロジェクトを走査する。
-- Then: ファイル、公開名、識別プロパティ、タグを示す。任意の文字列を有限な一覧と偽らない。
-- Then: 同じ宣言を再exportや別名で公開している場合は1件にまとめ、宣言したファイルの公開名を代表として、ほかの公開経路を併記する。
-- Then: 識別プロパティがすべて依存先やプロジェクト外で宣言された型は、外部の型として区別して示す。除外はしない。
-- Then: 型候補が失敗箇所のエラー型として現れる場合は、その経路（Result・throw・rejection）を示す。現れない型も候補に残す。
+**Scenario: unknown callees are not reported as failure-free.** Given an external
+implementation, function parameter sharing a known function's type, mutable alias
+or `any` prevents resolving the implementation, scanning reports its position and
+reason. Strict unknown checking exits nonzero.
 
-Scenario: 複数の関数を経由する場合、元の失敗箇所をたどれる
+## Measurement
 
-- Given: 別モジュールの関数がthrowし、別名importや再帰を通して呼び出される。
-- When: プロジェクトを走査する。
-- Then: 発生箇所と呼出経路を示し、循環があっても停止する。
+Measure candidates, unresolved sites and scan duration on real projects. Baseline
+values and speed targets are unmeasured. Do not calculate an exhaustive failure-
+discovery rate without a known denominator.
 
-Scenario: awaitの失敗をcatchする場合、外へ漏れる可能性と区別する
+## Functional requirements
 
-- Given: awaitした関数の失敗をcatchする関数と、Promiseを直接返す関数がある。
-- When: プロジェクトを走査する。
-- Then: 前者のcatch境界と、後者のrejectionの伝播を区別する。再throwや変換したエラーも発生箇所として示す。
+**Input:** tsconfig and candidate discriminator properties.
 
-Scenario: 呼出先が不明な場合、失敗なしとは報告しない
+**Output:** structured or text candidates, origins, functions, call relations,
+propagated failures, unresolved sites and analysis assumptions.
 
-- Given: 外部実装、既知の関数と同じ型の関数引数、可変の別名、anyなどで呼出先を確定できない。
-- When: プロジェクトを走査する。
-- Then: 場所と不明の理由を出力する。厳格な不明検査では非ゼロ終了とする。
+Propagation is a conservative possibility analysis. It does not prove catch
+conditions or return-value meaning. Do not change source/configuration or run
+tests. Type errors and analysis failures produce diagnostics and nonzero exits;
+analysis completion is separate from knowing every runtime error.
 
-## KPI
+## Data and relationships
 
-実プロジェクトで発見した候補数、未解決箇所数、走査時間を測ります。現状値と速度目標は未計測です。失敗の完全発見率は母数が分からないため算出しません。
+Candidates carry file, public name, tags, other exports of their declaration,
+external status and channels in which they appear as errors. Origins/functions
+carry positions, types and failure channels. Unresolved sites carry position,
+caller and reason. Several functions can reference one origin through call edges.
+Names and source paths appear in output but are not automatically sent elsewhere.
 
-## 機能要件
+## Dependencies and safety
 
-### 走査
+No external service is required. Analyze local source and dependency type
+information without executing target code.
 
-**入力:** tsconfigと識別プロパティの候補。
+## Future decisions
 
-**出力:** 型候補、失敗箇所、関数、呼出関係、伝播した失敗、未解決箇所、解析の前提を構造化出力またはテキストで返します。
-
-#### 適用する条件
-
-伝播は保守的な可能性の解析です。catchの条件分岐や返り値の意味を証明しません。ソースや設定は変更せず、テストも実行しません。
-
-#### 例外ケースでの振る舞い
-
-型エラーや解析失敗は診断と非ゼロ終了にします。解析成功と全エラーを把握したことを別の状態にします。
-
-## データ要件
-
-### 必要なデータ
-
-- **型候補:** ファイル、公開名、タグ、同じ宣言のほかの公開経路、外部の型かどうか、エラーとして現れる経路。
-- **発生元と関数:** ソース位置、型、失敗の経路。
-- **未解決箇所:** 場所、呼出側、理由。
-
-### データ間の関係
-
-呼出関係を通して同じ発生元を複数の関数から参照します。
-
-### 個人情報
-
-ファイル名やソース中の型名が出力に含まれます。外部への自動送信は行いません。
-
-## 依存する外部サービス
-
-なし。ローカルのソースと依存の型定義を解析します。
-
-## セキュリティ上の留意事項
-
-走査では対象コードを実行しません。
-
-## 未決事項
-
-外部ライブラリ固有のResult・callback規則は、実プロジェクトで必要になったものから別途追加します。
+Add library-specific Result/callback semantics separately when real projects need
+them, specifying both recognized and unresolved conditions.
