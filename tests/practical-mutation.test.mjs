@@ -1,0 +1,40 @@
+// Newly written public fixtures preserve observed gap patterns without KARTE source.
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {cpSync,mkdtempSync,readFileSync,writeFileSync,symlinkSync,rmSync,realpathSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
+import {runMutation,formatReport} from '../packages/core/index.mjs';
+const repo=fileURLToPath(new URL('../',import.meta.url));
+const binary=process.env.ERRSPEC_BIN||join(repo,'target/debug/errspec');
+test('existing assertions can pass while boundary, duplicate and malformed-input edits survive',async t=>{
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'errspec-practical-mutation-')));
+  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  cpSync(join(repo,'tests/fixtures/practical-mutation'),root,{recursive:true});
+  symlinkSync(join(repo,'examples/checkout/node_modules'),join(root,'node_modules'),'dir');
+  const source=readFileSync(join(root,'src/value.ts'),'utf8');
+  const generated=spawnSync(binary,['__mutation-source'],{input:JSON.stringify({file:'src/value.ts',source}),encoding:'utf8'});
+  assert.equal(generated.status,0,generated.stderr);
+  const candidates=JSON.parse(generated.stdout).candidates;
+  const keys=[['value.length <= 8','true'],["row.kind === 'notice' && row.ref !== undefined && !indices.has(row.ref)",'true'],["typeof data !== 'object' || data === null",'false']].map(([original,replacement])=>{
+    const candidate=candidates.find(c=>c.mutator==='ConditionalExpression'&&c.original===original&&c.replacement===replacement&&!c.ignored);
+    assert.ok(candidate,`Missing representative edit: ${original} -> ${replacement}`);return candidate.key;
+  });
+  const options={node:process.execPath,reuseSession:true,failOnUndetected:true,policy:{only:keys}};
+  const transport={binary,cwd:root};
+  const before=await runMutation(options,transport);
+  assert.equal(before.exitCode,1);assert.equal(before.report.runComplete,true);
+  assert.equal(before.report.baseline.length,3);assert.equal(before.report.mutants.length,3);
+  assert.ok(before.report.mutants.every(m=>m.status==='Survived'));
+  const explanation=JSON.parse(await formatReport(before.report,{reporter:'agent'},transport));
+  assert.equal(explanation.gaps.length,3);assert.ok(explanation.gaps.every(g=>g.gap==='notDetected'&&g.coveredByCount>0));
+  writeFileSync(join(root,'additional.test.ts'),readFileSync(join(root,'improved-tests.txt')));
+  const after=await runMutation(options,transport);
+  assert.equal(after.exitCode,0,JSON.stringify(after.report.diagnostics));assert.equal(after.report.runComplete,true);
+  assert.equal(after.report.baseline.length,8);assert.equal(after.report.mutants.length,3);
+  assert.deepEqual(after.report.mutants.map(m=>m.key),before.report.mutants.map(m=>m.key));
+  assert.ok(after.report.mutants.every(m=>m.status==='Killed'));assert.equal(after.report.summary.score,1);
+  assert.equal(readFileSync(join(root,'src/value.ts'),'utf8'),source,'tests improve without editing the implementation');
+});
