@@ -85,7 +85,7 @@ therefore cannot restrict recommendations to that function's coverage. Missing
 old text or syntax also falls back to all current files; function-only edits keep
 their bounded recommendations.
 
-Return `errspec/test-selection` JSON or files with uncollected-test warnings/fallback reasons. Re-enumerate final source/test inventory, including ignored-by-Git files added during acquisition. Acquisition/final mismatch returns incomplete exit 2 and no file recommendation.
+Return `errspec/test-selection` JSON or files with uncollected-test warnings/fallback reasons. Re-enumerate final source/test inventory, including ignored-by-Git files added during acquisition. Failed current baseline/probe acquisition or a final input mismatch returns incomplete exit 2 and no file recommendation.
 
 `--kill-matrix`/`killMatrix` requires complete all-covering-test acquisition, with a negative flag. Adapters declare complete capability and force bail/global retry to zero so late killers execute; fingerprint the forced settings. Do not narrow to weak-infected tests.
 

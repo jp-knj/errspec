@@ -100,8 +100,10 @@ still kills a mutant. Removing a test removes its recommendation. Changed tests,
 helpers/configuration outside the mutation inventory, removed source lines,
 module effects and changed functions without an observed candidate conservatively
 include every currently collected test file. Uncollected or deleted changed tests
-remain visible in `warnings`. Failed acquisition returns exit code 2 and no file
-recommendations. The report distinguishes a current probe from validated probe
+remain visible in `warnings`. Failed current baseline/probe or final-input
+acquisition returns exit code 2 and no file recommendations. Unavailable Git-base
+source or syntax conservatively includes every current test file instead. The
+report distinguishes a current probe from validated probe
 reuse; an empty successful list means no related changes were found.
 
 ## Complete kill matrix
