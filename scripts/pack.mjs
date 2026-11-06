@@ -30,6 +30,12 @@ const kit = JSON.parse(
   readFileSync(join(root, "packages/testkit/package.json"), "utf8"),
 );
 const core = JSON.parse(readFileSync(join(root, "packages/core/package.json"), "utf8"));
+const packageNames = ["cli", "testkit", "core", "vitest", "jest", "playwright", "typecheck"];
+for (const name of packageNames) {
+  const metadata = JSON.parse(readFileSync(join(root, "packages", name, "package.json"), "utf8"));
+  if (metadata.version !== cli.version || metadata.dependencies?.["@errspec/core"] && metadata.dependencies["@errspec/core"] !== core.version)
+    throw new Error(`Package version mismatch: ${name}`);
+}
 if (core.version !== cli.version || core.dependencies["@errspec/cli"] !== cli.version)
   throw new Error("Core and CLI versions must match");
 const cargo = readFileSync(join(root, "Cargo.toml"), "utf8").match(
@@ -100,7 +106,7 @@ try {
     );
   writeFileSync(join(native, "THIRD_PARTY_NOTICES.txt"), notices.stdout);
   const packages = [pack(native)];
-  for (const name of ["cli", "testkit", "core"]) {
+  for (const name of packageNames) {
     const dest = join(stage, name);
     cpSync(join(root, "packages", name), dest, { recursive: true });
     cpSync(join(root, "LICENSE"), join(dest, "LICENSE"));

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { runChild } from "./process-runner.mjs";
 // These helpers execute inside the project's Jest process. They acquire facts;
 // native Rust alone decides whether a mutation was detected.
@@ -41,12 +42,13 @@ function transformer(load) {
 function environment(Base,attachWeakBinary,load) {
   const {readFileSync,writeFileSync}=load("node:fs");
   const {join,relative}=load("node:path");
+  const {createHash}=load("node:crypto");
   return class extends Base {
     constructor(config,context){super(config,context);this.file=context.testPath;}
     async setup(){
       await super.setup();
       this.state=JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE,"utf8"));
-      this.data={file:this.file,tests:[],hits:{},staticHits:{}};
+      this.data={runId:this.state.context.runId,requestId:this.state.context.requestId,phase:this.state.phase,file:this.file,tests:[],hits:{},staticHits:{}};
       const self=this,ctx=this.state.context;
       const record=this.global[Symbol.for(`errspec.mutation.${ctx.runId}`)]=key=>{
         const count=self.data.hits[key]=(self.data.hits[key]||0)+1;
@@ -66,11 +68,10 @@ function environment(Base,attachWeakBinary,load) {
       if(event.name==="run_start"){
         if(this.state.context.complete){
           this.global[Symbol.for("RETRY_TIMES")]=0;
-          state.describeRetryOptions?.clear();
         }
         const counts=new Map(),selected=this.state.selected;
         const file=relative(this.state.root,this.file).replaceAll("\\","/");
-        const walk=node=>{for(const child of node.children||[]){if(child.type==="test"){
+        const walk=node=>{if(this.state.context.complete)state.describeRetryOptions?.delete(node);for(const child of node.children||[]){if(child.type==="test"){
           const names=[];for(let n=child;n&&n.name!=="ROOT_DESCRIBE_BLOCK";n=n.parent)names.unshift(n.name);
           const name=names.join(" "),occurrence=counts.get(name)||0;counts.set(name,occurrence+1);
           child.errspec={id:JSON.stringify(["",file,name,occurrence]),order:counts.size};
@@ -85,12 +86,15 @@ function environment(Base,attachWeakBinary,load) {
       if(["test_done","test_skip","test_todo"].includes(event.name)){
         const names=[];for(let n=t;n&&n.name!=="ROOT_DESCRIBE_BLOCK";n=n.parent)names.unshift(n.name);
         const meta=this.active?.test===t?this.active:{hits:{},infected:{}};
-        this.data.tests.push({id:t.errspec.id,order:t.errspec.order,name:names.join(" "),status:event.name==="test_skip"?"skipped":event.name==="test_todo"?"pending":t.errors.length?"failed":"passed",started:event.name==="test_done",duration:t.duration||0,errors:t.errors.map(e=>String(e?.[0]?.stack||e?.stack||e)),hits:meta.hits,infected:Object.keys(meta.infected)});
+        if(this.state.context.complete&&(t.invocations>1||t.repeatCount>0))this.data.acquisitionIncomplete="Jest repeated or retried a selected test";
+        const result={id:t.errspec.id,order:t.errspec.order,name:names.join(" "),status:event.name==="test_skip"?"skipped":event.name==="test_todo"?"pending":t.errors.length?"failed":"passed",started:event.name==="test_done",duration:t.duration||0,errors:t.errors.map(e=>String(e?.[0]?.stack||e?.stack||e)),hits:meta.hits,infected:Object.keys(meta.infected)};
+        const index=this.data.tests.findIndex(t=>t.id===result.id);
+        if(index>=0)this.data.tests[index]=result;else this.data.tests.push(result);
         this.active=undefined;
       }
     }
     async teardown(){
-      try{writeFileSync(join(this.state.output,Buffer.from(this.file).toString("hex")+".json"),JSON.stringify(this.data));}
+      try{writeFileSync(join(this.state.output,createHash("sha256").update(this.file).digest("hex")+".json"),JSON.stringify(this.data));}
       finally{await super.teardown();}
     }
   };
@@ -111,7 +115,7 @@ export async function createJestAdapter(ctx) {
   const config={...raw,rootDir:normalized.rootDir,testEnvironment:environmentFile,
     transform:{"\\.[cm]?[jt]sx?$":transformFile},extensionsToTreatAsEsm:[...new Set([...normalized.extensionsToTreatAsEsm,".ts",".mts"])],
     transformIgnorePatterns:[...normalized.transformIgnorePatterns,realpathSync(options.temp).replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"/"],
-    cache:false,watch:false,watchman:false,collectCoverage:false,updateSnapshot:false,reporters:[],maxWorkers:1};
+    cache:false,cacheDirectory:join(options.temp,"jest-cache"),watch:false,watchman:false,collectCoverage:false,updateSnapshot:false,reporters:[],maxWorkers:1};
   writeFileSync(configFile,JSON.stringify(config));
   const configFiles=[configPath,...normalized.setupFiles,...normalized.setupFilesAfterEnv,normalized.globalSetup,normalized.globalTeardown,...normalized.transform.map(t=>t[1])].filter(Boolean);
   configFiles.forEach(file=>remember(file));
@@ -125,10 +129,10 @@ export async function createJestAdapter(ctx) {
     const specs=files.map(file=>({file,project:""}));
     if(phase==="inspect")return {specs,excluded:[...configFiles,...files]};
     for(const file of inventory.keys())if(normalized.transformIgnorePatterns.some(pattern=>new RegExp(pattern).test(file)))throw failure("EC_MUTATION_CONFIG",`Mutation target is excluded from Jest transforms: ${file}; exclude the target or adjust transformIgnorePatterns`);
-    const output=join(directory,`results-${request.requestId}`);mkdirSync(output,{recursive:true});
+    const output=join(directory,`results-${request.requestId}`);rmSync(output,{recursive:true,force:true});mkdirSync(output,{recursive:true});
     const stateFile=join(directory,"state.json"),reportFile=join(directory,"report.json");
     rmSync(reportFile,{force:true});
-    writeFileSync(stateFile,JSON.stringify({root,toolTemp:realpathSync(options.toolTemp),transforms:normalized.transform,output,selected:request.selected||[],
+    writeFileSync(stateFile,JSON.stringify({root,phase,toolTemp:realpathSync(options.toolTemp),transforms:normalized.transform,output,selected:request.selected||[],
       context:{runId:ctx.runId,requestId:request.requestId,activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER,weakMutation:options.weakMutation,complete:!!request.complete},
       inventory:Object.fromEntries([...inventory].map(([file,entry])=>[file,{source:entry.source,code:phase==="plain"?entry.source:entry.emitted.code}]))}));
     const selectedFiles=request.selected?.length?[...new Set(request.selected.map(id=>{const test=baseline.tests.find(t=>t.id===id);if(!test)throw failure("EC_MUTATION_PROTOCOL",`Unknown test ID: ${id}`);return resolve(root,test.file);}))]:files;
@@ -138,11 +142,13 @@ export async function createJestAdapter(ctx) {
     const report=JSON.parse(readFileSync(reportFile,"utf8"));
     const execution={selected:request.selected||[],tests:[],failedModules:[],errors:[],hits:{},staticHits:{},moduleDurations:{},wallTimeout:false};
     for(const fileResult of report.testResults){
-      const file=fileResult.name,name=ctx.rel(file),metadata=join(output,Buffer.from(file).toString("hex")+".json");
+      const file=fileResult.name,name=ctx.rel(file),metadata=join(output,createHash("sha256").update(file).digest("hex")+".json");
       let moduleErrors=[];
       execution.moduleDurations[name]=(fileResult.endTime||0)-(fileResult.startTime||0);
       if(existsSync(metadata)){
         const data=JSON.parse(readFileSync(metadata,"utf8"));
+        if(data.runId!==ctx.runId||data.requestId!==request.requestId||data.phase!==phase||data.file!==file)throw failure("EC_MUTATION_PROTOCOL",`Stale Jest worker metadata: ${name}`);
+        if(data.acquisitionIncomplete)execution.acquisitionIncomplete=data.acquisitionIncomplete;
         moduleErrors=data.moduleErrors||[];
         for(const test of data.tests.sort((a,b)=>a.order-b.order)){delete test.order;execution.tests.push({...test,taskId:test.id,file:name});}
         for(const [key,count]of Object.entries(data.hits))execution.hits[key]=(execution.hits[key]||0)+count;

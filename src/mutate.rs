@@ -943,20 +943,23 @@ fn run_inner(
                 .iter_mut()
                 .find(|m| m.candidate.key == key)
                 .unwrap();
-            let reason = outcome["reason"].as_str();
-            match outcome["status"].as_str() {
-                Some("checked") if outcome["reason"].is_null() => (),
-                Some("CompileError") if reason.is_some_and(|r| !r.is_empty()) => {
+            let diagnostic = outcome.get("diagnostic");
+            let equivalent_reason = outcome.get("equivalentReason");
+            match (diagnostic, equivalent_reason) {
+                (Some(Value::Null), Some(Value::Null)) => (),
+                (Some(Value::String(reason)), Some(Value::Null)) if !reason.is_empty() => {
                     mutant.status = Status::CompileError;
-                    mutant.reason = reason.map(String::from);
+                    mutant.reason = Some(reason.clone());
                     errors += 1;
                 }
-                Some("Ignored") if reason.is_some_and(|r| r.starts_with("equivalent:")) => {
+                (Some(Value::Null), Some(Value::String(reason)))
+                    if reason.starts_with("equivalent:") =>
+                {
                     mutant.status = Status::Ignored;
-                    mutant.reason = reason.map(String::from);
+                    mutant.reason = Some(reason.clone());
                     equivalent += 1;
                 }
-                _ => return Err(Failure::protocol("Invalid typecheck outcome")),
+                _ => return Err(Failure::protocol("Invalid typecheck compiler facts")),
             }
         }
         if wanted != seen
@@ -1368,6 +1371,14 @@ fn execute_trial(
     }
     let total_ms = durations.iter().sum::<f64>() * 1.5 + 5000.0;
     let stall_ms = durations.iter().copied().fold(0.0, f64::max) * 3.0 + 10000.0;
+    let complete = context.options["killMatrix"] == true;
+    // Complete cohorts can restart a runner/browser after each failed test.
+    // Passing baseline durations do not include those failure-path transitions.
+    let total_ms = if complete {
+        total_ms.max(stall_ms * selected.len().max(1) as f64)
+    } else {
+        total_ms
+    };
     let hit_limit = baseline
         .hits
         .get(key)
@@ -1400,7 +1411,7 @@ fn execute_trial(
         } else {
             1
         };
-        let response=driver.request(json!({"op":"run","key":key,"selected":selected,"hitLimit":hit_limit,"multiplier":multiplier,"complete":context.options["killMatrix"]==true}),
+        let response=driver.request(json!({"op":"run","key":key,"selected":selected,"hitLimit":hit_limit,"multiplier":multiplier,"complete":complete}),
             Duration::from_secs_f64(total_ms*multiplier as f64/1000.0),Duration::from_secs_f64(stall_ms*multiplier as f64/1000.0))?;
         response.check_error()?;
         let result = if response.timeout {

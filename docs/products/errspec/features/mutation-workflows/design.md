@@ -86,6 +86,8 @@ moduleのimport／requireとpackage manifestはNodeのmodule hookで取得し、
 
 既存のfirst-detectionとscope結果はmatrix cellへ再利用せず、行を毎回実取得します。入力照合済みのprobe再利用は維持します。matrixの結果rowは既存のfirst-detection保存形式へ書き込まず、cache.reused／savedは0とします。純粋な分析関数はcomplete rowだけから検出なし・strictな包含・同じ非空kill集合を求めます。件数と除外理由はJSONへ残し、Git・ID・shardなどで選んだ変異集合に対する観測として扱います。test削除の安全性の証明にはしません。
 
+全件取得では失敗ごとにrunnerやbrowserが再起動するため、成功したbaselineの時間だけではcohortの総時間を見積もれません。nativeの全体deadlineは従来の算出値と「選択test数×既存の進捗停止deadline」の大きい方を使います。test開始間の進捗停止検査とrunnerのtest／hook timeoutは維持し、timeout後の確認実行をcompleteへ格上げしません。Jest／Playwrightのtest・hook期限切れもRustでtimeoutとして解釈し、通常のexpect／locatorの失敗と区別します。
+
 ### ランナーと実行計画
 
 `-j`／`--concurrency`と設定・APIの`concurrency`は1〜64の整数とし、既定1を維持します。2以上ではRustのqueueから各workerへ候補を割り当て、逐次実行と同じtrial・再確認・判定を使います。samplingとcache照合は配分前に行い、時間予算は要求全体の開始時刻で共有します。開始済みのtrialは完了させ、開始前の候補はPendingにします。完了順によらずinventory順へ結果を戻し、engine.parallelに要求数と起動したtrial worker数を示します。
@@ -111,6 +113,10 @@ Vitest sessionの再利用は`--reuse-session`／`reuseSession`で有効にし�
 Native supervisorをgroup leaderとし、Nodeは同じgroupとstdioを継承します。親はsupervisorをreapする前にgroupを終了し、supervisorはkernelの親関係が変わった場合に自分のgroupを終了します。privateなUID別registryには版・run ID・256-bit token・owner／supervisor・Unix endpointを保存します。次回の起動は3秒・256件まで照会し、生きているsupervisor自身が親とgroupを確認して終了します。保存PIDへ直接signalを送らず、active・不一致・未確認の記録を終了しません。Unix endpointが禁止された場合も親監視は維持し、workers.endpointUnavailableを示します。実行器と生成器のengine fingerprintも照合して、起動中のbinary差替えを未完了にします。
 
 ### レポート・API・配布
+
+`@errspec/vitest`と`@errspec/jest`はrunnerを固定してcoreの同じ内部要求へ委譲し、引数列の再構築や別の判定loopは持ちません。`@errspec/playwright`は既存testを拡張できるfixtureを独立配布し、Playwright本体は利用先が導入します。`@errspec/typecheck`へ実際のcompiler・overlay取得を配置し、埋込driverも同じ実装を使います。公開APIは元の本文とUTF-8範囲を確認してdiagnostic・型によるequivalenceの事実だけを返し、CompileErrorやIgnoredへの分類はRustが担当します。worker threadでの同じ取得と中断も提供します。
+
+JestとViteのscratch cacheは各owned workerのprivate temp下へ置き、projectの既定cacheを共有しません。孤立回収はrun identity、所有UID、private modeとcanonicalなdirectory identityを確認し、既知の内部directoryだけをnofollowで削除します。rootのkeep.txtなど未知のproject生成物を再帰削除せず、外部へ向くsymlinkを辿りません。
 
 Rustの結果からtext、mutation-testing-elements形式、agent、simplify、テスト選択、kill matrixを生成します。表示とquality gateは別の判定にし、保存先とstdoutを区別します。追加のnpm APIは機械可読の内部要求を使い、CLI引数の解析を実装の契約に含めません。
 

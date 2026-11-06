@@ -1,0 +1,33 @@
+{
+  "name": "@errspec/typecheck",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Source-bound mutant compiler facts from project TypeScript 5, 6 and 7",
+  "exports": {
+    ".": {
+      "types": "./index.d.mts",
+      "default": "./index.mjs"
+    }
+  },
+  "files": [
+    "index.mjs",
+    "index.d.mts",
+    "README.md",
+    "LICENSE",
+    "compiler.mjs",
+    "ranges.mjs",
+    "worker.mjs"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jp-knj/errspec.git",
+    "directory": "packages/typecheck"
+  }
+}

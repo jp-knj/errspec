@@ -240,6 +240,9 @@ fn is_timeout(error: &str) -> bool {
         || error.contains("Test timed out in ")
         || error.contains("Hook timed out in ")
         || error.contains("hook timed out after ")
+        || (error.contains("Exceeded timeout of ")
+            && (error.contains(" for a test") || error.contains(" for a hook")))
+        || (error.contains("Test timeout of ") && error.contains(" exceeded"))
 }
 
 pub fn judge(result: &Execution, selected: &[String], number: usize) -> Attempt {

@@ -2,7 +2,7 @@
 import { readFileSync as readFileSync6, writeFileSync as writeFileSync3, realpathSync as realpathSync6, existsSync as existsSync6, globSync, statSync } from "node:fs";
 import { basename, dirname as dirname5, resolve as resolve5, relative as relative2, join as join6, isAbsolute as isAbsolute2, matchesGlob } from "node:path";
 import { pathToFileURL as pathToFileURL4 } from "node:url";
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { format } from "node:util";
@@ -1623,7 +1623,7 @@ var MagicString = class MagicString {
   }
 };
 
-// emitter.mjs
+// ../typecheck/ranges.mjs
 function byteIndices(source) {
   const map = new Map([[0, 0]]);
   let bytes = 0, units = 0;
@@ -1634,6 +1634,8 @@ function byteIndices(source) {
   }
   return map;
 }
+
+// emitter.mjs
 function instrument(source, candidates, file, runId) {
   const indices = byteIndices(source);
   const root = { start: 0, end: source.length, children: [], candidates: [] };
@@ -1717,7 +1719,7 @@ if(${check}){${branch}}${original.slice(prefixLength)}`;
   return { code: magic.toString(), map: magic.generateMap({ source: file, includeContent: true, hires: true }) };
 }
 
-// typecheck.mjs
+// ../typecheck/compiler.mjs
 import { createRequire } from "node:module";
 import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, relative } from "node:path";
@@ -1885,7 +1887,10 @@ function equivalents(checker, file, source, candidates) {
   const chains = new Map;
   const visit = (node) => {
     if (node.questionDotToken && node.expression)
-      chains.set(node.questionDotToken.getStart(ast), node.expression);
+      chains.set(node.questionDotToken.getStart(ast), {
+        expression: node.expression,
+        replacement: node.name ? "." : ""
+      });
     node.forEachChild((child) => {
       visit(child);
     });
@@ -1923,13 +1928,16 @@ function equivalents(checker, file, source, candidates) {
       prefix++;
     if (candidate.original.slice(prefix, prefix + 2) !== "?.")
       continue;
-    const target = chains.get(indices.get(candidate.byteOffset) + prefix - (source.startsWith("\uFEFF") ? 1 : 0));
-    if (target && excludesNull(types.getTypeAtLocation(target)))
+    const chain = chains.get(indices.get(candidate.byteOffset) + prefix - (source.startsWith("\uFEFF") ? 1 : 0));
+    if (!chain || candidate.replacement !== candidate.original.slice(0, prefix) + chain.replacement + candidate.original.slice(prefix + 2))
+      continue;
+    const target = chain.expression;
+    if (excludesNull(types.getTypeAtLocation(target)))
       result.set(candidate.key, `equivalent: ${target.getText(ast)} excludes null and undefined`);
   }
   return result;
 }
-async function typecheckMutants(options, inventory, progress = () => {}) {
+async function typecheckInventory(options, inventory, progress = () => {}) {
   const root = options.root;
   const project = realpathSync(options.typecheckProject || join(root, "tsconfig.json"));
   const packageDir = packageDirectory(root, options.typecheckPackage);
@@ -1946,18 +1954,17 @@ async function typecheckMutants(options, inventory, progress = () => {}) {
         throw new Error(`Typecheck source is outside the project: ${file}`);
       const equivalent = equivalents(checker, file, entry.source, candidates);
       for (const candidate of candidates) {
-        let reason = equivalent.get(candidate.key), status = reason ? "Ignored" : "checked";
-        if (!reason) {
+        const equivalentReason = equivalent.get(candidate.key) ?? null;
+        let diagnostic = null;
+        if (!equivalentReason) {
           try {
             checker.change(file, applyCandidate(entry.source, candidate));
-            reason = newDiagnostic(baseline, checker.diagnose());
+            diagnostic = newDiagnostic(baseline, checker.diagnose()) ?? null;
           } finally {
             checker.change(file, undefined);
           }
-          if (reason)
-            status = "CompileError";
         }
-        outcomes.push({ key: candidate.key, status, reason: reason ?? null });
+        outcomes.push({ key: candidate.key, diagnostic, equivalentReason });
         progress(candidate.key);
       }
     }
@@ -1967,8 +1974,8 @@ async function typecheckMutants(options, inventory, progress = () => {}) {
         package: packageDir,
         project,
         checked: outcomes.length,
-        compileErrors: outcomes.filter((r) => r.status === "CompileError").length,
-        equivalent: outcomes.filter((r) => r.status === "Ignored").length
+        compileErrors: outcomes.filter((r) => r.diagnostic !== null).length,
+        equivalent: outcomes.filter((r) => r.equivalentReason !== null).length
       },
       outcomes
     };
@@ -1976,7 +1983,6 @@ async function typecheckMutants(options, inventory, progress = () => {}) {
     checker.close();
   }
 }
-
 // cache-inputs.mjs
 var builtinCompilationPlugins = new Set(`
 errspec-mutation alias vite:optimized-deps vite:pre-alias vitest:resolve-builtin
@@ -2273,6 +2279,7 @@ function detectRunner(root, options = {}) {
 import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync4, mkdirSync, rmSync, realpathSync as realpathSync4 } from "node:fs";
 import { join as join4, resolve as resolve3 } from "node:path";
 import { createRequire as createRequire4 } from "node:module";
+import { createHash } from "node:crypto";
 
 // process-runner.mjs
 import { spawn } from "node:child_process";
@@ -2340,6 +2347,7 @@ function transformer(load) {
 function environment(Base, attachWeakBinary, load) {
   const { readFileSync, writeFileSync } = load("node:fs");
   const { join, relative } = load("node:path");
+  const { createHash } = load("node:crypto");
   return class extends Base {
     constructor(config, context) {
       super(config, context);
@@ -2348,7 +2356,7 @@ function environment(Base, attachWeakBinary, load) {
     async setup() {
       await super.setup();
       this.state = JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE, "utf8"));
-      this.data = { file: this.file, tests: [], hits: {}, staticHits: {} };
+      this.data = { runId: this.state.context.runId, requestId: this.state.context.requestId, phase: this.state.phase, file: this.file, tests: [], hits: {}, staticHits: {} };
       const self = this, ctx = this.state.context;
       const record = this.global[Symbol.for(`errspec.mutation.${ctx.runId}`)] = (key) => {
         const count = self.data.hits[key] = (self.data.hits[key] || 0) + 1;
@@ -2378,11 +2386,12 @@ function environment(Base, attachWeakBinary, load) {
       if (event.name === "run_start") {
         if (this.state.context.complete) {
           this.global[Symbol.for("RETRY_TIMES")] = 0;
-          state.describeRetryOptions?.clear();
         }
         const counts = new Map, selected = this.state.selected;
         const file = relative(this.state.root, this.file).replaceAll("\\", "/");
         const walk = (node) => {
+          if (this.state.context.complete)
+            state.describeRetryOptions?.delete(node);
           for (const child of node.children || []) {
             if (child.type === "test") {
               const names = [];
@@ -2411,13 +2420,20 @@ function environment(Base, attachWeakBinary, load) {
         for (let n = t;n && n.name !== "ROOT_DESCRIBE_BLOCK"; n = n.parent)
           names.unshift(n.name);
         const meta = this.active?.test === t ? this.active : { hits: {}, infected: {} };
-        this.data.tests.push({ id: t.errspec.id, order: t.errspec.order, name: names.join(" "), status: event.name === "test_skip" ? "skipped" : event.name === "test_todo" ? "pending" : t.errors.length ? "failed" : "passed", started: event.name === "test_done", duration: t.duration || 0, errors: t.errors.map((e) => String(e?.[0]?.stack || e?.stack || e)), hits: meta.hits, infected: Object.keys(meta.infected) });
+        if (this.state.context.complete && (t.invocations > 1 || t.repeatCount > 0))
+          this.data.acquisitionIncomplete = "Jest repeated or retried a selected test";
+        const result = { id: t.errspec.id, order: t.errspec.order, name: names.join(" "), status: event.name === "test_skip" ? "skipped" : event.name === "test_todo" ? "pending" : t.errors.length ? "failed" : "passed", started: event.name === "test_done", duration: t.duration || 0, errors: t.errors.map((e) => String(e?.[0]?.stack || e?.stack || e)), hits: meta.hits, infected: Object.keys(meta.infected) };
+        const index = this.data.tests.findIndex((t) => t.id === result.id);
+        if (index >= 0)
+          this.data.tests[index] = result;
+        else
+          this.data.tests.push(result);
         this.active = undefined;
       }
     }
     async teardown() {
       try {
-        writeFileSync(join(this.state.output, Buffer.from(this.file).toString("hex") + ".json"), JSON.stringify(this.data));
+        writeFileSync(join(this.state.output, createHash("sha256").update(this.file).digest("hex") + ".json"), JSON.stringify(this.data));
       } finally {
         await super.teardown();
       }
@@ -2449,6 +2465,7 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
     extensionsToTreatAsEsm: [...new Set([...normalized.extensionsToTreatAsEsm, ".ts", ".mts"])],
     transformIgnorePatterns: [...normalized.transformIgnorePatterns, realpathSync4(options.temp).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/"],
     cache: false,
+    cacheDirectory: join4(options.temp, "jest-cache"),
     watch: false,
     watchman: false,
     collectCoverage: false,
@@ -2479,11 +2496,13 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
       if (normalized.transformIgnorePatterns.some((pattern) => new RegExp(pattern).test(file)))
         throw failure("EC_MUTATION_CONFIG", `Mutation target is excluded from Jest transforms: ${file}; exclude the target or adjust transformIgnorePatterns`);
     const output = join4(directory, `results-${request.requestId}`);
+    rmSync(output, { recursive: true, force: true });
     mkdirSync(output, { recursive: true });
     const stateFile = join4(directory, "state.json"), reportFile = join4(directory, "report.json");
     rmSync(reportFile, { force: true });
     writeFileSync(stateFile, JSON.stringify({
       root,
+      phase,
       toolTemp: realpathSync4(options.toolTemp),
       transforms: normalized.transform,
       output,
@@ -2503,11 +2522,15 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
     const report = JSON.parse(readFileSync4(reportFile, "utf8"));
     const execution = { selected: request.selected || [], tests: [], failedModules: [], errors: [], hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
     for (const fileResult of report.testResults) {
-      const file = fileResult.name, name = ctx.rel(file), metadata = join4(output, Buffer.from(file).toString("hex") + ".json");
+      const file = fileResult.name, name = ctx.rel(file), metadata = join4(output, createHash("sha256").update(file).digest("hex") + ".json");
       let moduleErrors = [];
       execution.moduleDurations[name] = (fileResult.endTime || 0) - (fileResult.startTime || 0);
       if (existsSync4(metadata)) {
         const data = JSON.parse(readFileSync4(metadata, "utf8"));
+        if (data.runId !== ctx.runId || data.requestId !== request.requestId || data.phase !== phase || data.file !== file)
+          throw failure("EC_MUTATION_PROTOCOL", `Stale Jest worker metadata: ${name}`);
+        if (data.acquisitionIncomplete)
+          execution.acquisitionIncomplete = data.acquisitionIncomplete;
         moduleErrors = data.moduleErrors || [];
         for (const test of data.tests.sort((a, b) => a.order - b.order)) {
           delete test.order;
@@ -2584,6 +2607,8 @@ function reporter(load) {
     }
     onTestEnd(test, result) {
       const item = this.tests.get(test.id);
+      if (this.state.complete && (result.retry > 0 || test.repeatEachIndex > 0))
+        this.acquisitionIncomplete = "Playwright repeated or retried a selected test";
       item.status = result.status === "skipped" ? "skipped" : result.status === test.expectedStatus ? "passed" : "failed";
       item.started = result.status !== "skipped";
       item.duration = result.duration;
@@ -2606,7 +2631,7 @@ function reporter(load) {
       this.errors.push(error.stack || error.message || String(error));
     }
     onEnd() {
-      writeFileSync(this.state.report, JSON.stringify({ tests: [...this.tests.values()], errors: this.errors }));
+      writeFileSync(this.state.report, JSON.stringify({ tests: [...this.tests.values()], errors: this.errors, ...this.acquisitionIncomplete ? { acquisitionIncomplete: this.acquisitionIncomplete } : {} }));
     }
   };
 }
@@ -2633,7 +2658,7 @@ const base=${JSON.stringify(configRoot)};
 const absolute=value=>value?resolve(base,value):undefined;
 const servers=[original.webServer||[]].flat();
 if(servers.some(server=>server.command&&!/^(?:vite|vp dev)(?:\\s|$)/.test(server.command)))throw new Error("errspec Playwright supports a Vite app; custom webServer commands are unsupported");
-const project=p=>({...p,timeout:(p.timeout??original.timeout??30000)*Number(process.env.ERRSPEC_TIMEOUT_MULTIPLIER||1),testDir:absolute(p.testDir||original.testDir||"."),snapshotDir:absolute(p.snapshotDir||original.snapshotDir),use:{...original.use,...p.use,baseURL:process.env.ERRSPEC_VITE_URL}});
+const project=p=>({...p,retries:0,repeatEach:1,timeout:(p.timeout??original.timeout??30000)*Number(process.env.ERRSPEC_TIMEOUT_MULTIPLIER||1),testDir:absolute(p.testDir||original.testDir||"."),snapshotDir:absolute(p.snapshotDir||original.snapshotDir),use:{...original.use,...p.use,baseURL:process.env.ERRSPEC_VITE_URL}});
 export default {...original,...project(original),globalSetup:[original.globalSetup||[]].flat().map(absolute),globalTeardown:[original.globalTeardown||[]].flat().map(absolute),webServer:undefined,workers:1,retries:0,repeatEach:1,fullyParallel:false,maxFailures:process.env.ERRSPEC_COMPLETE==="1"?0:original.maxFailures,updateSnapshots:"none",outputDir:${JSON.stringify(join5(directory, "test-results"))},reporter:[[${JSON.stringify(reporterFile)}]],projects:original.projects?.map(project)};`);
   const vite = await import(pathToFileURL3(join5(viteDir, "dist/node/index.js")).href);
   let phase = "plain";
@@ -2664,7 +2689,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
     }
     let url = "http://127.0.0.1";
     if (nextPhase !== "inspect") {
-      server = await vite.createServer({ root, plugins: [plugin], server: { host: "127.0.0.1", port: 0, strictPort: true, open: false } });
+      server = await vite.createServer({ root, cacheDir: join5(options.temp, "vite-cache"), plugins: [plugin], server: { host: "127.0.0.1", port: 0, strictPort: true, open: false } });
       await server.listen();
       url = `http://127.0.0.1:${server.httpServer.address().port}`;
     }
@@ -2679,6 +2704,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
       root,
       report: reportFile,
       context,
+      complete: !!request.complete,
       selectedTaskIds,
       runtime: `(()=>{${weakRuntime}
 (${browserRuntime.toString()})(${JSON.stringify(context)},attachWeakBinary);})();`
@@ -2699,7 +2725,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
 `) || "Playwright test discovery failed");
         return { specs, excluded: [configFile, ...files] };
       }
-      const execution = { selected: request.selected || [], tests: report.tests, failedModules: [], errors: report.errors, hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
+      const execution = { ...report.acquisitionIncomplete ? { acquisitionIncomplete: report.acquisitionIncomplete } : {}, selected: request.selected || [], tests: report.tests, failedModules: [], errors: report.errors, hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
       for (const test of report.tests) {
         for (const [key, count] of Object.entries(test.hits))
           execution.hits[key] = (execution.hits[key] || 0) + count;
@@ -2753,7 +2779,7 @@ var pendingGenerated = new Map;
 var mutationPlugins;
 var normalize = (s) => s.replaceAll("\\", "/");
 var rel = (file) => normalize(relative2(root, file));
-var hash = (data) => createHash("sha256").update(data).digest("hex");
+var hash = (data) => createHash2("sha256").update(data).digest("hex");
 var relocatedPath = (path) => {
   if (!options.cacheRelocation || !isAbsolute2(path))
     return path;
@@ -3434,7 +3460,7 @@ async function handle(request) {
     try {
       const keys = new Set(request.keys);
       const selected = new Map([...inventory].map(([file, entry]) => [file, { ...entry, candidates: entry.candidates.filter((c) => keys.has(c.key)) }]));
-      const result = await typecheckMutants(options, selected, (key) => send(request, "progress", { event: "typecheck", key }));
+      const result = await typecheckInventory(options, selected, (key) => send(request, "progress", { event: "typecheck", key }));
       verifyInputs();
       send(request, "typechecked", result);
       send(request, "done", { count: result.outcomes.length });

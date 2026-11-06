@@ -109,4 +109,6 @@ jobs:
       - run: node node_modules/@playwright/test/cli.js install --with-deps chromium
         working-directory: tests/fixtures/runners
       - run: cargo build --locked
-      - run: node --test --test-concurrency=1 tests/mutation-runners.test.mjs
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: packages/analysis-driver
+      - run: node --test --test-concurrency=1 tests/mutation-runners.test.mjs tests/mutation-runner-matrix.test.mjs tests/runner-packages.test.mjs

@@ -222,3 +222,27 @@ for(const runner of ['jest','playwright'])test(`${runner} custom plugin acquisit
   const custom=result.mutants.filter(m=>m.mutator==='ConfiguredNumber');assert.equal(custom.length,1);assert.equal(custom[0].status,'Killed');
   assert.ok(result.mutants.every(m=>m.file!=='src/custom-plugin.mjs'));
 });
+test("runner scratch caches stay in the owned worker workspace",t=>{
+  const jest=project(t);
+  writeFileSync(join(jest,"jest.config.mjs"),'export default {testEnvironment:"node",transform:{},testMatch:["**/*.test.ts"],cacheDirectory:"<rootDir>/user-cache"};');
+  assert.equal(run(jest,["--runner","jest"]).runComplete,true);
+  assert.equal(existsSync(join(jest,"user-cache")),false);
+  const browser=browserProject(t,{projects:false});
+  writeFileSync(join(browser,"vite.config.mjs"),'export default {cacheDir:"./user-cache"};');
+  assert.equal(run(browser,["--runner","playwright"]).runComplete,true);
+  assert.equal(existsSync(join(browser,"user-cache")),false);
+});
+
+test("Jest metadata supports deeply nested real test paths",t=>{
+  const root=project(t),directory=join(root,"tests","a".repeat(80),"b".repeat(80));
+  mkdirSync(directory,{recursive:true});rmSync(join(root,"value.test.ts"));
+  writeFileSync(join(directory,"value.test.ts"),'import {test,expect} from "@jest/globals";import {checked} from "../../../src/value.ts";test("deep",()=>expect(checked(2)).toBe(3));');
+  const report=run(root,["--runner","jest"]);assert.equal(report.runComplete,true);assert.ok(report.summary.killed>0);
+  assert.ok(report.baseline[0].file.length>160);
+});
+test("Jest rejects worker metadata from another execution before assigning verdicts",t=>{
+  const root=project(t);
+  writeFileSync(join(root,"custom-env.cjs"),'const {TestEnvironment}=require("jest-environment-node");const {readFileSync,writeFileSync,readdirSync}=require("node:fs");const {join}=require("node:path");module.exports=class extends TestEnvironment{async teardown(){const state=JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE,"utf8"));const file=join(state.output,readdirSync(state.output).find(name=>name.endsWith(".json")));const data=JSON.parse(readFileSync(file,"utf8"));data.runId="another-execution";writeFileSync(file,JSON.stringify(data));await super.teardown();}};');
+  writeFileSync(join(root,"jest.config.mjs"),'export default {testEnvironment:"<rootDir>/custom-env.cjs",transform:{},testMatch:["**/*.test.ts"],transformIgnorePatterns:["/node_modules/","/custom-env.cjs$"]};');
+  const report=run(root,["--runner","jest"],2);assert.equal(report.diagnostics[0].code,"EC_MUTATION_PROTOCOL");assert.match(report.diagnostics[0].message,/Stale Jest worker metadata/);assert.equal(report.summary.killed,0);
+});
