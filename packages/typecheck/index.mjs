@@ -25,8 +25,17 @@ export async function checkMutants(options,mutants,progress=()=>{}){
 /** Keep compiler acquisition off the calling thread, including TypeScript's synchronous APIs. */
 export async function checkMutantsInWorker(options,mutants,{signal}={}){
   signal?.throwIfAborted();
+  // --input-type belongs to the caller's stdin/eval source, not our worker file.
+  // Retain the remaining flags, including import/loader configuration.
+  const execArgv=[];
+  for(let index=0;index<process.execArgv.length;index++){
+    const argument=process.execArgv[index];
+    if(argument==="--input-type")index++;
+    else if(!argument.startsWith("--input-type="))execArgv.push(argument);
+  }
   return new Promise((resolve,reject)=>{
-    const worker=new Worker(new URL("./worker.mjs",import.meta.url),{workerData:{options,mutants}});
+    // Without an override Node retains its normal inherited-flag handling.
+    const worker=new Worker(new URL("./worker.mjs",import.meta.url),{workerData:{options,mutants},execArgv:execArgv.length!==process.execArgv.length?execArgv:undefined});
     let received=false;
     const abort=()=>{void worker.terminate().then(()=>reject(signal.reason??new DOMException("Aborted","AbortError")),reject);};
     signal?.addEventListener("abort",abort,{once:true});

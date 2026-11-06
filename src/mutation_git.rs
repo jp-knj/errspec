@@ -43,6 +43,23 @@ fn fingerprint(hash: &mut Sha256, bytes: &[u8]) {
     hash.update(bytes);
 }
 
+pub(crate) fn source_at(
+    root: &Path,
+    base: &str,
+    file: &str,
+    signal: &AtomicI32,
+) -> Result<String, String> {
+    // Git's :./ path form resolves from root, including a project nested below
+    // the repository top level. The commit was already resolved by acquire.
+    let reference = format!("{base}:./{file}");
+    let bytes = git(
+        root,
+        &["show", "--no-ext-diff", "--no-textconv", &reference],
+        signal,
+    )?;
+    String::from_utf8(bytes).map_err(|_| "Git-base source must be UTF-8".into())
+}
+
 pub(crate) fn acquire(
     root: &Path,
     since: &str,
