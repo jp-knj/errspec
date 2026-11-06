@@ -4,6 +4,8 @@ The Rust binary embeds `dist/driver.mjs` and `setup.mjs`. End users need Node 24
 
 `driver.mjs` owns runner sessions and the versioned NDJSON protocol. `emitter.mjs` applies the native generator's byte ranges with MagicString. `setup.mjs` records worker hits and test metadata before user setup files execute. The Rust CLI owns judgments, deadlines, temporary files, and the process group.
 
+`source-inventory.mjs` shares raw source registration, per-source plugin generation, and ancestor manifest tracking across runner baseline acquisition. Each runner retains its own enumeration, exclusions, acquisition order, and final input validation. Plugin callbacks still run once per source before the baseline.
+
 After editing driver or emitter source, rebuild the committed bundle and notices with Bun 1.4.4:
 
 ```sh

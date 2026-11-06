@@ -1,6 +1,6 @@
 // driver.mjs
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync3, realpathSync as realpathSync6, existsSync as existsSync6, globSync, statSync } from "node:fs";
-import { basename, dirname as dirname5, resolve as resolve5, relative as relative2, join as join6, isAbsolute as isAbsolute2, matchesGlob } from "node:path";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync3, realpathSync as realpathSync6, existsSync as existsSync6, globSync, statSync } from "node:fs";
+import { basename, dirname as dirname6, resolve as resolve5, relative as relative2, join as join7, isAbsolute as isAbsolute2, matchesGlob } from "node:path";
 import { pathToFileURL as pathToFileURL5 } from "node:url";
 import { createHash as createHash2 } from "node:crypto";
 import { createInterface } from "node:readline";
@@ -2235,20 +2235,42 @@ async function loadPlugins(specs, root, remember, excluded = []) {
   };
 }
 
-// runners.mjs
-import { existsSync as existsSync3, readFileSync as readFileSync3, realpathSync as realpathSync3 } from "node:fs";
-import { createRequire as createRequire3 } from "node:module";
+// source-inventory.mjs
+import { readFileSync as readFileSync3 } from "node:fs";
 import { dirname as dirname3, join as join3 } from "node:path";
+function registerSources(inventory, files, remember) {
+  for (const file of files) {
+    inventory.set(file, { source: readFileSync3(file, "utf8"), candidates: [] });
+    remember(file);
+  }
+}
+async function generatePluginSources(inventory, generate, relative) {
+  for (const [file, entry] of inventory)
+    entry.generated = await generate(entry.source, relative(file));
+}
+function rememberProjectManifests(root, remember) {
+  for (let directory = root;; directory = dirname3(directory)) {
+    for (const name of ["package.json", "package-lock.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json"])
+      remember(join3(directory, name));
+    if (dirname3(directory) === directory)
+      break;
+  }
+}
+
+// runners.mjs
+import { existsSync as existsSync3, readFileSync as readFileSync4, realpathSync as realpathSync3 } from "node:fs";
+import { createRequire as createRequire3 } from "node:module";
+import { dirname as dirname4, join as join4 } from "node:path";
 var extensions = ["ts", "mts", "cts", "js", "mjs", "cjs"];
-var configs = (root, names) => names.some((name) => [...extensions, "json"].some((ext) => existsSync3(join3(root, `${name}.config.${ext}`))));
+var configs = (root, names) => names.some((name) => [...extensions, "json"].some((ext) => existsSync3(join4(root, `${name}.config.${ext}`))));
 function resolvePackage(root, name, explicit) {
   if (explicit) {
-    if (!existsSync3(join3(explicit, "package.json")))
+    if (!existsSync3(join4(explicit, "package.json")))
       throw new Error(`Runner package not found: ${explicit}`);
     return realpathSync3(explicit);
   }
   try {
-    return dirname3(realpathSync3(createRequire3(join3(root, "package.json")).resolve(`${name}/package.json`)));
+    return dirname4(realpathSync3(createRequire3(join4(root, "package.json")).resolve(`${name}/package.json`)));
   } catch {
     return;
   }
@@ -2262,7 +2284,7 @@ function detectRunner(root, options = {}) {
     return resolvePackage(root, "vitest") ? "vitest" : resolvePackage(root, "vite-plus") ? "vite-plus" : "vitest";
   let pkg = {};
   try {
-    pkg = JSON.parse(readFileSync3(join3(root, "package.json"), "utf8"));
+    pkg = JSON.parse(readFileSync4(join4(root, "package.json"), "utf8"));
   } catch {}
   if (configs(root, ["jest"]) || Object.hasOwn(pkg, "jest"))
     return "jest";
@@ -2275,8 +2297,8 @@ function detectRunner(root, options = {}) {
 }
 
 // jest.mjs
-import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync4, mkdirSync, rmSync, realpathSync as realpathSync4 } from "node:fs";
-import { join as join4, resolve as resolve3 } from "node:path";
+import { readFileSync as readFileSync5, writeFileSync, existsSync as existsSync4, mkdirSync, rmSync, realpathSync as realpathSync4 } from "node:fs";
+import { join as join5, resolve as resolve3 } from "node:path";
 import { createRequire as createRequire4 } from "node:module";
 import { createHash } from "node:crypto";
 import { pathToFileURL as pathToFileURL3 } from "node:url";
@@ -2463,7 +2485,7 @@ function environment(Base, attachWeakBinary, load) {
 }
 async function createJestAdapter(ctx) {
   const { root, options, packageDir, remember, failure } = ctx;
-  const fromJest = createRequire4(join4(packageDir, "package.json"));
+  const fromJest = createRequire4(join5(packageDir, "package.json"));
   const configApi = createRequire4(fromJest.resolve("jest-cli/package.json"))("jest-config");
   const { config: raw, configPath } = await configApi.readInitialOptions(options.runnerConfig || undefined, { packageRootOrConfig: options.runnerConfig || root });
   if (raw.projects)
@@ -2471,11 +2493,11 @@ async function createJestAdapter(ctx) {
   const { options: normalized } = await configApi.normalize(raw, {});
   if (options.runnerProject)
     throw failure("EC_MUTATION_CONFIG", "runnerProject is not supported by the Jest native ESM adapter");
-  const directory = join4(options.temp, "jest");
+  const directory = join5(options.temp, "jest");
   mkdirSync(directory, { recursive: true });
-  const transformFile = join4(directory, "transform.cjs"), environmentFile = join4(directory, "environment.cjs"), configFile = join4(directory, "config.json");
+  const transformFile = join5(directory, "transform.cjs"), environmentFile = join5(directory, "environment.cjs"), configFile = join5(directory, "config.json");
   writeFileSync(transformFile, `module.exports=(${transformer.toString()})(require);`);
-  const weak = readFileSync4(join4(options.toolTemp, "weak-runtime.mjs"), "utf8").replace("export function attachWeakBinary", "function attachWeakBinary");
+  const weak = readFileSync5(join5(options.toolTemp, "weak-runtime.mjs"), "utf8").replace("export function attachWeakBinary", "function attachWeakBinary");
   writeFileSync(environmentFile, `${weak}
 const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports=(${environment.toString()})(base.TestEnvironment||base.default||base,attachWeakBinary,require);`);
   const config = {
@@ -2486,7 +2508,7 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
     extensionsToTreatAsEsm: [...new Set([...normalized.extensionsToTreatAsEsm, ".ts", ".mts"])],
     transformIgnorePatterns: [...normalized.transformIgnorePatterns, realpathSync4(options.temp).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/"],
     cache: false,
-    cacheDirectory: join4(options.temp, "jest-cache"),
+    cacheDirectory: join5(options.temp, "jest-cache"),
     watch: false,
     watchman: false,
     collectCoverage: false,
@@ -2497,7 +2519,7 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
   writeFileSync(configFile, JSON.stringify(config));
   const configFiles = [configPath, ...normalized.setupFiles, ...normalized.setupFilesAfterEnv, normalized.globalSetup, normalized.globalTeardown, ...normalized.transform.map((t) => t[1])].filter(Boolean);
   configFiles.forEach((file) => remember(file));
-  const cli = join4(packageDir, "bin/jest.js");
+  const cli = join5(packageDir, "bin/jest.js");
   return { async execute(phase, request, inventory, baseline) {
     configFiles.forEach((file) => remember(file));
     writeFileSync(configFile, JSON.stringify({ ...config, ...request.complete ? { bail: 0 } : {} }));
@@ -2516,10 +2538,10 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
     for (const file of inventory.keys())
       if (normalized.transformIgnorePatterns.some((pattern) => new RegExp(pattern).test(file)))
         throw failure("EC_MUTATION_CONFIG", `Mutation target is excluded from Jest transforms: ${file}; exclude the target or adjust transformIgnorePatterns`);
-    const output = join4(directory, `results-${request.requestId}`);
+    const output = join5(directory, `results-${request.requestId}`);
     rmSync(output, { recursive: true, force: true });
     mkdirSync(output, { recursive: true });
-    const stateFile = join4(directory, "state.json"), reportFile = join4(directory, "report.json");
+    const stateFile = join5(directory, "state.json"), reportFile = join5(directory, "report.json");
     rmSync(reportFile, { force: true });
     writeFileSync(stateFile, JSON.stringify({
       root,
@@ -2528,7 +2550,7 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
       transforms: normalized.transform,
       output,
       selected: request.selected || [],
-      nodeObserver: pathToFileURL3(join4(options.toolTemp, "child-process.mjs")).href,
+      nodeObserver: pathToFileURL3(join5(options.toolTemp, "child-process.mjs")).href,
       context: { matrix: !!options.killMatrix, runId: ctx.runId, requestId: request.requestId, activeKey: request.key || null, hitLimit: request.hitLimit || Number.MAX_SAFE_INTEGER, weakMutation: options.weakMutation, complete: !!request.complete },
       inventory: Object.fromEntries([...inventory].map(([file, entry]) => [file, { source: entry.source, code: phase === "plain" ? entry.source : entry.emitted.code }]))
     }));
@@ -2541,14 +2563,14 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
     const outcome = await runChild(["--experimental-vm-modules", cli, "--config", configFile, "--ci", "--runInBand", "--json", "--outputFile", reportFile, "--testTimeout", String((normalized.testTimeout || 5000) * (request.multiplier || 1)), "--runTestsByPath", ...selectedFiles], { root, env: { ERRSPEC_JEST_STATE: stateFile }, onProgress: () => ctx.progress(request) });
     if (!existsSync4(reportFile))
       throw failure("EC_MUTATION_RUNNER", `Jest exited without results (${outcome.code ?? outcome.signal})`);
-    const report = JSON.parse(readFileSync4(reportFile, "utf8"));
+    const report = JSON.parse(readFileSync5(reportFile, "utf8"));
     const execution = { selected: request.selected || [], tests: [], failedModules: [], errors: [], hits: {}, staticHits: {}, moduleDurations: {}, wallTimeout: false };
     for (const fileResult of report.testResults) {
-      const file = fileResult.name, name = ctx.rel(file), metadata = join4(output, createHash("sha256").update(file).digest("hex") + ".json");
+      const file = fileResult.name, name = ctx.rel(file), metadata = join5(output, createHash("sha256").update(file).digest("hex") + ".json");
       let moduleErrors = [];
       execution.moduleDurations[name] = (fileResult.endTime || 0) - (fileResult.startTime || 0);
       if (existsSync4(metadata)) {
-        const data = JSON.parse(readFileSync4(metadata, "utf8"));
+        const data = JSON.parse(readFileSync5(metadata, "utf8"));
         if (data.runId !== ctx.runId || data.requestId !== request.requestId || data.phase !== phase || data.file !== file)
           throw failure("EC_MUTATION_PROTOCOL", `Stale Jest worker metadata: ${name}`);
         if (data.acquisitionIncomplete)
@@ -2582,8 +2604,8 @@ const base=require(${JSON.stringify(normalized.testEnvironment)});module.exports
 }
 
 // playwright.mjs
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync2, existsSync as existsSync5, mkdirSync as mkdirSync2, realpathSync as realpathSync5, rmSync as rmSync2, readdirSync } from "node:fs";
-import { join as join5, dirname as dirname4, resolve as resolve4 } from "node:path";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync2, existsSync as existsSync5, mkdirSync as mkdirSync2, realpathSync as realpathSync5, rmSync as rmSync2, readdirSync } from "node:fs";
+import { join as join6, dirname as dirname5, resolve as resolve4 } from "node:path";
 import { pathToFileURL as pathToFileURL4 } from "node:url";
 function browserRuntime(context, weak) {
   const counts = {}, pending = globalThis.__errspecMutationPending = [];
@@ -2686,17 +2708,17 @@ async function createPlaywrightAdapter(ctx) {
   const viteDir = resolvePackage(root, "vite");
   if (!viteDir)
     throw failure("EC_MUTATION_CONFIG", "Playwright mutation requires a project Vite installation");
-  const configFile = options.runnerConfig || ["ts", "mts", "js", "mjs", "cts", "cjs"].map((ext) => join5(root, `playwright.config.${ext}`)).find(existsSync5);
+  const configFile = options.runnerConfig || ["ts", "mts", "js", "mjs", "cts", "cjs"].map((ext) => join6(root, `playwright.config.${ext}`)).find(existsSync5);
   if (!configFile)
     throw failure("EC_MUTATION_CONFIG", "Cannot find playwright.config.*; use --runner-config");
   remember(configFile);
-  remember(join5(viteDir, "package.json"));
-  const directory = join5(options.temp, "playwright");
+  remember(join6(viteDir, "package.json"));
+  const directory = join6(options.temp, "playwright");
   mkdirSync2(directory, { recursive: true });
-  const wrapper = join5(directory, "config.mjs"), reporterFile = join5(directory, "reporter.cjs"), stateFile = join5(directory, "state.json"), reportFile = join5(directory, "report.json");
+  const wrapper = join6(directory, "config.mjs"), reporterFile = join6(directory, "reporter.cjs"), stateFile = join6(directory, "state.json"), reportFile = join6(directory, "report.json");
   writeFileSync2(reporterFile, `module.exports=(${reporter.toString()})(require);`);
-  const configRoot = dirname4(configFile);
-  const weakRuntime = readFileSync5(join5(options.toolTemp, "weak-runtime.mjs"), "utf8").replace("export function attachWeakBinary", "function attachWeakBinary");
+  const configRoot = dirname5(configFile);
+  const weakRuntime = readFileSync6(join6(options.toolTemp, "weak-runtime.mjs"), "utf8").replace("export function attachWeakBinary", "function attachWeakBinary");
   writeFileSync2(wrapper, `import original from ${JSON.stringify(pathToFileURL4(configFile).href)};
 import {resolve} from "node:path";
 const base=${JSON.stringify(configRoot)};
@@ -2704,8 +2726,8 @@ const absolute=value=>value?resolve(base,value):undefined;
 const servers=[original.webServer||[]].flat();
 if(servers.some(server=>server.command&&!/^(?:vite|vp dev)(?:\\s|$)/.test(server.command)))throw new Error("errspec Playwright supports a Vite app; custom webServer commands are unsupported");
 const project=p=>({...p,retries:0,repeatEach:1,timeout:(p.timeout??original.timeout??30000)*Number(process.env.ERRSPEC_TIMEOUT_MULTIPLIER||1),testDir:absolute(p.testDir||original.testDir||"."),snapshotDir:absolute(p.snapshotDir||original.snapshotDir),use:{...original.use,...p.use,baseURL:process.env.ERRSPEC_VITE_URL}});
-export default {...original,...project(original),globalSetup:[original.globalSetup||[]].flat().map(absolute),globalTeardown:[original.globalTeardown||[]].flat().map(absolute),webServer:undefined,workers:1,retries:0,repeatEach:1,fullyParallel:false,maxFailures:process.env.ERRSPEC_COMPLETE==="1"?0:original.maxFailures,updateSnapshots:"none",outputDir:${JSON.stringify(join5(directory, "test-results"))},reporter:[[${JSON.stringify(reporterFile)}]],projects:original.projects?.map(project)};`);
-  const vite = await import(pathToFileURL4(join5(viteDir, "dist/node/index.js")).href);
+export default {...original,...project(original),globalSetup:[original.globalSetup||[]].flat().map(absolute),globalTeardown:[original.globalTeardown||[]].flat().map(absolute),webServer:undefined,workers:1,retries:0,repeatEach:1,fullyParallel:false,maxFailures:process.env.ERRSPEC_COMPLETE==="1"?0:original.maxFailures,updateSnapshots:"none",outputDir:${JSON.stringify(join6(directory, "test-results"))},reporter:[[${JSON.stringify(reporterFile)}]],projects:original.projects?.map(project)};`);
+  const vite = await import(pathToFileURL4(join6(viteDir, "dist/node/index.js")).href);
   let phase = "plain";
   const plugin = { name: "errspec-mutation", enforce: "pre", configResolved(config) {
     if (config.configFile)
@@ -2724,7 +2746,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
     return entry.emitted;
   } };
   let server;
-  const cli = join5(packageDir, "cli.js");
+  const cli = join6(packageDir, "cli.js");
   return { async execute(nextPhase, request, entries, baseline) {
     phase = nextPhase;
     inventory = entries;
@@ -2734,7 +2756,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
     }
     let url = "http://127.0.0.1";
     if (nextPhase !== "inspect") {
-      server = await vite.createServer({ root, cacheDir: join5(options.temp, "vite-cache"), plugins: [plugin], server: { host: "127.0.0.1", port: 0, strictPort: true, open: false } });
+      server = await vite.createServer({ root, cacheDir: join6(options.temp, "vite-cache"), plugins: [plugin], server: { host: "127.0.0.1", port: 0, strictPort: true, open: false } });
       await server.listen();
       url = `http://127.0.0.1:${server.httpServer.address().port}`;
     }
@@ -2745,14 +2767,14 @@ export default {...original,...project(original),globalSetup:[original.globalSet
         throw failure("EC_MUTATION_PROTOCOL", `Unknown test ID: ${id}`);
       return test.taskId;
     });
-    const nodeObservations = join5(directory, `observations-${request.requestId}-${nextPhase}`);
+    const nodeObservations = join6(directory, `observations-${request.requestId}-${nextPhase}`);
     rmSync2(nodeObservations, { recursive: true, force: true });
     mkdirSync2(nodeObservations, { recursive: true });
     writeFileSync2(stateFile, JSON.stringify({
       root,
       phase: nextPhase,
       nodeObservations,
-      nodeObserver: pathToFileURL4(join5(options.toolTemp, "child-process.mjs")).href,
+      nodeObserver: pathToFileURL4(join6(options.toolTemp, "child-process.mjs")).href,
       report: reportFile,
       context,
       matrix: !!options.killMatrix,
@@ -2767,7 +2789,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
       const outcome = await runChild(args, { root, env: { ERRSPEC_BROWSER_STATE: stateFile, ERRSPEC_VITE_URL: url, ERRSPEC_TIMEOUT_MULTIPLIER: String(request.multiplier || 1), ERRSPEC_COMPLETE: request.complete ? "1" : "0" }, onProgress: () => ctx.progress(request) });
       if (!existsSync5(reportFile))
         throw failure("EC_MUTATION_CONFIG", `Playwright failed before providing test results (${outcome.code ?? outcome.signal}); inspect stderr`);
-      const report = JSON.parse(readFileSync5(reportFile, "utf8"));
+      const report = JSON.parse(readFileSync6(reportFile, "utf8"));
       if (report.protocolError)
         throw failure("EC_MUTATION_PROTOCOL", report.protocolError);
       const files = [...new Set(report.tests.map((t) => resolve4(root, t.file)))];
@@ -2786,7 +2808,7 @@ export default {...original,...project(original),globalSetup:[original.globalSet
         execution.moduleDurations[test.file] = (execution.moduleDurations[test.file] || 0) + test.duration;
       }
       for (const file of readdirSync(nodeObservations)) {
-        const data = JSON.parse(readFileSync5(join5(nodeObservations, file), "utf8"));
+        const data = JSON.parse(readFileSync6(join6(nodeObservations, file), "utf8"));
         if (data.runId !== ctx.runId || data.requestId !== request.requestId || data.phase !== nextPhase)
           throw failure("EC_MUTATION_PROTOCOL", "Stale Playwright Node observations");
         for (const fact of data.facts)
@@ -2919,7 +2941,7 @@ function remember(file, content) {
   if (!existsSync6(file) || !statSync(file).isFile())
     return;
   file = realpathSync6(file);
-  const next = hash(readFileSync6(file));
+  const next = hash(readFileSync7(file));
   if (content !== undefined && hash(content) !== next)
     throw failure2("EC_MUTATION_INPUT", `Input changed while being acquired: ${file}`);
   if (fingerprints.has(file) && fingerprints.get(file) !== next)
@@ -2928,7 +2950,7 @@ function remember(file, content) {
 }
 function verifyInputs() {
   for (const [file, digest] of fingerprints) {
-    if (!existsSync6(file) || hash(readFileSync6(file)) !== digest)
+    if (!existsSync6(file) || hash(readFileSync7(file)) !== digest)
       throw failure2("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
   }
 }
@@ -3048,12 +3070,12 @@ function childProcessClosure(entries) {
     let dependencies = childDependencies.get(file);
     if (!dependencies) {
       dependencies = [];
-      const source = inventory.get(file)?.source ?? readFileSync6(file, "utf8");
+      const source = inventory.get(file)?.source ?? readFileSync7(file, "utf8");
       for (const specifier of native(source, rel(file), true, {}, true).metadata?.dependencies || []) {
         if (!specifier.startsWith("."))
           continue;
-        const target = resolve5(dirname5(file), specifier);
-        const candidates = [target, ...[".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].map((ext) => target + ext), ...["index.ts", "index.js", "index.mjs", "index.cjs"].map((name) => join6(target, name))];
+        const target = resolve5(dirname6(file), specifier);
+        const candidates = [target, ...[".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].map((ext) => target + ext), ...["index.ts", "index.js", "index.mjs", "index.cjs"].map((name) => join7(target, name))];
         const found = candidates.find((path) => existsSync6(path) && statSync(path).isFile());
         if (found && /[.][cm]?[jt]sx?$/.test(found) && !rel(found).startsWith("../") && !rel(found).split("/").includes("node_modules"))
           dependencies.push(found);
@@ -3158,14 +3180,10 @@ async function executeAdapter(phase, request) {
     remember(file);
   const files = candidateFiles(excluded);
   if (phase === "plain") {
-    for (const file of files) {
-      inventory.set(file, { source: readFileSync6(file, "utf8"), candidates: [] });
-      remember(file);
-    }
+    registerSources(inventory, files, remember);
     testSpecs = specs;
     if (options.plugins?.length)
-      for (const [file, entry] of inventory)
-        entry.generated = await generateSource(entry.source, rel(file));
+      await generatePluginSources(inventory, generateSource, rel);
     for (const file of mutationPlugins.files)
       inventory.delete(file);
     for (const file of globSync("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,json,snap,html,css,scss,sass,less,svg,png,jpg,jpeg,webp,avif,gif,wasm,txt,md}", { cwd: root, exclude: ["**/node_modules/**", "**/.git/**"] })) {
@@ -3175,12 +3193,7 @@ async function executeAdapter(phase, request) {
     }
     for (const file of globSync("**/.env*", { cwd: root, exclude: ["**/node_modules/**", "**/.git/**"] }))
       remember(resolve5(root, file));
-    for (let dir = root;; dir = dirname5(dir)) {
-      for (const name of ["package.json", "package-lock.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json"])
-        remember(join6(dir, name));
-      if (dirname5(dir) === dir)
-        break;
-    }
+    rememberProjectManifests(root, remember);
   } else if (JSON.stringify(specs) !== JSON.stringify(testSpecs) || JSON.stringify(files) !== JSON.stringify([...inventory.keys()]))
     throw failure2("EC_MUTATION_INPUT", "Source or test file inventory changed during the run");
   if (phase === "inspect") {
@@ -3363,25 +3376,15 @@ async function execute(phase, request) {
       remember(file);
     if (phase === "plain") {
       const files = candidateFiles(excluded);
-      for (const file of files) {
-        const source = readFileSync6(file, "utf8");
-        inventory.set(file, { source, candidates: [] });
-        remember(file);
-      }
+      registerSources(inventory, files, remember);
       testSpecs = specIdentities(specs);
       for (const file of [...globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", { cwd: root, exclude: ["**/node_modules/**"] })])
         remember(resolve5(root, file));
       for (const file of globSync("**/*.snap", { cwd: root, exclude: ["**/node_modules/**"] }))
         remember(resolve5(root, file));
-      for (let dir = root;; dir = dirname5(dir)) {
-        for (const name of ["package.json", "package-lock.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json"])
-          remember(join6(dir, name));
-        if (dirname5(dir) === dir)
-          break;
-      }
+      rememberProjectManifests(root, remember);
       if (options.plugins?.length)
-        for (const [file, entry] of inventory)
-          entry.generated = await generateSource(entry.source, rel(file));
+        await generatePluginSources(inventory, generateSource, rel);
       for (const file of mutationPlugins.files)
         inventory.delete(file);
     } else {
@@ -3496,22 +3499,22 @@ async function handle(request) {
     }
     if (!packageDir)
       throw failure2("EC_MUTATION_CONFIG", `Cannot find ${packageName}; use --runner-package`);
-    const runnerVersion = JSON.parse(readFileSync6(join6(packageDir, "package.json"), "utf8")).version;
+    const runnerVersion = JSON.parse(readFileSync7(join7(packageDir, "package.json"), "utf8")).version;
     if (runner === "vite-plus") {
-      remember(join6(packageDir, "package.json"));
+      remember(join7(packageDir, "package.json"));
       const vitest = resolvePackage(packageDir, "vitest");
       if (!vitest)
         throw failure2("EC_MUTATION_CONFIG", "Vite+ must expose a compatible Vitest 5 installation");
       packageDir = vitest;
     }
-    const pkg = JSON.parse(readFileSync6(join6(packageDir, "package.json"), "utf8"));
-    remember(join6(packageDir, "package.json"));
+    const pkg = JSON.parse(readFileSync7(join7(packageDir, "package.json"), "utf8"));
+    remember(join7(packageDir, "package.json"));
     if (["vitest", "vite-plus"].includes(runner)) {
       if (!/^5\./.test(pkg.version))
         throw failure2("EC_MUTATION_CONFIG", `mutate requires Vitest 5.x; found ${pkg.version}`);
-      api = await import(pathToFileURL5(join6(packageDir, "dist/node.js")).href);
-      const setup = readFileSync6(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join6(packageDir, "dist/index.js"))));
-      if (setup !== readFileSync6(options.setup, "utf8"))
+      api = await import(pathToFileURL5(join7(packageDir, "dist/node.js")).href);
+      const setup = readFileSync7(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join7(packageDir, "dist/index.js"))));
+      if (setup !== readFileSync7(options.setup, "utf8"))
         writeFileSync3(options.setup, setup);
     } else if (runner === "jest") {
       if (!/^30\./.test(pkg.version))
@@ -3523,7 +3526,7 @@ async function handle(request) {
       adapter = await createPlaywrightAdapter({ root, options, packageDir, remember, failure: failure2, rel, runId, inventory, recordChildProcesses, progress: (request) => send(request, "progress", { event: "testStart" }) });
     }
     if (request.restore) {
-      const saved = JSON.parse(readFileSync6(options.state, "utf8"));
+      const saved = JSON.parse(readFileSync7(options.state, "utf8"));
       baseline = saved.baseline;
       plain = saved.plain;
       testSpecs = saved.testSpecs;
