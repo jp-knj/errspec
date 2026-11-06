@@ -127,10 +127,13 @@ test("configuration loaders bound output and time, and cancellation preserves it
 });
 test("published API declarations support strict TypeScript consumers",t=>{
   const root=project(t),file=join(root,"consumer.mts");
-  writeFileSync(file,`import {defineConfig,runMutation} from ${JSON.stringify(join(repo,"packages/core/index.mjs"))};
+  writeFileSync(file,`import {defineConfig,runMutation,formatReport} from ${JSON.stringify(join(repo,"packages/core/index.mjs"))};
 const config=defineConfig({typecheck:false,weakMutation:true,vitestConfig:null,policy:{timeBudget:0}});
 const result=await runMutation(config);
 const complete:boolean=result.report.runComplete;
+const rendered:string=await formatReport(result.report,{reporter:'agent',sources:{'src/value.ts':'export const value=true;'}});
+// @ts-expect-error unsupported reporter
+formatReport(result.report,{reporter:'markdown'});
 const key:string|undefined=result.report.mutants[0]?.key;
 const offset:number|undefined=result.report.mutants[0]?.byteOffset;
 // @ts-expect-error unknown option
@@ -139,7 +142,7 @@ defineConfig({typo:true});
 runMutation({weakMutation:'true'});
 // @ts-expect-error report contains numeric counts
 const count:string=result.report.summary.killed;
-void [complete,key,offset,count];`);
+void [complete,key,offset,count,rendered];`);
   const program=ts.createProgram([file],{strict:true,noUncheckedIndexedAccess:true,exactOptionalPropertyTypes:true,noEmit:true,skipLibCheck:false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.NodeNext,moduleResolution:ts.ModuleResolutionKind.NodeNext});
   const diagnostics=ts.getPreEmitDiagnostics(program);
   assert.deepEqual(diagnostics.map(d=>ts.flattenDiagnosticMessageText(d.messageText,"\n")),[]);

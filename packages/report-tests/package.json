@@ -1,0 +1,7 @@
+{
+  "name": "@errspec/report-tests",
+  "private": true,
+  "type": "module",
+  "description": "Development-only upstream mutation report schema validation",
+  "devDependencies": { "ajv": "8.17.1" }
+}

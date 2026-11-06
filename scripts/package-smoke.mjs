@@ -145,15 +145,18 @@ scenarioTest(test, import.meta.url, {contract:'Failure',id:'case-1',tag:'Offline
   assert.equal(all.ok, false);
   writeFileSync(join(dir,"api.mjs"), `
 import assert from 'node:assert/strict';
-import {defineConfig,runMutation} from '@errspec/core';
+import {defineConfig,runMutation,formatReport} from '@errspec/core';
 const result=await runMutation(defineConfig({include:['does-not-exist/**']}));
 assert.equal(result.exitCode,2);
 assert.equal(result.report.testsExecuted,false);
 assert.equal(result.report.kind,'errspec/mutation');
 assert.equal(result.report.diagnostics[0].code,'EC_MUTATION_CONFIG');
+const formatted=JSON.parse(await formatReport(result.report,{reporter:'json'}));
+assert.equal(formatted.schemaVersion,'2');assert.deepEqual(formatted.files,{});
+assert.match(await formatReport(result.report,{reporter:'html'}),/errspec mutation report/);
 `);
   run(process.execPath,["api.mjs"]);
-  const extraChecks=["installed-core-native-api"];
+  const extraChecks=["installed-core-native-api","installed-core-format-report"];
   for (const compiler of JSON.parse(process.env.ERRSPEC_TYPESCRIPT_PACKAGES || "[]")) {
     writeFileSync(join(dir,"tsconfig.json"),JSON.stringify({compilerOptions:{strict:true,target:"ES2022",module:"ESNext",moduleResolution:"Bundler",skipLibCheck:true},files:["errors.ts"]}));
     const options=["--analysis-engine","typescript","--typescript-package",resolve(compiler),"--analysis-node",process.execPath,"--format","json"];
@@ -173,7 +176,7 @@ assert.equal(result.report.diagnostics[0].code,'EC_MUTATION_CONFIG');
     assert.ok(mutation.mutants.filter(m=>m.status==='Ignored').every(m=>m.ignored==='disabled: explicit installed-package exclusion'&&m.attempts.length===0));
     writeFileSync(join(dir,"api.mjs"), `
 import assert from 'node:assert/strict';
-import {defineConfig,runMutation} from '@errspec/core';
+import {defineConfig,runMutation,formatReport} from '@errspec/core';
 const diff=process.argv.includes('--diff');
 const sharded=process.argv.includes('--shard');
 const parallel=process.argv.includes('--parallel');
@@ -188,6 +191,12 @@ if(relocation)assert.equal(result.report.cache.relocation,true);
 if(sharded){assert.equal(result.report.shard.index,1);assert.equal(result.report.shard.total,2);assert.equal(result.report.shard.selected,result.report.summary.total);assert.equal(result.report.shard.selected+result.report.shard.omitted,result.report.shard.eligible);assert.ok(result.report.mutants.every(m=>BigInt('0x'+m.key.slice(0,16))%2n===0n));}
 else if(diff){assert.equal(result.report.selection.selected,1);assert.ok(result.report.selection.omitted>0);assert.ok(result.report.mutants.every(m=>m.line===2));}
 else assert.equal(result.report.summary.killed,2);
+const mte=JSON.parse(await formatReport(result.report,{reporter:'json'}));
+assert.equal(mte.schemaVersion,'2');
+assert.equal(mte.files['src/mutation.ts'].mutants.length,result.report.mutants.length);
+assert.ok(mte.files['src/mutation.ts'].source.includes('export function add'));
+const agent=JSON.parse(await formatReport(result.report,{reporter:'agent'}));
+assert.equal(agent.kind,'errspec/mutation-agent');
 if(cache){assert.equal(result.report.cache.disabledReason,undefined);assert.equal(result.report.cache.reused,warm?2:0);assert.equal(result.report.cache.executed,warm?0:2);assert.equal(result.report.cache.saved,2);assert.equal(result.report.cache.coverageReused,warm?true:undefined);}
 `);
     run(process.execPath,["api.mjs"]);

@@ -194,6 +194,10 @@ pub(super) fn run(
             base.script.parent().unwrap().join("weak-runtime.mjs"),
             directory.path().join("weak-runtime.mjs"),
         )?;
+        fs::copy(
+            base.script.parent().unwrap().join("child-process.mjs"),
+            directory.path().join("child-process.mjs"),
+        )?;
         let run_id = directory
             .path()
             .file_name()

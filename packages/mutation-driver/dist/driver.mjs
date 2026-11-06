@@ -1,6 +1,6 @@
 // driver.mjs
 import { readFileSync as readFileSync2, writeFileSync, realpathSync as realpathSync2, existsSync as existsSync2, globSync, statSync } from "node:fs";
-import { dirname as dirname2, resolve as resolve2, relative as relative2, join as join2, isAbsolute, matchesGlob } from "node:path";
+import { basename, dirname as dirname2, resolve as resolve2, relative as relative2, join as join2, isAbsolute, matchesGlob } from "node:path";
 import { pathToFileURL as pathToFileURL2 } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -2117,9 +2117,9 @@ function verifyInputs() {
       throw failure("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
   }
 }
-function native(source, file, validateOnly = false) {
+function native(source, file, validateOnly = false, facts = false) {
   const result = spawnSync(options.binary, ["__mutation-source"], {
-    input: JSON.stringify({ source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation, arid: options.arid, aridCallees: options.aridCallees, facts: !!(options.since || options.cache && options.cacheScope), engineFingerprint: options.engineFingerprint }),
+    input: JSON.stringify({ source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation, arid: options.arid, aridCallees: options.aridCallees, facts: !!(facts || options.since || options.cache && options.cacheScope), engineFingerprint: options.engineFingerprint }),
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     timeout: 60000
@@ -2183,6 +2183,49 @@ function plugin(phase) {
     return entry.emitted;
   } };
 }
+var childDependencies = new Map;
+function childProcessClosure(entries) {
+  const pending = entries.map((file) => resolve2(root, file)), seen = new Set;
+  while (pending.length) {
+    const file = pending.pop();
+    if (seen.has(file))
+      continue;
+    seen.add(file);
+    remember(file);
+    let dependencies = childDependencies.get(file);
+    if (!dependencies) {
+      dependencies = [];
+      const source = inventory.get(file)?.source ?? readFileSync2(file, "utf8");
+      for (const specifier of native(source, rel(file), true, true).metadata?.dependencies || []) {
+        if (!specifier.startsWith("."))
+          continue;
+        const target = resolve2(dirname2(file), specifier);
+        const candidates = [target, ...[".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].map((ext) => target + ext), ...["index.ts", "index.js", "index.mjs", "index.cjs"].map((name) => join2(target, name))];
+        const found = candidates.find((path) => existsSync2(path) && statSync(path).isFile());
+        if (found && /[.][cm]?[jt]sx?$/.test(found) && !rel(found).startsWith("../") && !rel(found).split("/").includes("node_modules"))
+          dependencies.push(found);
+      }
+      childDependencies.set(file, dependencies);
+    }
+    pending.push(...dependencies);
+  }
+  return [...seen].map(rel).sort();
+}
+function childProcessEntries(fact) {
+  const tokens = fact.method === "execSync" || fact.argv[1] === "-c" ? (fact.argv.at(-1).match(/(?:[^\s"'\\]|\\.|"[^"]*"|'[^']*')+/g) || []).map((v) => v.replace(/^(["'])([\s\S]*)\1$/, "$2").replace(/\\([\s"'])/g, "$1")) : fact.argv.slice(1);
+  const entries = new Set;
+  for (const arg of tokens) {
+    if (!arg || arg.startsWith("-") || !/[.][cm]?[jt]sx?$/.test(arg))
+      continue;
+    const path = resolve2(fact.cwd, arg), relative = rel(path);
+    if (relative.startsWith("../") || relative.split("/").includes("node_modules") || !existsSync2(path))
+      continue;
+    if (!statSync(path).isFile())
+      continue;
+    entries.add(relative);
+  }
+  return childProcessClosure([...entries]);
+}
 function recordModule(module, execution, request) {
   const counts = new Map;
   const moduleFile = rel(module.moduleId);
@@ -2217,6 +2260,13 @@ function recordModule(module, execution, request) {
       throw failure("EC_MUTATION_PROTOCOL", "Worker does not support weak mutation");
     if (meta.runId !== runId || meta.requestId !== request.requestId)
       throw failure("EC_MUTATION_PROTOCOL", "Stale module metadata");
+    for (const fact of meta.childProcesses || []) {
+      const entries = childProcessEntries(fact);
+      if (!entries.length)
+        continue;
+      const test = execution.tests.find((t) => t.file === moduleFile && t.taskId === fact.taskId && t.started)?.id || null;
+      (execution.childProcesses ||= []).push({ test, file: moduleFile, executable: basename(fact.argv[0]), entries, method: fact.method });
+    }
     for (const [key, count] of Object.entries(meta.hits))
       execution.hits[key] = (execution.hits[key] || 0) + count;
     for (const key of Object.keys(meta.staticHits))

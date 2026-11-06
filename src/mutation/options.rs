@@ -6,6 +6,8 @@ use std::path::PathBuf;
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Options {
     pub root: PathBuf,
+    pub reporters: Vec<super::reporting::Reporter>,
+    pub report_dir: Option<PathBuf>,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub exclude_mutator: Vec<String>,
@@ -37,6 +39,8 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             root: ".".into(),
+            reporters: vec![],
+            report_dir: None,
             include: vec![],
             exclude: vec![],
             exclude_mutator: vec![],
@@ -69,6 +73,7 @@ impl Default for Options {
 impl Options {
     pub fn validate(&self) -> Result<(), String> {
         self.policy.validate()?;
+        super::reporting::validate_reporters(&self.reporters)?;
         if self.experimental_callgraph && (!self.cache || !self.cache_scope) {
             return Err("experimentalCallgraph requires cache and cacheScope".into());
         }
@@ -108,6 +113,7 @@ impl Options {
         }
         if [
             &self.cache_dir,
+            &self.report_dir,
             &self.vitest_config,
             &self.vitest_package,
             &self.typecheck_project,

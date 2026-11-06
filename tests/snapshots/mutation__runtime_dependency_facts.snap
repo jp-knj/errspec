@@ -1,0 +1,14 @@
+---
+source: tests/mutation.rs
+expression: facts
+---
+{
+  "candidates": [],
+  "dependencies": [
+    "./common.cjs",
+    "./dynamic.ts",
+    "./effect.ts",
+    "./reexport.ts",
+    "./value.ts"
+  ]
+}

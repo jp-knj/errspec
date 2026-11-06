@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>errspec mutation report</title>
+<style>body{font:16px system-ui;max-width:1100px;margin:2rem auto;padding:0 1rem;color:#18273a;background:#f5f8fc}h1{font-size:2rem}select,input{font:inherit;padding:.4rem;margin:.3rem}article,details{background:white;border:1px solid #cdd8e5;border-radius:8px;padding:1rem;margin:.8rem 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#eef3f8;padding:.8rem}summary{cursor:pointer}small{color:#42566f}.Survived,.NoCoverage,.Pending{border-left:5px solid #ad5e17}.Killed{border-left:5px solid #168060}label{display:inline-block}#warnings{color:#795116}</style>
+<h1>errspec mutation report</h1><p id="summary"></p><div id="warnings"></div>
+<label>Status <select id="status"><option value="">All statuses</option></select></label>
+<label>File or mutation <input id="query" type="search"></label><p id="count" aria-live="polite"></p><div id="matrix"></div><main id="files"></main>
+<script type="application/json" id="report-data">__REPORT_DATA__</script>
+<script>
+'use strict';
+const report=JSON.parse(document.getElementById('report-data').textContent);
+const node=(tag,text,parent)=>{const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(parent)parent.append(el);return el;};
+const summary=report.errspec.summary;
+document.getElementById('summary').textContent=`${summary.total} mutants · score ${summary.score===null?'unknown':(summary.score*100).toFixed(2)+'%'} · ${report.errspec.runComplete?'complete':'incomplete'} · quality ${report.errspec.ok?'pass':'fail'}`;
+for(const warning of report.warnings??[])node('p',warning.message,document.getElementById('warnings'));
+if(report.killMatrix){const matrix=node('details',undefined,document.getElementById('matrix'));node('summary','Kill matrix and test relationships',matrix);node('p','Observed relationships are advisory. Review before changing or deleting tests.',matrix);node('pre',JSON.stringify(report.killMatrix,null,2),matrix);}
+const status=document.getElementById('status'),query=document.getElementById('query');
+for(const s of [...new Set(Object.values(report.files).flatMap(f=>f.mutants.map(m=>m.status)))].sort()){const option=node('option',s,status);option.value=s;}
+function render(){const out=document.getElementById('files');out.replaceChildren();let shown=0;const q=query.value.toLowerCase();
+for(const [file,result] of Object.entries(report.files)){const mutants=result.mutants.filter(m=>(!status.value||m.status===status.value)&&(!q||`${file} ${m.id} ${m.mutatorName} ${m.replacement}`.toLowerCase().includes(q)));if(!mutants.length)continue;
+const section=node('section',undefined,out);node('h2',file,section);const source=node('details',undefined,section);node('summary','Original source',source);node('pre',result.source,source);
+for(const m of mutants){shown++;const row=node('article',undefined,section);row.className=m.status;node('strong',`${m.location.start.line}:${m.location.start.column} ${m.mutatorName} — ${m.status}`,row);node('p',m.statusReason??'',row);node('pre',`Replacement: ${m.replacement}`,row);node('small',m.id,row);for(const field of ['coveredBy','killedBy']){const details=node('details',undefined,row);node('summary',`${field}: ${(m[field]??[]).length}`,details);node('pre',(m[field]??[]).join('\n')||'None',details);}}}
+document.getElementById('count').textContent=`${shown} mutants shown`;}
+status.addEventListener('change',render);query.addEventListener('input',render);render();
+</script></html>

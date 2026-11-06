@@ -10,6 +10,9 @@ pub struct Metadata {
     pub scopes: BTreeMap<String, Scope>,
     pub owners: BTreeMap<String, String>,
     pub nodes: Vec<SyntaxNode>,
+    /// Literal runtime module specifiers, including side-effect/re-export/literal calls.
+    #[serde(default)]
+    pub dependencies: Vec<String>,
     #[serde(default)]
     pub calls: Vec<Call>,
     #[serde(default)]

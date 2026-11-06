@@ -57,10 +57,10 @@
 | Vitest 5、Vite+、ランナーの自動選択と設定指定 | `mutate`はVitest 5系のNodeプロジェクトと設定指定に対応。Vite+固有の対応は未検証 |
 | Jest 30のnative ESM adapter（実験的） | 未実装 |
 | Playwright TestとVite dev serverのbrowser adapter、fixture、複数project（実験的） | 未実装 |
-| text、mutation-testing-elements形式のJSON・HTML、保存ディレクトリの指定 | `mutate`独自のtext・JSONを提供。mutation-testing-elements形式、HTML、保存先指定は未実装 |
-| `not detected`／`not infected`／`not reached`の分類、子プロセス内で実行された可能性の警告 | 未実装 |
-| `--reporter agent`の不足・関数本文・到達テスト・修正案、stdoutとstderrの分離 | ミューテーション用は未実装。errspecのJSONは診断をstdout、ランナーのログをstderrへ出力 |
-| `--reporter simplify`で削除してもテストが失敗しないコードを一覧化 | 未実装 |
+| text、mutation-testing-elements形式のJSON・HTML、保存ディレクトリの指定 | 従来の`--format json`を維持。`--reporter text/json/html`、`--report-dir`、MTE schema v2、外部リソース不要のHTMLを提供。実Vitest結果のupstream schema検証・HTML viewer実行を受入テストで確認 |
+| `not detected`／`not infected`／`not reached`の分類、子プロセス内で実行された可能性の警告 | レポートで3区分を表示。実際のNode子プロセス起動をテストへ関連付け、相対script依存のAST閉包に警告。raw argv/envは公開しない。動的な依存名・package/alias・shell展開は推測しない |
+| `--reporter agent`の不足・関数本文・到達テスト・修正案、stdoutとstderrの分離 | `--reporter agent` / `formatReport`で未検出区分、ASTの関数本文、到達テスト、修正案を単一JSONへ出力。GitHub環境でもannotationを混在させない |
+| `--reporter simplify`で削除してもテストが失敗しないコードを一覧化 | 到達済みの生存削除変異を、位置・関数・変異ID・削除内容とともに提示。未到達・Ignoredは含めない |
 | `select-tests`で変更に関係するテストを順位付けし、files／JSONで出力 | 未実装 |
 | `--kill-matrix`による全検出テスト、検出なし・包含・重複テストの一覧、各実行方式での結果再利用 | 未実装 |
 | high／low／breakの閾値、`--fail-on-survived`、baseline失敗とquality gate失敗の区別 | `--threshold-high/low/break`と`--fail-on-survived`を提供。quality gateは終了1、基準実行の異常は終了2 |
@@ -72,7 +72,7 @@
 | mutator 0.2.0の機能 | errspecの実装状況・関連機能 |
 | --- | --- |
 | `mutator.config.ts`／mts／mjs／js／json、`defineConfig`、JSON Schema、CLI優先順位と否定フラグ、root／include／exclude | `errspec.mutation.config.{ts,mts,mjs,js,json}`、`defineConfig`、JSON Schema、明示CLI/API優先、否定フラグを提供。受け入れ検証は`tests/mutation-options.test.mjs` |
-| `runMutation`、report formatter、plugin定義などのprogrammatic APIとcore／runner／typecheck／CLIのpackage分離 | `@errspec/core`の`runMutation`と`defineConfig`を提供。共通の版付き要求をRustへ渡しCLIと同じ判定を使う。formatter・plugin API・runner/typecheck package分離は未実装 |
+| `runMutation`、report formatter、plugin定義などのprogrammatic APIとcore／runner／typecheck／CLIのpackage分離 | `@errspec/core`の`runMutation`と`defineConfig`を提供。共通の版付き要求をRustへ渡しCLIと同じ判定を使う。`formatReport`も同じRust formatterを使用。plugin API・runner/typecheck package分離は未実装 |
 | npm CLIと各adapterの配布、Node.js 24以降での利用 | `mutate`のdriverをネイティブバイナリへ同梱。Node 24以降を要求。errspecの配布物は準備中、npm/crates.io未公開 |
 | GitHub Action、差分のbase取得、失敗時も保存するsnapshot cache、別checkoutでの再利用 | ミューテーション用は未実装。errspecのCIはRust・testkit・Bun/Vitest受け入れ検証を実行 |
 | Agent Skillsの同梱、skills-npm、`init-skill`、導入・反復修正・Playwrightの手順 | 未実装。既存のREADMEと導入例を提供 |

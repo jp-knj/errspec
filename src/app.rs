@@ -298,7 +298,10 @@ pub(crate) fn execute(request: Request) -> Outcome {
         Request::Mutation(request) => {
             Outcome::Mutation(Box::new(crate::mutation_config::run(*request)))
         }
-        Request::MutationSource | Request::MutationApi | Request::MutationSupervisor(_) => {
+        Request::MutationSource
+        | Request::MutationApi
+        | Request::FormatReport
+        | Request::MutationSupervisor(_) => {
             unreachable!("hidden source entry handled by main")
         }
         Request::Contract(request) => {

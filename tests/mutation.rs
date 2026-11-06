@@ -870,3 +870,45 @@ fn score_and_gate_depend_on_completion() {
     assert_eq!(report.summary.score, Some(0.0));
     assert_eq!(report.exit_code(), 1);
 }
+
+#[test]
+fn runtime_dependency_facts_distinguish_syntax_from_type_imports_and_literal_text() {
+    let source = r#"
+import type { Type } from './type-only.ts';
+import { value } from './value.ts';
+import './effect.ts';
+export { value as forwarded } from './reexport.ts';
+export type { Type as ForwardedType } from './export-type.ts';
+const decoy = "import './literal.ts'";
+type Derived = import('./type-query.ts').Type;
+const load = () => import('./dynamic.ts');
+const common = require('./common.cjs');
+const unknown = import(decoy);
+"#;
+    let generated = generate_options(source, json!({"validateOnly":true,"facts":true}));
+    let facts = json!({"dependencies":generated["metadata"]["dependencies"],"candidates":generated["candidates"]});
+    assert_eq!(
+        facts["dependencies"],
+        json!([
+            "./common.cjs",
+            "./dynamic.ts",
+            "./effect.ts",
+            "./reexport.ts",
+            "./value.ts"
+        ])
+    );
+    assert_eq!(facts["candidates"], json!([]));
+    insta::assert_json_snapshot!("runtime_dependency_facts", facts);
+    assert!(generate(source).get("metadata").is_none());
+}
+
+#[test]
+fn child_process_facts_require_an_actual_module_and_started_test() {
+    let mut execution:Execution=serde_json::from_value(json!({"selected":[],"tests":[{"id":"t","taskId":"1","file":"a.test.ts","name":"runs","status":"passed","started":true,"duration":0,"errors":[],"hits":{}}],"failedModules":[],"errors":[],"staticHits":{},"hits":{},"wallTimeout":false,"childProcesses":[{"test":"t","file":"a.test.ts","executable":"node","entries":["src/child.ts"],"method":"spawnSync"}]})).unwrap();
+    assert!(mutation::validate_execution(&execution, &[]).is_ok());
+    execution.child_processes[0].test = Some("unknown".into());
+    assert!(mutation::validate_execution(&execution, &[]).is_err());
+    execution.child_processes[0].test = None;
+    execution.child_processes[0].entries = vec!["../outside.ts".into()];
+    assert!(mutation::validate_execution(&execution, &[]).is_err());
+}

@@ -16,10 +16,16 @@ use std::{
 
 pub(crate) fn run(request: MutationRequest) -> Report {
     let gate = request.options.fail_on_undetected;
+    let presentation = errspec::mutation::reporting::Presentation {
+        root: request.options.root.clone(),
+        reporters: request.options.reporters.clone(),
+        directory: request.options.report_dir.clone(),
+    };
     match resolve(request) {
         Ok(options) => crate::mutate::run(options),
         Err(error) => {
             let mut report = Report::new(gate);
+            report.presentation = presentation;
             report.interrupted = error.interrupted;
             report.error("EC_MUTATION_CONFIG", error.message);
             report.finish();
@@ -102,6 +108,7 @@ fn resolve(request: MutationRequest) -> Result<Options, ConfigFailure> {
     let mut config = serde_json::to_value(file_options).unwrap();
     config["root"] = serde_json::json!(effective_root);
     for name in [
+        "reportDir",
         "vitestConfig",
         "vitestPackage",
         "typecheckProject",
@@ -141,6 +148,9 @@ fn object_has_root(value: &Value) -> bool {
 pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) {
     for (id, key) in [
         ("root", "root"),
+        ("reporter", "reporters"),
+        ("reporters", "reporters"),
+        ("report_dir", "reportDir"),
         ("since", "since"),
         ("diff_unit", "diffUnit"),
         ("shard", "shard"),
