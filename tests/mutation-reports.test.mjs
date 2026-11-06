@@ -1,6 +1,8 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runCommand} from "./support/cli.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync,truncateSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync,truncateSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -14,18 +16,17 @@ const schema=JSON.parse(readFileSync(new URL('../packages/core/schema/mutation-t
 const validate=new Ajv({strict:false,validateFormats:false}).compile(schema);
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=join(repo,'target/debug/errspec');
 function project(t) {
-  const root=realpathSync(mkdtempSync(join(tmpdir(),'errspec-reports-')));
-  t.after(()=>rmSync(root,{recursive:true,force:true}));
-  mkdirSync(join(root,'src'));mkdirSync(join(root,'node_modules'));
-  symlinkSync(join(repo,'examples/checkout/node_modules/vitest'),join(root,'node_modules/vitest'),'dir');
+  const root=temporaryProject(t,"errspec-reports-");
+
+  prepareVitestProject(root,repo);
+
   writeFileSync(join(root,'src/value.ts'),'export function value(n:number){ console.log("observation",n); return n > 0; }\nexport const unseen=()=>false;\n');
   writeFileSync(join(root,'value.test.ts'),'import {test,expect} from "vitest";import {value} from "./src/value";test("value",()=>expect(value(2)).toBeDefined());');
   writeFileSync(join(root,'vitest.config.mjs'),'export default {test:{include:["value.test.ts"]}};');
   return root;
 }
 function cli(root,args=[],code=0,env={}) {
-  const result=spawnSync(binary,['mutate','--node',process.execPath,...args],{cwd:root,encoding:'utf8',timeout:60000,env:{...process.env,...env}});
-  assert.ifError(result.error);assert.equal(result.status,code,result.stdout+result.stderr);return result;
+  return runCommand(binary,['mutate','--node',process.execPath,...args],{cwd:root,encoding:'utf8',timeout:60000,env:{...process.env,...env}},code);
 }
 const transport=root=>({binary,cwd:root});
 test('real native results render MTE schema, function explanations, simplify candidates, and offline HTML',async t=>{

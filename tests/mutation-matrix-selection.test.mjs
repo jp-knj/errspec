@@ -1,7 +1,8 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync} from "node:fs";
-import {tmpdir} from "node:os";
+import {mkdirSync,writeFileSync,readFileSync,rmSync} from "node:fs";
 import {dirname,delimiter,join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {spawnSync} from "node:child_process";
@@ -9,8 +10,8 @@ import {runMutation,selectTests,formatReport} from "../packages/core/index.mjs";
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=process.env.ERRSPEC_BIN||join(repo,'target/debug/errspec');
 function git(root,args){const r=spawnSync('git',args,{cwd:root,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout;}
 function fixture(t){
- const root=realpathSync(mkdtempSync(join(tmpdir(),'errspec-matrix-'))),control=realpathSync(mkdtempSync(join(tmpdir(),'errspec-matrix-control-')));t.after(()=>{rmSync(root,{recursive:true,force:true});rmSync(control,{recursive:true,force:true});});
- mkdirSync(join(root,'src'));mkdirSync(join(root,'node_modules'));symlinkSync(join(repo,'examples/checkout/node_modules/vitest'),join(root,'node_modules/vitest'),'dir');
+ const root=temporaryProject(t,"errspec-matrix-"),control=temporaryProject(t,"errspec-matrix-control-");
+ prepareVitestProject(root,repo);
  writeFileSync(join(root,'package.json'),JSON.stringify({type:'module',dependencies:{vitest:'5.0.5'}}));
  writeFileSync(join(root,'.gitignore'),'node_modules/\n.errspec/\n');
  writeFileSync(join(root,'src/positive.ts'),'export const isPositive=(n:number)=>n>0;');
@@ -27,7 +28,7 @@ test('observes without assertion',()=>{log();isPositive(1)});`);
  git(root,['init','-q','-b','main']);git(root,['add','.']);git(root,['-c','commit.gpgSign=false','-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-q','-m','base']);
  return {root,tracker};
 }
-function cli(root,command,args=[],code=0){const r=spawnSync(binary,[command,'--node',process.execPath,'--reuse-session','--format','json',...args],{cwd:root,encoding:'utf8',timeout:60000,killSignal:'SIGKILL'});assert.ifError(r.error);assert.equal(r.status,code,r.stdout+r.stderr);return JSON.parse(r.stdout);}
+function cli(root,command,args=[],code=0){return runJsonCommand(binary,[command,'--node',process.execPath,'--reuse-session','--format','json',...args],{cwd:root,encoding:'utf8',timeout:60000,killSignal:'SIGKILL'},code);}
 const identities=report=>report.mutants.map(m=>({key:m.key,status:m.status,coveredBy:m.coveredBy,killedBy:m.killedBy,matrix:m.matrix}));
 test('complete matrix rejects experimental survivor pruning before any tests start',t=>{
  const {root,tracker}=fixture(t);

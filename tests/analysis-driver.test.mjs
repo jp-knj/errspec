@@ -1,18 +1,7 @@
+import {temporaryProject} from "./support/project.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-  rmSync,
-  symlinkSync,
-  realpathSync,
-  existsSync,
-  readdirSync,
-  chmodSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import {mkdirSync,readFileSync,writeFileSync,symlinkSync,realpathSync,existsSync,readdirSync,chmodSync} from "node:fs";
 import { resolve, join, dirname, delimiter } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -37,8 +26,8 @@ const modern = {
 };
 
 function project(t, files, options = modern) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "errspec-analysis-")));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = temporaryProject(t,"errspec-analysis-");
+
   for (const [name, text] of Object.entries(files)) {
     mkdirSync(dirname(join(root, name)), { recursive: true });
     writeFileSync(join(root, name), text);

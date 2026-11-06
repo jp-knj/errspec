@@ -1,7 +1,8 @@
+import {temporaryProject} from "./support/project.mjs";
+import {runCommand} from "./support/cli.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readdirSync,rmSync,symlinkSync,realpathSync,existsSync,statSync,chmodSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {mkdirSync,writeFileSync,readFileSync,readdirSync,rmSync,symlinkSync,existsSync,statSync,chmodSync} from 'node:fs';
 import {join,resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
@@ -9,8 +10,8 @@ import {createRequire} from 'node:module';
 const require=createRequire(new URL('../packages/report-tests/package.json',import.meta.url)),{parse}=require('yaml');
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=join(repo,'target/debug/errspec'),shipped=join(repo,'packages/cli/skills');
 function files(root){return readdirSync(root,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?files(join(root,entry.name)).map(file=>join(entry.name,file)):[entry.name]).sort();}
-function project(t){const root=realpathSync(mkdtempSync(join(tmpdir(),'errspec-skills-')));t.after(()=>rmSync(root,{recursive:true,force:true}));return root;}
-function cli(root,args,code=0){const r=spawnSync(binary,args,{cwd:root,encoding:'utf8',timeout:60000});assert.ifError(r.error);assert.equal(r.status,code,r.stdout+r.stderr);return r;}
+function project(t){const root=temporaryProject(t,"errspec-skills-");return root;}
+function cli(root,args,code=0){return runCommand(binary,args,{cwd:root,encoding:'utf8',timeout:60000},code);}
 function initialize(root,args=[],code=0){return JSON.parse(cli(root,['init-skill','--format','json',...args],code).stdout);}
 function verifyCopy(target){for(const file of files(shipped))assert.equal(readFileSync(join(target,file),'utf8'),readFileSync(join(shipped,file),'utf8'),file);}
 test('shipped skills are discoverable, parse as Agent Skills, and retain local references',()=>{

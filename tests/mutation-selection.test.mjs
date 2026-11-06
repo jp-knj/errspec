@@ -1,7 +1,8 @@
+import {temporaryProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync} from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -11,8 +12,8 @@ const repo=fileURLToPath(new URL("../",import.meta.url)),binary=join(repo,"targe
 const source="export function choose(x:number){\n  const v=x+1;\n  return v>2;\n}\nexport function untouched(x:number){\n  return x-1;\n}\n";
 function git(cwd,...args){const r=spawnSync("git",args,{cwd,encoding:"utf8"});assert.equal(r.status,0,r.stderr);return r.stdout.trim();}
 function fixture(t,nested=false){
-  const directory=realpathSync(mkdtempSync(join(tmpdir(),"errspec-git-selection-")));
-  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const directory=temporaryProject(t,"errspec-git-selection-");
+
   const root=nested?join(directory,"project"):directory;
   mkdirSync(join(root,"src"),{recursive:true});mkdirSync(join(root,"node_modules"));
   symlinkSync(join(repo,"examples/checkout/node_modules/vitest"),join(root,"node_modules/vitest"),"dir");
@@ -26,8 +27,7 @@ function fixture(t,nested=false){
   return {root,directory};
 }
 function run(root,args=[],code=0,budget=0){
-  const r=spawnSync(binary,["mutate","--node",process.execPath,"--format","json","--time-budget",String(budget),...args],{cwd:root,encoding:"utf8",timeout:30000});
-  assert.ifError(r.error);assert.equal(r.status,code,r.stderr+r.stdout);return JSON.parse(r.stdout);
+  return runJsonCommand(binary,["mutate","--node",process.execPath,"--format","json","--time-budget",String(budget),...args],{cwd:root,encoding:"utf8",timeout:30000},code);
 }
 test("node and function scope selections use the current AST and retain stable IDs",t=>{
   const {root}=fixture(t),path=join(root,"src/café space.ts"),all=run(root);

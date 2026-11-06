@@ -1,8 +1,8 @@
+import {temporaryProject} from "./support/project.mjs";
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,realpathSync,rmSync,cpSync,symlinkSync} from "node:fs";
+import {mkdirSync,writeFileSync,readFileSync,realpathSync,cpSync,symlinkSync} from "node:fs";
 import {join,resolve,dirname} from "node:path";
-import {tmpdir} from "node:os";
 import {pathToFileURL,fileURLToPath} from "node:url";
 import {createRequire} from "node:module";
 import {spawnSync} from "node:child_process";
@@ -10,7 +10,7 @@ import {checkMutants,checkMutantsInWorker} from "../packages/typecheck/index.mjs
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const binary=process.env.ERRSPEC_BIN||join(repo,"target/debug/errspec");
 const dependencies=join(repo,"tests/fixtures/runners/node_modules");
-function temporary(t){const root=realpathSync(mkdtempSync(join(tmpdir(),"errspec-public-package-")));t.after(()=>rmSync(root,{recursive:true,force:true}));return root;}
+function temporary(t){const root=temporaryProject(t,"errspec-public-package-");return root;}
 function compilerProject(t){
   const root=temporary(t),source='export const value:number=42;export const safe=(x:{n:number})=>x?.n;';
   writeFileSync(join(root,"value.ts"),source);

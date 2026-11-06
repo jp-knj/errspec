@@ -1,17 +1,17 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync} from "node:fs";
-import {tmpdir} from "node:os";
+import {writeFileSync,readFileSync,rmSync} from "node:fs";
 import {join} from "node:path";
-import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
 import {runMutation} from "../packages/core/index.mjs";
 const repo=fileURLToPath(new URL("../",import.meta.url)),binary=join(repo,"target/debug/errspec");
 const source="export function add(a:number,b:number){return a+b;}\nexport function subtract(a:number,b:number){return a-b;}\n";
 function fixture(t){
-  const root=realpathSync(mkdtempSync(join(tmpdir(),"errspec-scope-cache-")));t.after(()=>rmSync(root,{recursive:true,force:true}));
-  mkdirSync(join(root,"src"));mkdirSync(join(root,"node_modules"));
-  symlinkSync(join(repo,"examples/checkout/node_modules/vitest"),join(root,"node_modules/vitest"),"dir");
+  const root=temporaryProject(t,"errspec-scope-cache-");
+  prepareVitestProject(root,repo);
+
   writeFileSync(join(root,"package.json"),JSON.stringify({type:"module",dependencies:{vitest:"5.0.5"}}));
   writeFileSync(join(root,"src/value.ts"),source);
   writeFileSync(join(root,"a.test.ts"),'import {test,expect} from "vitest";import {add} from "./src/value";test("adds",()=>expect(add(2,3)).toBe(5));');
@@ -21,8 +21,7 @@ function fixture(t){
 }
 function run(root,args=[],code=0,environment={}){
   const defaults=[...(args.includes("--no-cache")?[]:["--cache"]),...(args.includes("--no-cache-scope")||args.includes("--no-cache")?[]:["--cache-scope"])];
-  const r=spawnSync(binary,["mutate","--node",process.execPath,"--format","json",...defaults,...args],{cwd:root,encoding:"utf8",timeout:60000,env:{...process.env,...environment}});
-  assert.ifError(r.error);assert.equal(r.status,code,r.stdout+r.stderr);return JSON.parse(r.stdout);
+  return runJsonCommand(binary,["mutate","--node",process.execPath,"--format","json",...defaults,...args],{cwd:root,encoding:"utf8",timeout:60000,env:{...process.env,...environment}},code);
 }
 const verdicts=report=>report.mutants.map(m=>[m.key,m.status,m.coveredBy,m.killedBy]);
 test("position-only edits reuse assertion results but refresh all current probe evidence",{timeout:60000},t=>{

@@ -1,10 +1,11 @@
+import {temporaryProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,cpSync,existsSync,rmSync,realpathSync,symlinkSync} from "node:fs";
-import {tmpdir} from "node:os";
+import {mkdirSync,writeFileSync,readFileSync,cpSync,existsSync,rmSync,symlinkSync} from "node:fs";
 import {join,resolve,dirname} from "node:path";
 import {fileURLToPath} from "node:url";
-import {spawnSync,spawn,execFileSync} from "node:child_process";
+import {spawn,execFileSync} from "node:child_process";
 import {once} from "node:events";
 import {detectRunner} from "../packages/mutation-driver/runners.mjs";
 import {runMutation} from "../packages/core/index.mjs";
@@ -12,15 +13,14 @@ const repo=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const dependencies=join(repo,"tests/fixtures/runners/node_modules");
 const binary=process.env.ERRSPEC_BIN||join(repo,"target/debug/errspec");
 function project(t,runner="jest"){
-  const root=realpathSync(mkdtempSync(join(tmpdir(),"errspec-runner-")));
-  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const root=temporaryProject(t,"errspec-runner-");
+
   cpSync(join(repo,"tests/fixtures/runners",runner),root,{recursive:true});
   symlinkSync(dependencies,join(root,"node_modules"),"dir");
   return root;
 }
 function run(root,args=[],status=0){
-  const result=spawnSync(binary,["mutate","--node",process.execPath,"--format","json",...args],{cwd:root,encoding:"utf8",timeout:120000});
-  assert.equal(result.error,undefined,(result.error?.stack||"")+result.stderr+result.stdout);assert.equal(result.status,status,result.stderr+result.stdout);return JSON.parse(result.stdout);
+  return runJsonCommand(binary,["mutate","--node",process.execPath,"--format","json",...args],{cwd:root,encoding:"utf8",timeout:120000},status);
 }
 test("runner detection follows config precedence and explicit selections",t=>{
   const root=project(t);assert.equal(detectRunner(root),"jest");

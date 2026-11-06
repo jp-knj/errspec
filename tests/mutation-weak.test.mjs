@@ -1,17 +1,10 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  rmSync,
-  symlinkSync,
-  realpathSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import {writeFileSync} from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 import { attachWeakBinary } from "../packages/mutation-driver/weak-runtime.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const binary = process.env.ERRSPEC_BIN || join(repo, "target/debug/errspec");
@@ -72,9 +65,9 @@ test("weak probes evaluate operands and object coercions once and retain excepti
 });
 
 function project(t, tests) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "errspec-weak-")));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  mkdirSync(join(root, "src"));
+  const root = temporaryProject(t,"errspec-weak-");
+
+  prepareVitestProject(root,repo);
   writeFileSync(
     join(root, "src/value.ts"),
     "export function age(x:number){return x>=18;}",
@@ -87,12 +80,8 @@ function project(t, tests) {
     join(root, "vitest.config.mjs"),
     "export default {test:{include:['value.test.ts']}};",
   );
-  mkdirSync(join(root, "node_modules"));
-  symlinkSync(
-    join(repo, "examples/checkout/node_modules/vitest"),
-    join(root, "node_modules/vitest"),
-    "dir",
-  );
+
+
   return root;
 }
 function run(root, weak) {
@@ -106,14 +95,11 @@ function run(root, weak) {
     weak ? "--weak-mutation" : "--no-weak-mutation",
     ...families.flatMap((name) => ["--exclude-mutator", name]),
   ];
-  const result = spawnSync(binary, args, {
+  return runJsonCommand(binary,args,{
     cwd: root,
     encoding: "utf8",
     timeout: 60000,
-  });
-  assert.ifError(result.error);
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  return JSON.parse(result.stdout);
+  },0);
 }
 function greater(report) {
   return report.mutants.find(

@@ -1,18 +1,16 @@
+import {runJsonCommand,runCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { spawnSync } from "node:child_process";
 import { runInNewContext } from "node:vm";
 import { stripTypeScriptTypes } from "node:module";
 import { instrument, byteIndices } from "../packages/mutation-driver/emitter.mjs";
 
 const binary = process.env.ERRSPEC_BIN || new URL("../target/debug/errspec", import.meta.url).pathname;
 function generate(source,file="example.ts") {
-  const result=spawnSync(binary,["__mutation-source"],{input:JSON.stringify({source,file}),encoding:"utf8"});
-  assert.equal(result.status,0,result.stderr);return JSON.parse(result.stdout).candidates;
+  return runJsonCommand(binary,["__mutation-source"],{input:JSON.stringify({source,file}),encoding:"utf8"},0).candidates;
 }
 function validate(source,file="example.ts") {
-  const result=spawnSync(binary,["__mutation-source"],{input:JSON.stringify({source,file,validateOnly:true}),encoding:"utf8"});
-  assert.equal(result.status,0,result.stderr);
+  runCommand(binary,["__mutation-source"],{input:JSON.stringify({source,file,validateOnly:true}),encoding:"utf8"},0);
 }
 test("UTF-8 offsets map exactly to UTF-16 including BOM, emoji, and CRLF",()=>{
   const text="\uFEFF日本🧪\r\nx";const map=byteIndices(text);

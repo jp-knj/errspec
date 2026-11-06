@@ -1,10 +1,10 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import childProcess, {spawn,spawnSync,execFileSync,execSync} from 'node:child_process';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {pathToFileURL,fileURLToPath} from 'node:url';
+import {fileURLToPath} from 'node:url';
 import {observeChildProcesses} from '../packages/mutation-driver/child-process.mjs';
 import {runMutation,formatReport} from '../packages/core/index.mjs';
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=join(repo,'target/debug/errspec');
@@ -30,11 +30,11 @@ test('Node diagnostics observe async children, synchronous exports restore exact
   spawnSync(process.execPath,['-e','']);assert.equal(events.length,5);
 });
 function project(t) {
-  const root=realpathSync(mkdtempSync(join(tmpdir(),'errspec-child-report-')));
-  t.after(()=>rmSync(root,{recursive:true,force:true}));
-  mkdirSync(join(root,'src'));mkdirSync(join(root,'node_modules'));
+  const root=temporaryProject(t,"errspec-child-report-");
+
+  prepareVitestProject(root,repo);
   writeFileSync(join(root,'package.json'),JSON.stringify({type:'module',dependencies:{vitest:'5.0.5'}}));
-  symlinkSync(join(repo,'examples/checkout/node_modules/vitest'),join(root,'node_modules/vitest'),'dir');
+
   writeFileSync(join(root,'src/leaf.ts'),'export const value = 2 + 3;\n');
   writeFileSync(join(root,'src/effect.ts'),'export const enabled = true;\n');
   writeFileSync(join(root,'src/bridge.ts'),"export {value} from './leaf.ts'; import './effect.ts';\n");

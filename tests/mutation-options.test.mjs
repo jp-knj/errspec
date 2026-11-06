@@ -1,9 +1,10 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync, existsSync } from "node:fs";
+import {mkdtempSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync,existsSync} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import {join} from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import ts from "../packages/analysis-driver/node_modules/typescript6/lib/typescript.js";
@@ -12,19 +13,17 @@ import { defineConfig, runMutation } from "../packages/core/index.mjs";
 const repo=fileURLToPath(new URL("../",import.meta.url)), binary=join(repo,"target/debug/errspec");
 const sdk=pathToFileURL(join(repo,"packages/core/index.mjs")).href;
 function project(t) {
-  const root=realpathSync(mkdtempSync(join(tmpdir(),"errspec-options-")));
-  t.after(()=>rmSync(root,{recursive:true,force:true}));
-  mkdirSync(join(root,"src"));mkdirSync(join(root,"node_modules"));
-  symlinkSync(join(repo,"examples/checkout/node_modules/vitest"),join(root,"node_modules/vitest"),"dir");
+  const root=temporaryProject(t,"errspec-options-");
+
+  prepareVitestProject(root,repo);
+
   writeFileSync(join(root,"src/value.ts"),"export const yes=()=>true;");
   writeFileSync(join(root,"value.test.ts"),'import {test,expect} from "vitest";import {yes} from "./src/value";test("yes",()=>expect(yes()).toBeDefined());');
   writeFileSync(join(root,"vitest.config.mjs"),'export default {test:{include:["value.test.ts"]}};');
   return root;
 }
 function cli(root,args=[],code=0) {
-  const result=spawnSync(binary,["mutate","--node",process.execPath,"--format","json",...args],{cwd:root,encoding:"utf8",timeout:30000});
-  assert.ifError(result.error);assert.equal(result.status,code,result.stdout+result.stderr);
-  return JSON.parse(result.stdout);
+  return runJsonCommand(binary,["mutate","--node",process.execPath,"--format","json",...args],{cwd:root,encoding:"utf8",timeout:30000},code);
 }
 test("all five configuration formats use the same native validation and keep logs out of JSON",t=>{
   const root=project(t);

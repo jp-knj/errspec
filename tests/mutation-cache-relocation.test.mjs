@@ -1,14 +1,14 @@
+import {temporaryProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtempSync,mkdirSync,writeFileSync,cpSync,rmSync,symlinkSync,realpathSync,readFileSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {mkdirSync,writeFileSync,cpSync,symlinkSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {runMutation} from '../packages/core/index.mjs';
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=process.env.ERRSPEC_BIN||join(repo,'target/debug/errspec');
 function fixture(t,provided=false,localRunner=false){
- const base=realpathSync(mkdtempSync(join(tmpdir(),'errspec-cache-relocation-'))),a=join(base,'a'),b=join(base,'b');t.after(()=>rmSync(base,{recursive:true,force:true}));
+ const base=temporaryProject(t,"errspec-cache-relocation-"),a=join(base,'a'),b=join(base,'b');
  mkdirSync(join(a,'src'),{recursive:true});mkdirSync(join(a,'node_modules/fixturedep'),{recursive:true});
  if(localRunner)cpSync(join(repo,'examples/checkout/node_modules'),join(a,'node_modules'),{recursive:true,verbatimSymlinks:true});
  else symlinkSync(join(repo,'examples/checkout/node_modules/vitest'),join(a,'node_modules/vitest'),'dir');
@@ -22,8 +22,8 @@ function fixture(t,provided=false,localRunner=false){
  return {a,b,copy:()=>cpSync(a,b,{recursive:true,verbatimSymlinks:true})};
 }
 function run(root,args=[],extraEnv={}){
- const result=spawnSync(binary,['mutate','--node',process.execPath,'--format','json','--cache','--reuse-session',...args],{cwd:root,env:{...process.env,PWD:root,INIT_CWD:root,...extraEnv},encoding:'utf8',timeout:90000});
- assert.ifError(result.error);assert.equal(result.status,0,result.stderr+result.stdout);const report=JSON.parse(result.stdout);assert.equal(report.cache.disabledReason,undefined,JSON.stringify(report.cache));return report;
+ const report=runJsonCommand(binary,['mutate','--node',process.execPath,'--format','json','--cache','--reuse-session',...args],{cwd:root,env:{...process.env,PWD:root,INIT_CWD:root,...extraEnv},encoding:'utf8',timeout:90000});
+ assert.equal(report.cache.disabledReason,undefined,JSON.stringify(report.cache));return report;
 }
 test('opt-in relocation reuses results and probe evidence across checkout paths and rebinds current tests',{timeout:60000},t=>{
  const {a,b,copy}=fixture(t),cold=run(a,['--cache-relocation','-j','2']);copy();

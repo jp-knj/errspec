@@ -1,17 +1,17 @@
+import {temporaryProject,prepareVitestProject} from "./support/project.mjs";
+import {runJsonCommand} from "./support/cli.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {writeFileSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {spawnSync} from 'node:child_process';
 import {runMutation} from '../packages/core/index.mjs';
 const repo=fileURLToPath(new URL('../',import.meta.url)),binary=join(repo,'target/debug/errspec');
 const cache=['--cache','--cache-scope'],experiment=[...cache,'--experimental-callgraph'];
 function fixture(t,input=0,connected=false){
-  const root=realpathSync(mkdtempSync(join(tmpdir(),'errspec-callgraph-')));t.after(()=>rmSync(root,{recursive:true,force:true}));
-  mkdirSync(join(root,'src'));mkdirSync(join(root,'node_modules'));
-  symlinkSync(join(repo,'examples/checkout/node_modules/vitest'),join(root,'node_modules/vitest'),'dir');
+  const root=temporaryProject(t,"errspec-callgraph-");
+  prepareVitestProject(root,repo);
+
   writeFileSync(join(root,'package.json'),JSON.stringify({type:'module',dependencies:{vitest:'5.0.5'}}));
   writeFileSync(join(root,'src/input.ts'),`export function input(){return ${input};}\n`);
   writeFileSync(join(root,'src/cancel.ts'),connected?'import {input as read} from "./input";export function cancel(){return read()-read();}\n':'export function cancel(n:number){return n-n;}\n');
@@ -19,8 +19,7 @@ function fixture(t,input=0,connected=false){
   writeFileSync(join(root,'vitest.config.mjs'),'export default {test:{include:["value.test.ts"]}};');return root;
 }
 function run(root,args=[],code=0){
-  const r=spawnSync(binary,['mutate','--node',process.execPath,'--format','json',...args],{cwd:root,encoding:'utf8',timeout:60000});
-  assert.ifError(r.error);assert.equal(r.status,code,r.stdout+r.stderr);return JSON.parse(r.stdout);
+  return runJsonCommand(binary,['mutate','--node',process.execPath,'--format','json',...args],{cwd:root,encoding:'utf8',timeout:60000},code);
 }
 const arithmetic=report=>report.mutants.find(m=>m.mutator==='ArithmeticOperator');
 function edit(root,input){writeFileSync(join(root,'src/input.ts'),`export function input(){return ${input};}\n`);}
