@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { formatReport, runMutation, selectTests } from "../packages/core/index.mjs";
+import { exchangeNative } from "../packages/core/native-transport.mjs";
 
 const repo = fileURLToPath(new URL("../", import.meta.url));
 const binary = process.env.ERRSPEC_BIN || join(repo, "target/debug/errspec");
@@ -120,6 +121,25 @@ test("mutation and formatter retain their distinct stdout limits", { timeout: 18
   await assert.rejects(runMutation({ bytes: 65 * mib }, transport), /Mutation API output exceeds 64 MiB/);
   assert.equal((await formatReport({ bytes: 65 * mib }, {}, transport)).length, 65 * mib);
   await assert.rejects(formatReport({ bytes: 129 * mib }, {}, transport), /Formatter output exceeds 128 MiB/);
+});
+
+test("stdout limits count decoded UTF-8 bytes across split and malformed sequences", async t => {
+  const stream = fragments => probe(t, `for(const bytes of ${JSON.stringify(fragments.map(fragment => [...fragment]))}){await new Promise(resolve=>process.stdout.write(Buffer.from(bytes),resolve));await new Promise(resolve=>setTimeout(resolve,10));}`);
+  const receive = (transport, outputLimit) => exchangeNative({
+    ...transport, command: "__utf8-probe", input: "{}", label: "UTF-8 probe",
+    outputLimit, outputError: "Decoded output exceeded its limit",
+  });
+  const encoded = Buffer.from('{"value":"€😀"}');
+  const euro = encoded.indexOf(Buffer.from("€")), emoji = encoded.indexOf(Buffer.from("😀"));
+  const valid = stream([encoded.subarray(0, euro + 1), encoded.subarray(euro + 1, emoji + 2), encoded.subarray(emoji + 2)]);
+  assert.deepEqual((await receive(valid, encoded.length)).response, { value: "€😀" });
+  await assert.rejects(receive(valid, encoded.length - 1), /Decoded output exceeded its limit/);
+  const fragments = [Buffer.from('{"value":"'), Buffer.from([0xe2]), Buffer.from('"}')];
+  const raw = Buffer.concat(fragments), decodedBytes = Buffer.byteLength(raw.toString("utf8"));
+  assert.ok(decodedBytes > raw.length, "Malformed UTF-8 expands to a replacement character");
+  const malformed = stream(fragments);
+  assert.deepEqual((await receive(malformed, decodedBytes)).response, { value: "�" });
+  await assert.rejects(receive(malformed, raw.length), /Decoded output exceeded its limit/);
 });
 
 test("packed core includes its private transport and resolves the installed native launcher", t => {
