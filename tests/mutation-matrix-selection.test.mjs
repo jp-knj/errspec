@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,realpathSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {dirname,delimiter,join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {spawnSync} from "node:child_process";
 import {runMutation,selectTests,formatReport} from "../packages/core/index.mjs";
@@ -87,6 +87,45 @@ test('removed functions and changed functions with no eligible candidates select
  const removed=cli(root,'select-tests',['--since','HEAD']);assert.equal(removed.files.length,2);assert.match(removed.fallbackReason,/Removed source/);
  writeFileSync(path,'export const isPositive=(n:number)=>/* modified */n>0;\nexport const unobserved=()=>8;\n');
  const noCandidates=cli(root,'select-tests',['--since','HEAD','--exclude-mutator','ArrowFunction']);assert.equal(noCandidates.files.length,2);assert.match(noCandidates.fallbackReason,/no attributable/);
+});
+test('selection keeps module changes on shared function lines conservative without widening function-only edits',async t=>{
+ const cases=[
+  {name:'import before a function',before:"import {f} from './one'; export function a(){return f(1)}\nexport function b(){return f(2)}\n",after:"import {f} from './two'; export function a(){return f(1)}\nexport function b(){return f(2)}\n",module:true},
+  {name:'module expression before a function',before:'globalThis.convert=String; export function a(){return true}\nexport function b(){return globalThis.convert(1)}\n',after:'globalThis.convert=Boolean; export function a(){return true}\nexport function b(){return globalThis.convert(1)}\n',module:true},
+  {name:'mixed function and module declarations',before:'export const a=()=>true,convert=String;\nexport function b(){return convert(1)}\n',after:'export const a=()=>true,convert=Boolean;\nexport function b(){return convert(1)}\n',module:true},
+  {name:'removed import before a function',before:"import './side'; export function a(){return true}\nexport function b(){return String(globalThis.flag)}\n",after:'export function a(){return true}\nexport function b(){return String(globalThis.flag)}\n',module:true},
+  {name:'removed module statement before a function',before:"globalThis.flag='set'; export function a(){return true}\nexport function b(){return String(globalThis.flag)}\n",after:'export function a(){return true}\nexport function b(){return String(globalThis.flag)}\n',module:true},
+  {name:'removed module declaration beside a function',before:'export const a=()=>true,convert=String;\nexport function b(){return typeof convert}\n',after:'export const a=()=>true;\nexport function b(){return typeof convert}\n',module:true},
+  {name:'function body beside an unchanged import',before:"import {f} from './one'; export function a(){return f(1)}\nexport function b(){return f(2)}\n",after:"import {f} from './one'; export function a(){return f(2)}\nexport function b(){return f(2)}\n",module:false},
+  {name:'function body after an import line',before:"import {f} from './one';\nexport function a(){\nreturn f(1)\n}\nexport function b(){return f(2)}\n",after:"import {f} from './one';\nexport function a(){\nreturn f(2)\n}\nexport function b(){return f(2)}\n",module:false},
+  {name:'exported arrow function body',before:'export const a=()=>true;\nexport const b=()=>true;\n',after:'export const a=()=>!false;\nexport const b=()=>true;\n',module:false},
+ ];
+ for(const entry of cases)await t.test(entry.name,t=>{
+  const {root}=fixture(t),path=join(root,'src/value.ts');
+  writeFileSync(join(root,'src/one.ts'),'export const f=(n:number)=>n>0;\n');
+  writeFileSync(join(root,'src/two.ts'),'export const f=(n:number)=>n>=0;\n');
+  writeFileSync(join(root,'src/side.ts'),"globalThis.flag='set';\n");
+  writeFileSync(path,entry.before);
+  for(const name of ['a','b'])writeFileSync(join(root,`${name}.test.ts`),`import {test,expect} from 'vitest';import {${name}} from './src/value';test('${name}',()=>expect(Boolean(${name}())).toBe(true));`);
+  git(root,['add','.']);git(root,['-c','commit.gpgSign=false','-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-q','-m','shared source line']);
+  writeFileSync(path,entry.after);
+  const result=cli(root,'select-tests',['--since','HEAD']);assert.equal(result.runComplete,true);
+  if(entry.module){assert.deepEqual(new Set(result.files),new Set(['a.test.ts','b.test.ts','matrix.test.ts','other.test.ts']));assert.match(result.fallbackReason,/module/);}
+  else{assert.deepEqual(result.files,['a.test.ts']);assert.equal(result.fallbackReason,undefined);}
+ });
+});
+test('selection falls back for unavailable Git-base source and preserves cancellation during lookup',async t=>{
+ const executable=spawnSync('which',['git'],{encoding:'utf8'});assert.equal(executable.status,0,executable.stderr);
+ for(const interrupt of [false,true])await t.test(interrupt?'cancelled lookup':'unavailable source',t=>{
+  const {root,tracker}=fixture(t),wrappers=join(dirname(tracker),'bin');mkdirSync(wrappers);
+  writeFileSync(join(root,'src/positive.ts'),'export const isPositive=(n:number)=>/* changed scope */n>0;');
+  writeFileSync(join(wrappers,'git'),`#!${process.execPath}\nconst {spawnSync}=require('node:child_process');const args=process.argv.slice(2);if(args.includes('show')){${interrupt?"process.kill(process.ppid,'SIGINT');":''}process.exit(1)}const result=spawnSync(${JSON.stringify(executable.stdout.trim())},args,{stdio:'inherit'});process.exit(result.status??1);\n`,{mode:0o755});
+  const result=spawnSync(binary,['select-tests','--node',process.execPath,'--since','HEAD','--format','json'],{cwd:root,env:{...process.env,PATH:wrappers+delimiter+process.env.PATH},encoding:'utf8',timeout:60000,killSignal:'SIGKILL'});
+  assert.ifError(result.error);assert.equal(result.status,interrupt?130:0,result.stdout+result.stderr);
+  const report=JSON.parse(result.stdout);
+  if(interrupt){assert.equal(report.runComplete,false);assert.deepEqual(report.files,[]);}
+  else{assert.equal(report.runComplete,true);assert.deepEqual(new Set(report.files),new Set(['matrix.test.ts','other.test.ts']));assert.match(report.fallbackReason,/unavailable/);}
+ });
 });
 test('per-test retries and timeout outcomes remain incomplete matrix rows',t=>{
  const {root}=fixture(t);

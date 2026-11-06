@@ -1,13 +1,43 @@
 //! Ranked recommendations from current reachability; old kills are hints, never verdicts.
-use super::{Diagnostic, Execution, Mutant, selection::Changes};
+use super::{Diagnostic, Execution, Mutant, selection::Changes, syntax::Metadata};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+
+pub struct PreviousSource {
+    pub text: String,
+    pub metadata: Metadata,
+}
+
+fn module_source<'a>(facts: &Metadata, source: &'a str) -> Option<Vec<&'a str>> {
+    if !super::syntax::source_matches(facts, source) {
+        return None;
+    }
+    let mut functions: Vec<_> = facts
+        .scopes
+        .values()
+        .filter(|scope| scope.function)
+        .collect();
+    functions.sort_by_key(|scope| (scope.start, std::cmp::Reverse(scope.end)));
+    let mut parts = vec![];
+    let mut end = 0;
+    for function in functions {
+        if function.end <= end {
+            continue;
+        }
+        parts.push(source.get(end..function.start)?);
+        end = function.end;
+    }
+    parts.push(source.get(end..)?);
+    Some(parts)
+}
 
 /// Changed scopes without an observed candidate cannot justify omitting tests.
 pub fn fallback(
     changes: &Changes,
     mutants: &[Mutant],
-    metadata: &BTreeMap<String, super::syntax::Metadata>,
+    metadata: &BTreeMap<String, Metadata>,
+    sources: &BTreeMap<String, String>,
+    previous: &BTreeMap<String, PreviousSource>,
 ) -> Option<String> {
     for (file, ranges) in &changes.files {
         if super::selection::test_file(file) {
@@ -56,6 +86,20 @@ pub fn fallback(
                     return Some("Changed function has no attributable current mutation coverage; select every collected test file".into());
                 }
             }
+        }
+        let previous_module = previous
+            .get(file)
+            .and_then(|previous| module_source(&previous.metadata, &previous.text));
+        let current_module = sources
+            .get(file)
+            .and_then(|source| module_source(facts, source));
+        let Some((previous_module, current_module)) = previous_module.zip(current_module) else {
+            return Some(
+                "Git-base source or syntax is unavailable; select every collected test file".into(),
+            );
+        };
+        if previous_module != current_module {
+            return Some("Changed module-level source has no bounded function cohort; select every collected test file".into());
         }
     }
     None

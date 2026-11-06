@@ -78,6 +78,8 @@ moduleのimport／requireとpackage manifestはNodeのmodule hookで取得し、
 
 `select-tests --since`と`selectTests({since})`は、CLI解析を経由せず同じnative要求・設定解決・baseline／probe経路を使います。現在の収集test IDと到達記録を取得し、入力が一致したprobeだけ再利用します。変異trialは実行せず、予算・品質gate・weak絞込・型検査・shardを推薦へ適用しません。Git基準は必須で、function scopeの変更に対する現在のcoverageを順位付けします。過去のkillは現在のcovering test IDと一致したときだけhistorical hintとして先行させ、今回も検出できる証拠とはしません。削除されたtestは除き、変更test・helperや設定などinventory外の変更・削除行・module領域・観測できないfunctionは現在の全test fileへ戻します。削除だけのhunkはGit取得で事実として保持し、元scopeが消えた場合に隣接scopeだけへ限定しません。
 
+変更fileはGit基準の本文と構文も取得し、前後それぞれの関数scopeのbyte範囲を除いたmodule本文を比較します。同じ行に関数とimportやmoduleの文があっても、関数外の変更・削除を見落として隣の関数のcoverageだけへ推薦を絞りません。旧本文や構文を取得できない場合も全test fileへ戻します。
+
 選択結果は`errspec/test-selection`のJSONとfile一覧で提供し、変更testの未収集warningと保守的なfallback理由を残します。最後にも現在のsource／test inventoryを収集して、Gitが無視するfileがprobe中に追加された場合を含めて照合します。取得や最終照合が失敗した場合は未完了・exit 2とし、file推薦を空にします。
 
 `killMatrix`／`--kill-matrix`は全covering testの実行を要求し、`--no-kill-matrix`で設定を解除できます。adapterはcomplete取得能力を明示し、bailと全体retryを0にして遅い検出testも実行します。強制後の値をcache指紋にも使います。weak mutationの感染testだけへの絞込は行いません。nativeは全selected IDにstartedな通常pass／failがあり、module／runner error・timeout・native再試行・観測されたtest単位retry／repeatが無いことを確認してcompleteを付けます。未実行・予算・標本・未到達・取得不足はcomplete cellを作りません。runの入力照合を完了できなければ全rowのcompleteを解除します。
