@@ -1,6 +1,10 @@
 //! Conservative reuse over acquired, complete scope-entry and test-file cohorts.
 //! The acquiring adapter must establish envelope hashes and entry-probe ownership.
-use super::{Candidate, Execution, Mutant, cache::Record, syntax::Metadata};
+use super::{
+    Candidate, Execution, Mutant,
+    cache::Record,
+    syntax::{Metadata, scope_key},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,6 +34,8 @@ pub struct Context {
     pub candidates: BTreeMap<String, String>,
     /// Current stable test ID -> file; fresh probe acquisition is required.
     pub tests: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_calls: Option<super::callgraph::Graph>,
 }
 fn hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -38,9 +44,6 @@ pub struct Source<'a> {
     pub text: &'a str,
     pub metadata: &'a Metadata,
     pub candidates: &'a [Candidate],
-}
-fn owner_id(file: &str, owner: &str) -> String {
-    serde_json::to_string(&(file, owner)).unwrap()
 }
 
 /// Build a cohort from the current full probe. Module effects and all other
@@ -91,7 +94,7 @@ pub fn from_probe(
                 })
             });
             scopes.insert(
-                owner_id(file, name),
+                scope_key(file, name),
                 Scope {
                     file: file.clone(),
                     hash: if name == "module" {
@@ -121,7 +124,7 @@ pub fn from_probe(
                     .ok_or("Missing enclosing function or module")?;
             }
             if candidates
-                .insert(candidate.key.clone(), owner_id(file, owner))
+                .insert(candidate.key.clone(), scope_key(file, owner))
                 .is_some()
             {
                 return Err("Duplicate scope candidate key".into());
@@ -144,6 +147,7 @@ pub fn from_probe(
         scopes,
         candidates,
         tests,
+        static_calls: None,
     };
     if !context.valid() {
         return Err("Incomplete or invalid scope cache context".into());
@@ -154,6 +158,14 @@ impl Context {
     fn valid(&self) -> bool {
         let files = self.tests.values().collect::<BTreeSet<_>>();
         self.eligible
+            && self.static_calls.as_ref().is_none_or(|graph| {
+                graph.valid()
+                    && graph.matches_scopes(
+                        self.scopes
+                            .iter()
+                            .map(|(key, scope)| (key.as_str(), scope.file.as_str())),
+                    )
+            })
             && hash(&self.envelope)
             && !self.tests.is_empty()
             && self
@@ -195,7 +207,7 @@ enum Affected {
     All,
     Files(BTreeSet<String>),
 }
-fn affected(before: &Context, current: &Context) -> Affected {
+fn affected(before: &Context, current: &Context, experiment: Option<&str>) -> Affected {
     if before.scopes.keys().ne(current.scopes.keys()) {
         return Affected::All;
     }
@@ -214,11 +226,25 @@ fn affected(before: &Context, current: &Context) -> Affected {
         if old.opaque || new.opaque {
             return Affected::All;
         }
+        if let Some(owner) = experiment
+            && let (Some(previous), Some(now)) = (&before.static_calls, &current.static_calls)
+            && !previous.related(owner, name)
+            && !now.related(owner, name)
+        {
+            continue;
+        }
         files.extend(old_entry.files.iter().chain(&new_entry.files).cloned());
     }
     Affected::Files(files)
 }
 impl File {
+    fn mode(context: &Context) -> &'static str {
+        if context.static_calls.is_some() {
+            "all_tests_scope_entries_static_calls_v1"
+        } else {
+            "all_tests_scope_entries_v1"
+        }
+    }
     pub fn refreshed(self, context: Context) -> Option<Self> {
         let mut current = Self::new(context)?;
         // Carry unselected records only when their complete acquired context is
@@ -242,7 +268,7 @@ impl File {
         context.valid().then_some(Self {
             kind: "errspec/mutation-scope-results".into(),
             schema_version: 1,
-            acquisition_mode: "all_tests_scope_entries_v1".into(),
+            acquisition_mode: Self::mode(&context).into(),
             context,
             records: BTreeMap::new(),
         })
@@ -276,9 +302,27 @@ impl File {
         true
     }
     pub fn reuse(&self, current: &Context, mutant: &mut Mutant, selected: &[String]) -> bool {
+        self.reuse_inner(current, mutant, selected, false)
+    }
+    pub fn reuse_with_static_calls(
+        &self,
+        current: &Context,
+        mutant: &mut Mutant,
+        selected: &[String],
+    ) -> bool {
+        self.reuse_inner(current, mutant, selected, true)
+    }
+    fn reuse_inner(
+        &self,
+        current: &Context,
+        mutant: &mut Mutant,
+        selected: &[String],
+        experimental: bool,
+    ) -> bool {
         if self.kind != "errspec/mutation-scope-results"
             || self.schema_version != 1
-            || self.acquisition_mode != "all_tests_scope_entries_v1"
+            || self.acquisition_mode != Self::mode(current)
+            || self.acquisition_mode != Self::mode(&self.context)
             || !self.context.valid()
             || !current.valid()
             || self.context.envelope != current.envelope
@@ -295,6 +339,9 @@ impl File {
         let Some(record) = self.records.get(&mutant.candidate.key) else {
             return false;
         };
+        if experimental && (!record.outcome.survived() || current.static_calls.is_none()) {
+            return false;
+        }
         if &record.owner != owner
             || self.context.candidates.get(&mutant.candidate.key) != Some(owner)
             || record.hash != scope.hash
@@ -311,7 +358,11 @@ impl File {
         {
             return false;
         }
-        match affected(&self.context, current) {
+        match affected(
+            &self.context,
+            current,
+            experimental.then_some(owner.as_str()),
+        ) {
             Affected::All => false,
             Affected::Files(files) => {
                 let changed = !files.is_empty()

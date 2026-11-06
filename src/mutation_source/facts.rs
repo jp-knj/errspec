@@ -275,5 +275,7 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect(),
         nodes,
+        calls: rules.calls.clone(),
+        imports: callgraph::imports(rules),
     }
 }

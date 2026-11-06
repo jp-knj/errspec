@@ -187,6 +187,11 @@ struct MutationArgs {
     cache_scope: bool,
     #[arg(long)]
     no_cache_scope: bool,
+    /// Experimental survivor reuse through a static graph; may miss value flow through tests.
+    #[arg(long, conflicts_with = "no_experimental_callgraph")]
+    experimental_callgraph: bool,
+    #[arg(long)]
+    no_experimental_callgraph: bool,
     #[arg(long)]
     no_cache: bool,
     #[arg(long)]
@@ -390,6 +395,8 @@ impl Cli {
                     no_cache_relocation: _,
                     cache_scope,
                     no_cache_scope: _,
+                    experimental_callgraph,
+                    no_experimental_callgraph: _,
                     no_cache: _,
                     cache_dir,
                     full_dry_run,
@@ -435,6 +442,7 @@ impl Cli {
                             cache,
                             cache_relocation,
                             cache_scope,
+                            experimental_callgraph,
                             cache_dir,
                             full_dry_run,
                             typecheck_project,

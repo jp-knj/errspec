@@ -32,9 +32,13 @@ function start(root,native=binary,environment={}){
  return {child,done};
 }
 async function until(predicate,message,timeout=12000){const end=Date.now()+timeout;while(!predicate()&&Date.now()<end)await delay(10);assert.ok(predicate(),message);}
-function running(pid){
- try{process.kill(pid,0);if(process.platform==='linux'&&existsSync(`/proc/${pid}/stat`)&&/\) Z /.test(readFileSync(`/proc/${pid}/stat`,'utf8')))return false;return true;}catch(error){if(error.code==='ESRCH')return false;throw error;}
+function running(pid,readStat=readFileSync,platform=process.platform){
+ try{process.kill(pid,0);if(platform==='linux'&&/\) Z /.test(readStat(`/proc/${pid}/stat`,'utf8')))return false;return true;}catch(error){if(error.code==='ESRCH'||error.code==='ENOENT')return false;throw error;}
 }
+test('a process disappearing between kill(0) and reading proc is already stopped',()=>{
+ assert.equal(running(process.pid,()=>{throw Object.assign(new Error('process exited'),{code:'ENOENT'});},'linux'),false);
+ assert.throws(()=>running(process.pid,()=>{throw Object.assign(new Error('permission denied'),{code:'EACCES'});},'linux'),{code:'EACCES'});
+});
 function record(owner){
  for(const name of readdirSync(registry)){
   if(!/^[a-f0-9]{32}\.json$/.test(name))continue;
