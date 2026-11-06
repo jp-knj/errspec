@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSyn
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { runChild } from "./process-runner.mjs";
 // These helpers execute inside the project's Jest process. They acquire facts;
 // native Rust alone decides whether a mutation was detected.
@@ -44,58 +45,68 @@ function environment(Base,attachWeakBinary,load) {
   const {join,relative}=load("node:path");
   const {createHash}=load("node:crypto");
   return class extends Base {
-    constructor(config,context){super(config,context);this.file=context.testPath;}
+    #file; #state; #data; #active; #concurrent=false; #stopObserving; #identities=new WeakMap();
+    constructor(config,context){super(config,context);this.#file=context.testPath;}
     async setup(){
-      await super.setup();
-      this.state=JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE,"utf8"));
-      this.data={runId:this.state.context.runId,requestId:this.state.context.requestId,phase:this.state.phase,file:this.file,tests:[],hits:{},staticHits:{}};
-      const self=this,ctx=this.state.context;
+      this.#state=JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE,"utf8"));
+      this.#data={runId:this.#state.context.runId,requestId:this.#state.context.requestId,phase:this.#state.phase,file:this.#file,tests:[],hits:{},staticHits:{}};
+      const {observeChildProcesses}=await import(this.#state.nodeObserver);
+      this.#stopObserving=observeChildProcesses(fact=>{
+        const taskId=this.#active&&!this.#concurrent?this.#identities.get(this.#active.test)?.id:null;
+        (this.#data.childProcesses||=[]).push({...fact,taskId:taskId||null});
+      });
+      try{await super.setup();}catch(error){this.#stopObserving();throw error;}
+      const self=this,ctx=this.#state.context;
       const record=this.global[Symbol.for(`errspec.mutation.${ctx.runId}`)]=key=>{
-        const count=self.data.hits[key]=(self.data.hits[key]||0)+1;
-        if(self.active&&!self.concurrent){self.active.hits[key]=(self.active.hits[key]||0)+1;}
-        else self.data.staticHits[key]=true;
+        const count=self.#data.hits[key]=(self.#data.hits[key]||0)+1;
+        if(self.#active&&!self.#concurrent){self.#active.hits[key]=(self.#active.hits[key]||0)+1;}
+        else self.#data.staticHits[key]=true;
         if(key===ctx.activeKey&&count>ctx.hitLimit){const e=new Error("ERRSPEC_HIT_LIMIT");e.name="ErrspecHitLimitError";throw e;}
         return key===ctx.activeKey;
       };
-      if(ctx.weakMutation)attachWeakBinary(record,key=>{if(self.active&&!self.concurrent)self.active.infected[key]=true;},ctx.activeKey);
+      if(ctx.weakMutation)attachWeakBinary(record,key=>{if(self.#active&&!self.#concurrent)self.#active.infected[key]=true;},ctx.activeKey);
     }
     async handleTestEvent(event,state){
       if(super.handleTestEvent)await super.handleTestEvent(event,state);
       const t=event.test;
       // Jest's formatted JSON drops testExecError while retaining passed tests.
       // Preserve suite/global errors from the worker before that formatting.
-      if(event.name==="run_finish")this.data.moduleErrors=state.unhandledErrors.map(e=>String(e?.[0]?.stack||e?.stack||e));
+      if(event.name==="run_finish")this.#data.moduleErrors=state.unhandledErrors.map(e=>String(e?.[0]?.stack||e?.stack||e));
       if(event.name==="run_start"){
-        if(this.state.context.complete){
+        if(this.#state.context.complete){
           this.global[Symbol.for("RETRY_TIMES")]=0;
         }
-        const counts=new Map(),selected=this.state.selected;
-        const file=relative(this.state.root,this.file).replaceAll("\\","/");
-        const walk=node=>{if(this.state.context.complete)state.describeRetryOptions?.delete(node);for(const child of node.children||[]){if(child.type==="test"){
+        const counts=new Map(),selected=this.#state.selected;let order=0;
+        const file=relative(this.#state.root,this.#file).replaceAll("\\","/");
+        const walk=node=>{if(this.#state.context.complete)state.describeRetryOptions?.delete(node);for(const child of node.children||[]){if(child.type==="test"){
           const names=[];for(let n=child;n&&n.name!=="ROOT_DESCRIBE_BLOCK";n=n.parent)names.unshift(n.name);
           const name=names.join(" "),occurrence=counts.get(name)||0;counts.set(name,occurrence+1);
-          child.errspec={id:JSON.stringify(["",file,name,occurrence]),order:counts.size};
-          if(selected.length&&!selected.includes(child.errspec.id))child.mode="skip";
-          if(child.concurrent)this.concurrent=true;
+          const identity={id:JSON.stringify(["",file,name,occurrence]),order:order++};this.#identities.set(child,identity);
+          if(selected.length&&!selected.includes(identity.id))child.mode="skip";
+          if(child.concurrent)this.#concurrent=true;
         }else walk(child);}};walk(state.rootDescribeBlock);
       }
-      if(event.name==="test_start"){
-        this.active={test:t,hits:{},infected:{}};
+      if(event.name==="test_started"){
+        this.#active={test:t,hits:{},infected:{}};
         if(process.send)process.send({errspec:"testStart"});
       }
       if(["test_done","test_skip","test_todo"].includes(event.name)){
         const names=[];for(let n=t;n&&n.name!=="ROOT_DESCRIBE_BLOCK";n=n.parent)names.unshift(n.name);
-        const meta=this.active?.test===t?this.active:{hits:{},infected:{}};
-        if(this.state.context.complete&&(t.invocations>1||t.repeatCount>0))this.data.acquisitionIncomplete="Jest repeated or retried a selected test";
-        const result={id:t.errspec.id,order:t.errspec.order,name:names.join(" "),status:event.name==="test_skip"?"skipped":event.name==="test_todo"?"pending":t.errors.length?"failed":"passed",started:event.name==="test_done",duration:t.duration||0,errors:t.errors.map(e=>String(e?.[0]?.stack||e?.stack||e)),hits:meta.hits,infected:Object.keys(meta.infected)};
-        const index=this.data.tests.findIndex(t=>t.id===result.id);
-        if(index>=0)this.data.tests[index]=result;else this.data.tests.push(result);
-        this.active=undefined;
+        const meta=this.#active?.test===t?this.#active:{hits:{},infected:{}};
+        if(this.#state.context.matrix&&(t.invocations>1||t.repeatCount>0))this.#data.acquisitionIncomplete="Jest repeated or retried a selected test";
+        const identity=this.#identities.get(t);
+        const result={id:identity.id,order:identity.order,name:names.join(" "),status:event.name==="test_skip"?"skipped":event.name==="test_todo"?"pending":t.errors.length?"failed":"passed",started:event.name==="test_done",duration:t.duration||0,errors:t.errors.map(e=>String(e?.[0]?.stack||e?.stack||e)),hits:meta.hits,infected:Object.keys(meta.infected)};
+        const index=this.#data.tests.findIndex(t=>t.id===result.id);
+        if(index>=0)this.#data.tests[index]=result;else this.#data.tests.push(result);
+        this.#active=undefined;
       }
     }
     async teardown(){
-      try{writeFileSync(join(this.state.output,createHash("sha256").update(this.file).digest("hex")+".json"),JSON.stringify(this.data));}
-      finally{await super.teardown();}
+      try{await super.teardown();}
+      finally{
+        this.#stopObserving?.();
+        writeFileSync(join(this.#state.output,createHash("sha256").update(this.#file).digest("hex")+".json"),JSON.stringify(this.#data));
+      }
     }
   };
 }
@@ -133,7 +144,8 @@ export async function createJestAdapter(ctx) {
     const stateFile=join(directory,"state.json"),reportFile=join(directory,"report.json");
     rmSync(reportFile,{force:true});
     writeFileSync(stateFile,JSON.stringify({root,phase,toolTemp:realpathSync(options.toolTemp),transforms:normalized.transform,output,selected:request.selected||[],
-      context:{runId:ctx.runId,requestId:request.requestId,activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER,weakMutation:options.weakMutation,complete:!!request.complete},
+      nodeObserver:pathToFileURL(join(options.toolTemp,"child-process.mjs")).href,
+      context:{matrix:!!options.killMatrix,runId:ctx.runId,requestId:request.requestId,activeKey:request.key||null,hitLimit:request.hitLimit||Number.MAX_SAFE_INTEGER,weakMutation:options.weakMutation,complete:!!request.complete},
       inventory:Object.fromEntries([...inventory].map(([file,entry])=>[file,{source:entry.source,code:phase==="plain"?entry.source:entry.emitted.code}]))}));
     const selectedFiles=request.selected?.length?[...new Set(request.selected.map(id=>{const test=baseline.tests.find(t=>t.id===id);if(!test)throw failure("EC_MUTATION_PROTOCOL",`Unknown test ID: ${id}`);return resolve(root,test.file);}))]:files;
     const outcome=await runChild(["--experimental-vm-modules",cli,"--config",configFile,"--ci","--runInBand","--json","--outputFile",reportFile,"--testTimeout",String((normalized.testTimeout||5000)*(request.multiplier||1)),"--runTestsByPath",...selectedFiles],
@@ -151,11 +163,13 @@ export async function createJestAdapter(ctx) {
         if(data.acquisitionIncomplete)execution.acquisitionIncomplete=data.acquisitionIncomplete;
         moduleErrors=data.moduleErrors||[];
         for(const test of data.tests.sort((a,b)=>a.order-b.order)){delete test.order;execution.tests.push({...test,taskId:test.id,file:name});}
+        ctx.recordChildProcesses(execution,name,data.childProcesses||[]);
         for(const [key,count]of Object.entries(data.hits))execution.hits[key]=(execution.hits[key]||0)+count;
         for(const key of Object.keys(data.staticHits))(execution.staticHits[key]||=[]).push(name);
       }else if(fileResult.assertionResults.length)throw failure("EC_MUTATION_PROTOCOL",`Jest worker did not provide mutation metadata: ${name}`);
       if(moduleErrors.length||fileResult.testExecError||fileResult.status==="failed"&&!fileResult.assertionResults.some(test=>test.status==="failed")){execution.failedModules.push(name);execution.errors.push(...(moduleErrors.length?moduleErrors:[`Jest native ESM module failed: ${fileResult.message||name}`]));}
     }
+    execution.tests.sort((a,b)=>a.file<b.file?-1:a.file>b.file?1:0);
     if(report.runExecError)execution.errors.push(String(report.runExecError));
     if((report.success===false||outcome.code!==0)&&!execution.failedModules.length&&!execution.errors.length&&!execution.tests.some(test=>test.status==="failed"))execution.errors.push(report.snapshot?.failure?"Jest snapshot validation failed":"Jest runner reported failure without a failed assertion");
     if(![0,1].includes(outcome.code))execution.errors.push(`Jest process terminated: ${outcome.code??outcome.signal}`);

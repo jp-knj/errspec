@@ -242,7 +242,16 @@ test("Jest metadata supports deeply nested real test paths",t=>{
 });
 test("Jest rejects worker metadata from another execution before assigning verdicts",t=>{
   const root=project(t);
-  writeFileSync(join(root,"custom-env.cjs"),'const {TestEnvironment}=require("jest-environment-node");const {readFileSync,writeFileSync,readdirSync}=require("node:fs");const {join}=require("node:path");module.exports=class extends TestEnvironment{async teardown(){const state=JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE,"utf8"));const file=join(state.output,readdirSync(state.output).find(name=>name.endsWith(".json")));const data=JSON.parse(readFileSync(file,"utf8"));data.runId="another-execution";writeFileSync(file,JSON.stringify(data));await super.teardown();}};');
+  writeFileSync(join(root,"custom-env.cjs"),'const {TestEnvironment}=require("jest-environment-node");const {readFileSync,writeFileSync,readdirSync}=require("node:fs");const {join}=require("node:path");module.exports=class extends TestEnvironment{async teardown(){process.once("exit",()=>{const state=JSON.parse(readFileSync(process.env.ERRSPEC_JEST_STATE,"utf8"));const file=join(state.output,readdirSync(state.output).find(name=>name.endsWith(".json")));const data=JSON.parse(readFileSync(file,"utf8"));data.runId="another-execution";writeFileSync(file,JSON.stringify(data));});await super.teardown();}};');
   writeFileSync(join(root,"jest.config.mjs"),'export default {testEnvironment:"<rootDir>/custom-env.cjs",transform:{},testMatch:["**/*.test.ts"],transformIgnorePatterns:["/node_modules/","/custom-env.cjs$"]};');
   const report=run(root,["--runner","jest"],2);assert.equal(report.diagnostics[0].code,"EC_MUTATION_PROTOCOL");assert.match(report.diagnostics[0].message,/Stale Jest worker metadata/);assert.equal(report.summary.killed,0);
+});
+
+test("Jest acquisition preserves custom environment state and reports all-skipped baselines honestly",t=>{
+  const root=project(t);
+  writeFileSync(join(root,"custom-env.cjs"),'const {TestEnvironment}=require("jest-environment-node");module.exports=class extends TestEnvironment{constructor(config,context){super(config,context);this.state={user:true};this.data={user:true};this.file="user-owned";}async setup(){if(!this.state.user||!this.data.user||this.file!=="user-owned")throw Error("custom state overwritten");await super.setup();}async teardown(){if(!this.state.user||!this.data.user||this.file!=="user-owned")throw Error("custom state overwritten");await super.teardown();}};');
+  writeFileSync(join(root,"jest.config.mjs"),'export default {testEnvironment:"<rootDir>/custom-env.cjs",transform:{},testMatch:["**/*.test.ts"],transformIgnorePatterns:["/node_modules/","/custom-env.cjs$"]};');
+  const report=run(root,["--runner","jest"]);assert.equal(report.runComplete,true);assert.ok(report.summary.killed>0);
+  writeFileSync(join(root,"value.test.ts"),'import {test} from "@jest/globals";test.skip("skipped",()=>{});');
+  const skipped=run(root,["--runner","jest"],2);assert.equal(skipped.testsExecuted,false);assert.equal(skipped.diagnostics[0].code,"EC_MUTATION_BASELINE");
 });
