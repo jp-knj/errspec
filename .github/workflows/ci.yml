@@ -44,6 +44,7 @@ jobs:
         env:
           TESTKIT_ENTRY: ../packages/testkit/index.ts
       - run: node --test tests/package.test.mjs
+      - run: node --test tests/core-transport.test.mjs
       - run: node --test tests/vitest-recorder.test.mjs
       - run: node --test tests/analysis-driver.test.mjs
       - run: node --test tests/mutator-comparison.test.mjs

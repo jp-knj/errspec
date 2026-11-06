@@ -147,6 +147,8 @@ Configuration root is relative to the configuration file; its paths are relative
 
 CLI/API share `mutation::options::Options`. `@errspec/core` runMutation sends protocol-1 JSON directly to native execution, not CLI argument parsing. defineConfig/plugin helpers are typed identity functions; native code validates final input and judges. Configuration/quality failures return report plus exitCode; startup/invalid response rejects the Promise. Ship declarations/schema. Typecheck options are `--typecheck`, `--no-typecheck`, `--typecheck-project`, `--typecheck-package`, using mutation `--node`; semantic-analysis options remain separate.
 
+Core's private `native-transport.mjs` owns native binary resolution, JSON-compatible serialization, process I/O and bounded response acquisition. Each public API constructs its request and validates its response and exit status. Mutation/selection retain the 64-MiB response limit and AbortSignal interruption with SIGINT followed by SIGKILL after five seconds; formatting retains its 64-MiB request and 128-MiB response limits and force-stops overflowing output. Formatting has no cancellation transport option. Package the private module with the public entry without adding another public export.
+
 Validate internal version/run/request IDs, counts, duplicate/missing/mismatched candidates, diagnostics, and executed targets. Typecheck status stays in engine.typecheck plus acquired version facts. History binds fingerprints and acquisition mode and never becomes scenario history.
 
 ## Security, distribution, and alternatives

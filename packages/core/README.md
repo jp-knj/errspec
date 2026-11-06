@@ -29,6 +29,9 @@ binary, malformed responses, and process termination without a report reject.
 directory, explicit configuration file, AbortSignal, or locally built binary.
 Absent `binary`, it resolves the installed platform package through
 `@errspec/cli`. Cancellation interrupts native execution and its owned workers.
+Mutation and test-selection responses are bounded to 64 MiB of JSON. An aborted
+execution has five seconds to finish its native cleanup before forced termination;
+when native returns an interruption report, the API retains its exit code and report.
 
 ## Configuration
 
