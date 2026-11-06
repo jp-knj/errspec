@@ -12,9 +12,7 @@ import {runMutation} from "../packages/core/index.mjs";
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const dependencies=join(repo,"tests/fixtures/runners/node_modules");
 const binary=process.env.ERRSPEC_BIN||join(repo,"target/debug/errspec");
-function project(t,runner="jest"){
-  const root=temporaryProject(t,"errspec-runner-");
-
+function project(t,runner="jest",root=temporaryProject(t,"errspec-runner-")){
   cpSync(join(repo,"tests/fixtures/runners",runner),root,{recursive:true});
   symlinkSync(dependencies,join(root,"node_modules"),"dir");
   return root;
@@ -112,16 +110,17 @@ function browserProject(t,{projects=true,fixture=true}={}){
   if(!fixture)writeFileSync(join(root,"value.spec.mjs"),readFileSync(join(root,"value.spec.mjs"),"utf8").replace('@errspec/playwright','@playwright/test'));
   return root;
 }
-for(const runner of ["jest","playwright"])test(`${runner} rejects project manifest changes made by a passing baseline`,t=>{
-  const root=runner==="jest"?project(t):browserProject(t,{projects:false});
+for(const runner of ["jest","playwright"])test(`${runner} rejects ancestor lockfile changes made by a passing baseline`,t=>{
+  const workspace=temporaryProject(t,"errspec-runner-workspace-"),root=project(t,runner,join(workspace,"app"));
+  writeFileSync(join(workspace,"bun.lock"),JSON.stringify({lockfileVersion:1,workspaces:{}}));
   const source=runner==="jest"
-    ?'import {test,expect} from "@jest/globals";import {checked} from "./src/value.ts";import {appendFileSync} from "node:fs";test("manifest change",()=>{expect(checked(2)).toBe(3);appendFileSync(new URL("./package.json",import.meta.url),"\\n");});'
-    :'import {test,expect} from "@errspec/playwright";import {appendFileSync} from "node:fs";test("manifest change",async({page})=>{await page.goto("/");await page.waitForFunction(()=>typeof checked==="function");expect(await page.evaluate(()=>checked(2))).toBe(3);appendFileSync(new URL("./package.json",import.meta.url),"\\n");});';
+    ?'import {test,expect} from "@jest/globals";import {checked} from "./src/value.ts";import {appendFileSync} from "node:fs";test("manifest change",()=>{expect(checked(2)).toBe(3);appendFileSync(new URL("../bun.lock",import.meta.url),"\\n");});'
+    :'import {test,expect} from "@errspec/playwright";import {appendFileSync} from "node:fs";test("manifest change",async({page})=>{await page.goto("/");await page.waitForFunction(()=>typeof checked==="function");expect(await page.evaluate(()=>checked(2))).toBe(3);appendFileSync(new URL("../bun.lock",import.meta.url),"\\n");});';
   writeFileSync(join(root,runner==="jest"?"value.test.ts":"value.spec.mjs"),source);
   const report=run(root,["--runner",runner],2);
   assert.equal(report.runComplete,false);
   assert.equal(report.diagnostics[0].code,"EC_MUTATION_INPUT");
-  assert.match(report.diagnostics[0].message,/package\.json/);
+  assert.match(report.diagnostics[0].message,/bun\.lock/);
   assert.equal(report.summary.killed,0);
 });
 test("Playwright + Vite uses real browser fixtures and distinct configured project identities",t=>{
