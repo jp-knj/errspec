@@ -2,7 +2,6 @@ import { readFileSync, writeFileSync, realpathSync, existsSync, globSync, statSy
 import { basename, dirname, resolve, relative, join, isAbsolute, matchesGlob } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { format } from "node:util";
 import { serialize } from "node:v8";
@@ -14,6 +13,7 @@ import { registerSources, generatePluginSources, rememberProjectManifests } from
 import { detectRunner, resolvePackage } from "./runners.mjs";
 import { createJestAdapter } from "./jest.mjs";
 import { createPlaywrightAdapter } from "./playwright.mjs";
+import { nativeSource, nativeSources } from "./native-source.mjs";
 
 const protocolWrite = process.stdout.write.bind(process.stdout);
 // Config evaluation happens in this process, before Vitest redirects test logs.
@@ -54,19 +54,62 @@ function verifyInputs() {
       throw failure("EC_MUTATION_INPUT",`Input changed during mutation run: ${file}`);
   }
 }
-function native(source,file,validateOnly=false,pluginInputs={},facts=false) {
-  const result=spawnSync(options.binary,["__mutation-source"], {
-    input:JSON.stringify({source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation,arid:options.arid,aridCallees:options.aridCallees,facts:!!(facts || options.since || options.cache && options.cacheScope || options.plugins?.length),customMutators:mutationPlugins?.names,pluginAridCallees:mutationPlugins?.aridCallees,...pluginInputs,engineFingerprint:options.engineFingerprint}),
-    encoding:"utf8",maxBuffer:64*1024*1024,timeout:60000,
-  });
-  if(result.status!==0) throw failure(result.stderr?.startsWith("EC_MUTATION_INPUT:")?"EC_MUTATION_INPUT":"EC_MUTATION_INSTRUMENTATION",result.stderr||"Native parser failed");
-  try {return JSON.parse(result.stdout);} catch {throw failure("EC_MUTATION_PROTOCOL","Invalid native generator response");}
+function sourceRequest(source,file,validateOnly=false,pluginInputs={},facts=false) {
+  return {source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation,arid:options.arid,aridCallees:options.aridCallees,facts:!!(facts || options.since || options.cache && options.cacheScope || options.plugins?.length),customMutators:mutationPlugins?.names,pluginAridCallees:mutationPlugins?.aridCallees,...pluginInputs};
+}
+function native(...args) {
+  return nativeSource(options.binary,options.engineFingerprint,sourceRequest(...args));
 }
 async function generateSource(source,file,base) {
   if(!options.plugins?.length)return base??native(source,file);
   const acquired=base??native(source,file);
   const edits=await mutationPlugins.edits(source,file,acquired.metadata);
   return native(source,file,false,edits);
+}
+async function* preparedSources() {
+  const entries=[...inventory];
+  for(let start=0;start<entries.length;start+=8) {
+    let group=entries.slice(start,start+8),generationFailure;
+    const missing=group.filter(([file,entry])=>!pendingGenerated.has(file)&&!entry.generated);
+    if(!options.plugins?.length) {
+      const generated=nativeSources(options.binary,options.engineFingerprint,missing.map(([file,entry])=>sourceRequest(entry.source,rel(file))));
+      for(let index=0;index<missing.length;index++) {
+        if("Err" in generated[index]) {
+          generationFailure=failure("EC_MUTATION_INSTRUMENTATION",generated[index].Err);
+          group=group.slice(0,group.findIndex(([file])=>file===missing[index][0]));
+          break;
+        }
+        missing[index][1].generated=generated[index].Ok;
+      }
+    }
+    for(const [file,entry] of group) {
+      entry.generated=pendingGenerated.get(file)??entry.generated??await generateSource(entry.source,rel(file));
+      pendingGenerated.delete(file);
+      entry.candidates=entry.generated.candidates;
+      entry.critical=entry.generated.critical||[];
+      for(const c of entry.candidates)if(c.regex) {try{new RegExp(...c.regex);}catch{c.ignored="Regex replacement is invalid for the original flags";}}
+      entry.emitted=instrument(entry.source,entry.candidates,file,runId);
+    }
+    const validations=nativeSources(options.binary,options.engineFingerprint,group.map(([file,entry])=>sourceRequest(entry.emitted.code,rel(file),true)));
+    for(let index=0;index<group.length;index++) {
+      const [file,entry]=group[index];
+      if("Err" in validations[index]) {
+        // Reject an unsafe placement individually; valid rules in this file still run.
+        for(const c of entry.candidates.filter(c=>!c.ignored)) {
+          try {native(instrument(entry.source,[c],file,runId).code,rel(file),true);}
+          catch(error) {
+            if(error.code!=="EC_MUTATION_INSTRUMENTATION")throw error;
+            c.ignored="Switch placement is not valid in this syntax context";
+          }
+        }
+        entry.emitted=instrument(entry.source,entry.candidates,file,runId);
+        native(entry.emitted.code,rel(file),true);
+      }
+      const generated=entry.generated;delete entry.generated;
+      yield {file,entry,generated};
+    }
+    if(generationFailure)throw generationFailure;
+  }
 }
 function candidateFiles(excluded) {
   const patterns=options.include.length?options.include:["src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"];
@@ -445,24 +488,7 @@ async function handle(request) {
     if(plain.failedModules.length||plain.errors.length||!plain.tests.some(t=>t.started&&t.status==="passed")||plain.tests.some(t=>t.status==="failed"))
       throw failure("EC_MUTATION_BASELINE","Unmodified baseline failed or executed no tests");
     let count=0;
-    for(const [file,entry] of inventory) {
-      const generated=pendingGenerated.get(file) ?? entry.generated ?? await generateSource(entry.source,rel(file));
-      pendingGenerated.delete(file);
-      delete entry.generated;
-      entry.candidates=generated.candidates;
-      entry.critical=generated.critical||[];
-      for(const c of entry.candidates)if(c.regex) {try{new RegExp(...c.regex);}catch{c.ignored="Regex replacement is invalid for the original flags";}}
-      entry.emitted=instrument(entry.source,entry.candidates,file,runId);
-      try { native(entry.emitted.code,rel(file),true); }
-      catch(error) {
-        // Reject an unsafe placement individually; valid rules in this file still run.
-        for(const c of entry.candidates.filter(c=>!c.ignored)) {
-          try {native(instrument(entry.source,[c],file,runId).code,rel(file),true);}
-          catch {c.ignored="Switch placement is not valid in this syntax context";}
-        }
-        entry.emitted=instrument(entry.source,entry.candidates,file,runId);
-        native(entry.emitted.code,rel(file),true);
-      }
+    for await(const {file,entry,generated} of preparedSources()) {
       // Entry facts describe guards actually present in the accepted switch.
       // A placement rejected above supplies no entry observation.
       if(generated.metadata)for(const scope of Object.values(generated.metadata.scopes))

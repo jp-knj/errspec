@@ -69,6 +69,27 @@ Rust uses half-open UTF-8 byte ranges and shared `Location`. The driver scans co
 
 Reparse transformed text using the same ScriptKind before registration. Invalid emission is an instrumentation failure, never a kill. If an earlier Vite transform supplies text different from registered source, reject unsupported ordering/input change rather than guessing original positions.
 
+The shared driver batches pure source generation and emitted-text validation into
+one-shot native parser children. Each invocation handles at most eight requests;
+the driver splits at 1 MiB of serialized request input, except that an individually
+larger file keeps its existing isolated path. Compiler arenas die with the child,
+so batching does not introduce an unbounded persistent parser. The internal batch
+envelope authenticates the compiled engine fingerprint, preserves request order,
+and returns independent success/error results. The existing single-source entry
+and public CLI/JSON contracts remain unchanged.
+
+Every emitted file is still parsed. A syntax failure takes the existing individual
+placement checks, while engine/protocol failures stop acquisition. If aggregate
+output exceeds the 64 MiB transport buffer, retry files individually; a transport
+limit must not silently discard candidates. Plugin visitors keep their original
+per-source execution and input acquisition. This optimization changes neither
+ordinary/probe baselines nor cache eligibility or final input validation. The
+[emitter acceptance](../../../../../tests/mutation-emitter.test.mjs) compares full
+individual/batched results, mixed syntax failures, ordering, process counts, byte
+bounds, fingerprint failures and malformed responses. The reproducible
+[throughput benchmark](../../../../../scripts/benchmark-mutation-source.mjs)
+asserts complete result equality separately from runner wall time.
+
 ## Vitest acquisition and coverage
 
 Use Vitest 5's public `createVitest`, `globTestSpecifications`, `runTestSpecifications`, and result APIs. The initial validation baseline was 5.0.5; required APIs and major version are checked at startup. Current pinned adapter evidence is in [implementation status](../../implementation-status.md).

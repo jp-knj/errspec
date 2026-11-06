@@ -1,5 +1,10 @@
 //! Select and acquire semantic facts. Registration and propagation judgments stay in Rust.
-use crate::{failure_paths, scenario_source, tsrs_adapter::TsrsAdapter};
+use crate::{
+    failure_paths,
+    owned_process::{self, CaptureFailure, CaptureOptions},
+    scenario_source,
+    tsrs_adapter::TsrsAdapter,
+};
 use errspec::{
     discovery::ScanFacts,
     model::{AnalysisInfo, EntryRef, Finding, Source, TSRS_REVISION},
@@ -8,13 +13,14 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     fs::{self, File},
+    io::Read,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -293,18 +299,6 @@ struct Input<'a> {
     entries: &'a [EntryRequest],
 }
 
-// A dedicated process group owns both Node and the TypeScript 7 native API server.
-struct OwnedProcess(Child);
-impl Drop for OwnedProcess {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(-(self.0.id() as i32), libc::SIGKILL);
-        }
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 struct Interrupts(Vec<signal_hook::SigId>);
 impl Drop for Interrupts {
     fn drop(&mut self) {
@@ -361,8 +355,6 @@ fn invoke(
                 entries: &plan.entries,
             })?,
         )?;
-        let out = directory.path().join("stdout");
-        let err = directory.path().join("stderr");
         let interrupted = Arc::new(AtomicBool::new(false));
         let mut signals = Interrupts(vec![]);
         for number in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
@@ -378,52 +370,41 @@ fn invoke(
         }
         command
             .arg(directory.path().join("driver.mjs"))
-            .current_dir(root)
-            .stdin(File::open(input)?)
-            .stdout(Stdio::from(File::create(&out)?))
-            .stderr(Stdio::from(File::create(&err)?));
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        let mut child = OwnedProcess(command.spawn()?);
-        let start = Instant::now();
-        let status = loop {
-            if interrupted.load(Ordering::SeqCst) {
-                return Err("TypeScript analysis interrupted".into());
+            .current_dir(root);
+        let output = owned_process::capture_with_options(
+            &mut command,
+            CaptureOptions {
+                stdin: Stdio::from(File::open(input)?),
+                timeout: Duration::from_secs(300),
+                stdout_limit: 64 * 1024 * 1024,
+                stderr_limit: 4 * 1024 * 1024,
+                poll_interval: Duration::from_millis(20),
+            },
+            || interrupted.load(Ordering::SeqCst),
+        )
+        .map_err(|failure| -> Box<dyn std::error::Error> {
+            match failure {
+                CaptureFailure::Interrupted => "TypeScript analysis interrupted".into(),
+                CaptureFailure::TimedOut => {
+                    "TypeScript analysis timed out after 300 seconds".into()
+                }
+                CaptureFailure::OutputLimit => {
+                    "TypeScript analysis output exceeded its limit".into()
+                }
+                CaptureFailure::Io(error) => error.into(),
             }
-            if start.elapsed() > Duration::from_secs(300) {
-                return Err("TypeScript analysis timed out after 300 seconds".into());
-            }
-            if fs::metadata(&out)?.len() > 64 * 1024 * 1024
-                || fs::metadata(&err)?.len() > 4 * 1024 * 1024
-            {
-                return Err("TypeScript analysis output exceeded its limit".into());
-            }
-            if let Some(status) = child.0.try_wait()? {
-                break status;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        drop(child); // Reap any API workers even if Node failed to close them.
-        // Check again after exit, before allocating response buffers.
-        if fs::metadata(&out)?.len() > 64 * 1024 * 1024
-            || fs::metadata(&err)?.len() > 4 * 1024 * 1024
-        {
-            return Err("TypeScript analysis output exceeded its limit".into());
-        }
-        if !status.success() {
+        })?;
+        if !output.status.success() {
+            let mut stderr = String::new();
+            output.stderr.as_slice().read_to_string(&mut stderr)?;
             return Err(format!(
-                "TypeScript analysis exited {status}: {}",
-                fs::read_to_string(err)?
-                    .chars()
-                    .take(8000)
-                    .collect::<String>()
+                "TypeScript analysis exited {}: {}",
+                output.status,
+                stderr.chars().take(8000).collect::<String>()
             )
             .into());
         }
-        Ok(serde_json::from_slice(&fs::read(out)?)?)
+        Ok(serde_json::from_slice(&output.stdout)?)
     };
     run().map_err(|e| format!("TypeScript API backend failed: {e}; use --analysis-node for Node.js 22+ and --typescript-package for an installed compiler"))
 }
