@@ -10,6 +10,7 @@ import { instrument } from "./emitter.mjs";
 import { typecheckMutants } from "./typecheck.mjs";
 import { compilerInputs } from "./cache-inputs.mjs";
 import { loadPlugins } from "./plugins.mjs";
+import { registerSources, generatePluginSources, rememberProjectManifests } from "./source-inventory.mjs";
 import { detectRunner, resolvePackage } from "./runners.mjs";
 import { createJestAdapter } from "./jest.mjs";
 import { createPlaywrightAdapter } from "./playwright.mjs";
@@ -195,10 +196,9 @@ async function executeAdapter(phase,request) {
   for(const file of excluded)remember(file);
   const files=candidateFiles(excluded);
   if(phase==="plain") {
-    for(const file of files){inventory.set(file,{source:readFileSync(file,"utf8"),candidates:[]});remember(file);}
+    registerSources(inventory,files,remember);
     testSpecs=specs;
-    if(options.plugins?.length)for(const [file,entry] of inventory)
-      entry.generated=await generateSource(entry.source,rel(file));
+    if(options.plugins?.length)await generatePluginSources(inventory,generateSource,rel);
     for(const file of mutationPlugins.files)inventory.delete(file);
     // Adapters revalidate conservatively: all local source/test/config inputs
     // are immutable for this run, and unknown external inputs disable caching.
@@ -207,10 +207,7 @@ async function executeAdapter(phase,request) {
       if(!absolute.startsWith(toolTemp+"/")&&!absolute.includes("/.errspec/"))remember(absolute);
     }
     for(const file of globSync("**/.env*",{cwd:root,exclude:["**/node_modules/**","**/.git/**"]}))remember(resolve(root,file));
-    for(let dir=root;;dir=dirname(dir)){
-      for(const name of ["package.json","package-lock.json","bun.lock","bun.lockb","pnpm-lock.yaml","yarn.lock","tsconfig.json"])remember(join(dir,name));
-      if(dirname(dir)===dir)break;
-    }
+    rememberProjectManifests(root,remember);
   } else if(JSON.stringify(specs)!==JSON.stringify(testSpecs)||JSON.stringify(files)!==JSON.stringify([...inventory.keys()]))
     throw failure("EC_MUTATION_INPUT","Source or test file inventory changed during the run");
   if(phase==="inspect"){verifyInputs();return;}
@@ -306,18 +303,14 @@ async function execute(phase,request) {
     // Track all enumerated inputs before the plain baseline, including unimported files.
     if(phase==="plain") {
       const files=candidateFiles(excluded);
-      for(const file of files){const source=readFileSync(file,"utf8");inventory.set(file,{source,candidates:[]});remember(file);}
+      registerSources(inventory,files,remember);
       testSpecs=specIdentities(specs);
       for(const file of [...globSync("**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",{cwd:root,exclude:["**/node_modules/**"]})])remember(resolve(root,file));
       for(const file of globSync("**/*.snap",{cwd:root,exclude:["**/node_modules/**"]}))remember(resolve(root,file));
-      for(let dir=root;;dir=dirname(dir)) {
-        for(const name of ["package.json","package-lock.json","bun.lock","bun.lockb","pnpm-lock.yaml","yarn.lock","tsconfig.json"])remember(join(dir,name));
-        if(dirname(dir)===dir)break;
-      }
+      rememberProjectManifests(root,remember);
       // Plugin data must be observed before tests can modify it. Retain the
       // generated inventory so callbacks run once per source, including cache hits.
-      if(options.plugins?.length)for(const [file,entry] of inventory)
-        entry.generated=await generateSource(entry.source,rel(file));
+      if(options.plugins?.length)await generatePluginSources(inventory,generateSource,rel);
       // Async visitors may reveal additional plugin modules inside include globs.
       for(const file of mutationPlugins.files)inventory.delete(file);
     } else {

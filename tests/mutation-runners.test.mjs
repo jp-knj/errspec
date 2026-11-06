@@ -112,6 +112,18 @@ function browserProject(t,{projects=true,fixture=true}={}){
   if(!fixture)writeFileSync(join(root,"value.spec.mjs"),readFileSync(join(root,"value.spec.mjs"),"utf8").replace('@errspec/playwright','@playwright/test'));
   return root;
 }
+for(const runner of ["jest","playwright"])test(`${runner} rejects project manifest changes made by a passing baseline`,t=>{
+  const root=runner==="jest"?project(t):browserProject(t,{projects:false});
+  const source=runner==="jest"
+    ?'import {test,expect} from "@jest/globals";import {checked} from "./src/value.ts";import {appendFileSync} from "node:fs";test("manifest change",()=>{expect(checked(2)).toBe(3);appendFileSync(new URL("./package.json",import.meta.url),"\\n");});'
+    :'import {test,expect} from "@errspec/playwright";import {appendFileSync} from "node:fs";test("manifest change",async({page})=>{await page.goto("/");await page.waitForFunction(()=>typeof checked==="function");expect(await page.evaluate(()=>checked(2))).toBe(3);appendFileSync(new URL("./package.json",import.meta.url),"\\n");});';
+  writeFileSync(join(root,runner==="jest"?"value.test.ts":"value.spec.mjs"),source);
+  const report=run(root,["--runner",runner],2);
+  assert.equal(report.runComplete,false);
+  assert.equal(report.diagnostics[0].code,"EC_MUTATION_INPUT");
+  assert.match(report.diagnostics[0].message,/package\.json/);
+  assert.equal(report.summary.killed,0);
+});
 test("Playwright + Vite uses real browser fixtures and distinct configured project identities",t=>{
   const root=browserProject(t),report=run(root,["--runner","playwright","--weak-mutation"]);
   assert.equal(report.runComplete,true);assert.equal(report.engine.runner,"playwright");
