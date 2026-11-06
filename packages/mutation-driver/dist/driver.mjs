@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import { format } from "node:util";
 import { serialize } from "node:v8";
 
-// ../../../errspec-merge-20261106/packages/mutation-driver/node_modules/@jridgewell/sourcemap-codec/dist/sourcemap-codec.mjs
+// node_modules/@jridgewell/sourcemap-codec/dist/sourcemap-codec.mjs
 var comma = 44;
 var semicolon = 59;
 var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -118,7 +118,7 @@ function encode(decoded) {
   return writer.flush();
 }
 
-// ../../../errspec-merge-20261106/packages/mutation-driver/node_modules/magic-string/dist/index.mjs
+// node_modules/magic-string/dist/index.mjs
 var BitSet = class BitSet {
   constructor(arg) {
     this.bits = arg instanceof BitSet ? arg.bits.slice() : [];
