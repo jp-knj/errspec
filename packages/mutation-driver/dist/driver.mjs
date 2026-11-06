@@ -3,7 +3,6 @@ import { readFileSync as readFileSync6, writeFileSync as writeFileSync3, realpat
 import { basename, dirname as dirname5, resolve as resolve5, relative as relative2, join as join6, isAbsolute as isAbsolute2, matchesGlob } from "node:path";
 import { pathToFileURL as pathToFileURL5 } from "node:url";
 import { createHash as createHash2 } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { format } from "node:util";
 import { serialize } from "node:v8";
@@ -2810,6 +2809,69 @@ export default {...original,...project(original),globalSetup:[original.globalSet
   } };
 }
 
+// native-source.mjs
+import { spawnSync } from "node:child_process";
+var MAX_BUFFER = 64 * 1024 * 1024;
+var MAX_INPUT = 1024 * 1024;
+function failure(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+function invoke(binary, input, count = 1) {
+  const result = spawnSync(binary, ["__mutation-source"], {
+    input: JSON.stringify(input),
+    encoding: "utf8",
+    maxBuffer: MAX_BUFFER,
+    timeout: 60000 * count
+  });
+  if (result.error?.code === "ENOBUFS")
+    return;
+  if (result.status !== 0)
+    throw failure(result.stderr?.startsWith("EC_MUTATION_INPUT:") ? "EC_MUTATION_INPUT" : "EC_MUTATION_INSTRUMENTATION", result.stderr || result.error?.message || "Native parser failed");
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    throw failure("EC_MUTATION_PROTOCOL", "Invalid native generator response");
+  }
+}
+function nativeSource(binary, engineFingerprint, request) {
+  const result = invoke(binary, { ...request, engineFingerprint });
+  if (result === undefined)
+    throw failure("EC_MUTATION_INSTRUMENTATION", "Native parser response exceeded buffer limit");
+  return result;
+}
+function nativeSources(binary, engineFingerprint, requests) {
+  const results = [];
+  for (let start = 0;start < requests.length; ) {
+    let end = start, bytes = 0;
+    while (end < requests.length && end - start < 8) {
+      const size = Buffer.byteLength(JSON.stringify(requests[end]));
+      if (end > start && bytes + size > MAX_INPUT)
+        break;
+      bytes += size;
+      end++;
+    }
+    const group = requests.slice(start, end);
+    let acquired;
+    if (group.length > 1)
+      acquired = invoke(binary, { requests: group, engineFingerprint }, group.length);
+    if (acquired === undefined)
+      acquired = group.map((request) => {
+        try {
+          return { Ok: nativeSource(binary, engineFingerprint, request) };
+        } catch (error) {
+          if (error.code === "EC_MUTATION_INPUT" || error.code === "EC_MUTATION_PROTOCOL")
+            throw error;
+          return { Err: error.message };
+        }
+      });
+    if (!Array.isArray(acquired) || acquired.length !== group.length || acquired.some((value) => !value || typeof value !== "object" || Object.keys(value).length !== 1 || !(typeof value.Err === "string" || value.Ok && Array.isArray(value.Ok.candidates))))
+      throw failure("EC_MUTATION_PROTOCOL", "Invalid native batch response");
+    results.push(...acquired);
+    start = end;
+  }
+  return results;
+}
+
 // driver.mjs
 var protocolWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = (chunk, encoding, cb) => process.stderr.write(chunk, encoding, cb);
@@ -2848,7 +2910,7 @@ var relocatedPath = (path) => {
   const name = rel(path);
   return name !== ".." && !name.startsWith("../") && !isAbsolute2(name) ? { projectRootRelativePath: name } : path;
 };
-function failure(code, message) {
+function failure2(code, message) {
   const e = new Error(message);
   e.code = code;
   return e;
@@ -2859,31 +2921,22 @@ function remember(file, content) {
   file = realpathSync6(file);
   const next = hash(readFileSync6(file));
   if (content !== undefined && hash(content) !== next)
-    throw failure("EC_MUTATION_INPUT", `Input changed while being acquired: ${file}`);
+    throw failure2("EC_MUTATION_INPUT", `Input changed while being acquired: ${file}`);
   if (fingerprints.has(file) && fingerprints.get(file) !== next)
-    throw failure("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
+    throw failure2("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
   fingerprints.set(file, next);
 }
 function verifyInputs() {
   for (const [file, digest] of fingerprints) {
     if (!existsSync6(file) || hash(readFileSync6(file)) !== digest)
-      throw failure("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
+      throw failure2("EC_MUTATION_INPUT", `Input changed during mutation run: ${file}`);
   }
 }
-function native(source, file, validateOnly = false, pluginInputs = {}, facts = false) {
-  const result = spawnSync(options.binary, ["__mutation-source"], {
-    input: JSON.stringify({ source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation, arid: options.arid, aridCallees: options.aridCallees, facts: !!(facts || options.since || options.cache && options.cacheScope || options.plugins?.length), customMutators: mutationPlugins?.names, pluginAridCallees: mutationPlugins?.aridCallees, ...pluginInputs, engineFingerprint: options.engineFingerprint }),
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    timeout: 60000
-  });
-  if (result.status !== 0)
-    throw failure(result.stderr?.startsWith("EC_MUTATION_INPUT:") ? "EC_MUTATION_INPUT" : "EC_MUTATION_INSTRUMENTATION", result.stderr || "Native parser failed");
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    throw failure("EC_MUTATION_PROTOCOL", "Invalid native generator response");
-  }
+function sourceRequest(source, file, validateOnly = false, pluginInputs = {}, facts = false) {
+  return { source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation, arid: options.arid, aridCallees: options.aridCallees, facts: !!(facts || options.since || options.cache && options.cacheScope || options.plugins?.length), customMutators: mutationPlugins?.names, pluginAridCallees: mutationPlugins?.aridCallees, ...pluginInputs };
+}
+function native(...args) {
+  return nativeSource(options.binary, options.engineFingerprint, sourceRequest(...args));
 }
 async function generateSource(source, file, base) {
   if (!options.plugins?.length)
@@ -2891,6 +2944,61 @@ async function generateSource(source, file, base) {
   const acquired = base ?? native(source, file);
   const edits = await mutationPlugins.edits(source, file, acquired.metadata);
   return native(source, file, false, edits);
+}
+async function* preparedSources() {
+  const entries = [...inventory];
+  for (let start = 0;start < entries.length; start += 8) {
+    let group = entries.slice(start, start + 8), generationFailure;
+    const missing = group.filter(([file, entry]) => !pendingGenerated.has(file) && !entry.generated);
+    if (!options.plugins?.length) {
+      const generated = nativeSources(options.binary, options.engineFingerprint, missing.map(([file, entry]) => sourceRequest(entry.source, rel(file))));
+      for (let index = 0;index < missing.length; index++) {
+        if ("Err" in generated[index]) {
+          generationFailure = failure2("EC_MUTATION_INSTRUMENTATION", generated[index].Err);
+          group = group.slice(0, group.findIndex(([file]) => file === missing[index][0]));
+          break;
+        }
+        missing[index][1].generated = generated[index].Ok;
+      }
+    }
+    for (const [file, entry] of group) {
+      entry.generated = pendingGenerated.get(file) ?? entry.generated ?? await generateSource(entry.source, rel(file));
+      pendingGenerated.delete(file);
+      entry.candidates = entry.generated.candidates;
+      entry.critical = entry.generated.critical || [];
+      for (const c of entry.candidates)
+        if (c.regex) {
+          try {
+            new RegExp(...c.regex);
+          } catch {
+            c.ignored = "Regex replacement is invalid for the original flags";
+          }
+        }
+      entry.emitted = instrument(entry.source, entry.candidates, file, runId);
+    }
+    const validations = nativeSources(options.binary, options.engineFingerprint, group.map(([file, entry]) => sourceRequest(entry.emitted.code, rel(file), true)));
+    for (let index = 0;index < group.length; index++) {
+      const [file, entry] = group[index];
+      if ("Err" in validations[index]) {
+        for (const c of entry.candidates.filter((c) => !c.ignored)) {
+          try {
+            native(instrument(entry.source, [c], file, runId).code, rel(file), true);
+          } catch (error) {
+            if (error.code !== "EC_MUTATION_INSTRUMENTATION")
+              throw error;
+            c.ignored = "Switch placement is not valid in this syntax context";
+          }
+        }
+        entry.emitted = instrument(entry.source, entry.candidates, file, runId);
+        native(entry.emitted.code, rel(file), true);
+      }
+      const generated = entry.generated;
+      delete entry.generated;
+      yield { file, entry, generated };
+    }
+    if (generationFailure)
+      throw generationFailure;
+  }
 }
 function candidateFiles(excluded) {
   const patterns = options.include.length ? options.include : ["src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"];
@@ -2922,7 +3030,7 @@ function plugin(phase) {
     if (!entry || phase === "plain")
       return;
     if (code !== entry.source) {
-      infrastructureFailure = failure("EC_MUTATION_INSTRUMENTATION", `Source was transformed before mutation instrumentation: ${rel(file)}`);
+      infrastructureFailure = failure2("EC_MUTATION_INSTRUMENTATION", `Source was transformed before mutation instrumentation: ${rel(file)}`);
       throw infrastructureFailure;
     }
     return entry.emitted;
@@ -2991,7 +3099,7 @@ function recordModule(module, execution, request) {
     const id = JSON.stringify([projectName, moduleFile, test.fullName, occurrence]);
     const meta = test.meta().__errspecMutation;
     if (meta && (meta.runId !== runId || meta.requestId !== request.requestId))
-      throw failure("EC_MUTATION_PROTOCOL", "Stale test metadata");
+      throw failure2("EC_MUTATION_PROTOCOL", "Stale test metadata");
     const result = test.result();
     if (options.killMatrix && (test.diagnostic()?.retryCount > 0 || test.diagnostic()?.repeatCount > 0))
       execution.acquisitionIncomplete = `Complete acquisition included a retried or repeated test: ${id}`;
@@ -3010,12 +3118,12 @@ function recordModule(module, execution, request) {
   }
   const meta = module.meta().__errspecMutation;
   if (!meta && execution.tests.some((t) => t.file === moduleFile && t.started))
-    throw failure("EC_MUTATION_PROTOCOL", "Test worker did not install the mutation runtime");
+    throw failure2("EC_MUTATION_PROTOCOL", "Test worker did not install the mutation runtime");
   if (meta) {
     if (options.weakMutation && meta.weakVersion !== 1)
-      throw failure("EC_MUTATION_PROTOCOL", "Worker does not support weak mutation");
+      throw failure2("EC_MUTATION_PROTOCOL", "Worker does not support weak mutation");
     if (meta.runId !== runId || meta.requestId !== request.requestId)
-      throw failure("EC_MUTATION_PROTOCOL", "Stale module metadata");
+      throw failure2("EC_MUTATION_PROTOCOL", "Stale module metadata");
     recordChildProcesses(execution, moduleFile, meta.childProcesses || []);
     for (const [key, count] of Object.entries(meta.hits))
       execution.hits[key] = (execution.hits[key] || 0) + count;
@@ -3039,7 +3147,7 @@ async function closeContext(ctx) {
   const failed = process.exitCode;
   process.exitCode = 0;
   if (failed)
-    throw failure("EC_MUTATION_RUNNER", "Vitest cleanup reported a failure; see stderr");
+    throw failure2("EC_MUTATION_RUNNER", "Vitest cleanup reported a failure; see stderr");
 }
 async function executeAdapter(phase, request) {
   verifyInputs();
@@ -3074,7 +3182,7 @@ async function executeAdapter(phase, request) {
         break;
     }
   } else if (JSON.stringify(specs) !== JSON.stringify(testSpecs) || JSON.stringify(files) !== JSON.stringify([...inventory.keys()]))
-    throw failure("EC_MUTATION_INPUT", "Source or test file inventory changed during the run");
+    throw failure2("EC_MUTATION_INPUT", "Source or test file inventory changed during the run");
   if (phase === "inspect") {
     verifyInputs();
     return;
@@ -3103,7 +3211,7 @@ async function execute(phase, request) {
   Object.assign(state, { request, execution, active: true });
   const active = () => {
     if (!state.active) {
-      state.failure = failure("EC_MUTATION_PROTOCOL", "Runner emitted an event outside its execution request");
+      state.failure = failure2("EC_MUTATION_PROTOCOL", "Runner emitted an event outside its execution request");
       return false;
     }
     return true;
@@ -3158,11 +3266,11 @@ async function execute(phase, request) {
     current = ctx;
     const projects = ctx.projects.filter((p) => !p.config.typecheck?.only);
     if (projects.length !== 1)
-      throw failure("EC_MUTATION_CONFIG", `Select exactly one Vitest project with --vitest-project: ${projects.map((p) => p.config.name || "<unnamed>").join(", ")}`);
+      throw failure2("EC_MUTATION_CONFIG", `Select exactly one Vitest project with --vitest-project: ${projects.map((p) => p.config.name || "<unnamed>").join(", ")}`);
     const project = projects[0];
     projectName = project.config.name || "";
     if (project.config.browser?.enabled)
-      throw failure("EC_MUTATION_CONFIG", "Vitest Browser Mode is not supported by mutate");
+      throw failure2("EC_MUTATION_CONFIG", "Vitest Browser Mode is not supported by mutate");
     const config = project.config;
     const rootProject = typeof ctx.getRootProject === "function" ? ctx.getRootProject() : undefined;
     if (options.reuseSession && phase !== "plain") {
@@ -3279,7 +3387,7 @@ async function execute(phase, request) {
     } else {
       const currentSpecs = specIdentities(specs);
       if (JSON.stringify(currentSpecs) !== JSON.stringify(testSpecs) || JSON.stringify(candidateFiles(excluded)) !== JSON.stringify([...inventory.keys()]))
-        throw failure("EC_MUTATION_INPUT", "Source or test file inventory changed during the run");
+        throw failure2("EC_MUTATION_INPUT", "Source or test file inventory changed during the run");
     }
     let planned = specs;
     if (execution.selected.length) {
@@ -3287,7 +3395,7 @@ async function execute(phase, request) {
       for (const id of execution.selected) {
         const base = baseline.tests.find((t) => t.id === id);
         if (!base)
-          throw failure("EC_MUTATION_PROTOCOL", `Unknown test ID: ${id}`);
+          throw failure2("EC_MUTATION_PROTOCOL", `Unknown test ID: ${id}`);
         const file = resolve5(root, base.file);
         (grouped.get(file) || grouped.set(file, []).get(file)).push(base.taskId);
       }
@@ -3316,7 +3424,7 @@ async function execute(phase, request) {
     return execution;
   } catch (error) {
     if (!ctx && !error.code?.startsWith("EC_MUTATION_"))
-      throw failure(phase === "plain" ? "EC_MUTATION_CONFIG" : "EC_MUTATION_RUNNER", error.stack || String(error));
+      throw failure2(phase === "plain" ? "EC_MUTATION_CONFIG" : "EC_MUTATION_RUNNER", error.stack || String(error));
     throw error;
   } finally {
     state.active = false;
@@ -3359,60 +3467,60 @@ async function acquireStaticImports(project) {
 }
 async function handle(request) {
   if (request.version !== PROTOCOL || typeof request.runId !== "string" || !Number.isSafeInteger(request.requestId))
-    throw failure("EC_MUTATION_PROTOCOL", "Invalid request envelope");
+    throw failure2("EC_MUTATION_PROTOCOL", "Invalid request envelope");
   if (runId && runId !== request.runId)
-    throw failure("EC_MUTATION_PROTOCOL", "Wrong run ID");
+    throw failure2("EC_MUTATION_PROTOCOL", "Wrong run ID");
   runId = request.runId;
   if (request.op === "open") {
     options = request.options;
     pendingGenerated.clear();
     if (Number(process.versions.node.split(".")[0]) < 24)
-      throw failure("EC_MUTATION_CONFIG", "mutate requires Node 24 or newer");
+      throw failure2("EC_MUTATION_CONFIG", "mutate requires Node 24 or newer");
     root = realpathSync6(options.root);
     toolTemp = realpathSync6(options.toolTemp || options.temp);
     mutationPlugins = await loadPlugins(options.plugins, root, remember, options.excludeMutator);
     try {
       runner = detectRunner(root, options);
     } catch (error) {
-      throw failure("EC_MUTATION_CONFIG", error.message);
+      throw failure2("EC_MUTATION_CONFIG", error.message);
     }
     if (!["vitest", "vite-plus"].includes(runner) && (options.vitestConfig || options.vitestPackage || options.vitestProject))
-      throw failure("EC_MUTATION_CONFIG", "Vitest options do not match the selected runner");
+      throw failure2("EC_MUTATION_CONFIG", "Vitest options do not match the selected runner");
     options.vitestConfig ??= options.runnerConfig;
     options.vitestProject ??= options.runnerProject;
     const packageName = { vitest: "vitest", "vite-plus": "vite-plus", jest: "jest", playwright: "@playwright/test" }[runner];
     try {
       packageDir = resolvePackage(root, packageName, options.runnerPackage || options.vitestPackage);
     } catch (error) {
-      throw failure("EC_MUTATION_CONFIG", error.message);
+      throw failure2("EC_MUTATION_CONFIG", error.message);
     }
     if (!packageDir)
-      throw failure("EC_MUTATION_CONFIG", `Cannot find ${packageName}; use --runner-package`);
+      throw failure2("EC_MUTATION_CONFIG", `Cannot find ${packageName}; use --runner-package`);
     const runnerVersion = JSON.parse(readFileSync6(join6(packageDir, "package.json"), "utf8")).version;
     if (runner === "vite-plus") {
       remember(join6(packageDir, "package.json"));
       const vitest = resolvePackage(packageDir, "vitest");
       if (!vitest)
-        throw failure("EC_MUTATION_CONFIG", "Vite+ must expose a compatible Vitest 5 installation");
+        throw failure2("EC_MUTATION_CONFIG", "Vite+ must expose a compatible Vitest 5 installation");
       packageDir = vitest;
     }
     const pkg = JSON.parse(readFileSync6(join6(packageDir, "package.json"), "utf8"));
     remember(join6(packageDir, "package.json"));
     if (["vitest", "vite-plus"].includes(runner)) {
       if (!/^5\./.test(pkg.version))
-        throw failure("EC_MUTATION_CONFIG", `mutate requires Vitest 5.x; found ${pkg.version}`);
+        throw failure2("EC_MUTATION_CONFIG", `mutate requires Vitest 5.x; found ${pkg.version}`);
       api = await import(pathToFileURL5(join6(packageDir, "dist/node.js")).href);
       const setup = readFileSync6(options.setup, "utf8").replace('"__VITEST_ENTRY__"', JSON.stringify(normalize(join6(packageDir, "dist/index.js"))));
       if (setup !== readFileSync6(options.setup, "utf8"))
         writeFileSync3(options.setup, setup);
     } else if (runner === "jest") {
       if (!/^30\./.test(pkg.version))
-        throw failure("EC_MUTATION_CONFIG", `mutate requires Jest 30.x native ESM; found ${pkg.version}`);
-      adapter = await createJestAdapter({ root, options, packageDir, remember, failure, rel, runId, recordChildProcesses, progress: (request) => send(request, "progress", { event: "testStart" }) });
+        throw failure2("EC_MUTATION_CONFIG", `mutate requires Jest 30.x native ESM; found ${pkg.version}`);
+      adapter = await createJestAdapter({ root, options, packageDir, remember, failure: failure2, rel, runId, recordChildProcesses, progress: (request) => send(request, "progress", { event: "testStart" }) });
     } else {
       if (!/^1\./.test(pkg.version))
-        throw failure("EC_MUTATION_CONFIG", `mutate requires Playwright Test 1.x; found ${pkg.version}`);
-      adapter = await createPlaywrightAdapter({ root, options, packageDir, remember, failure, rel, runId, inventory, recordChildProcesses, progress: (request) => send(request, "progress", { event: "testStart" }) });
+        throw failure2("EC_MUTATION_CONFIG", `mutate requires Playwright Test 1.x; found ${pkg.version}`);
+      adapter = await createPlaywrightAdapter({ root, options, packageDir, remember, failure: failure2, rel, runId, inventory, recordChildProcesses, progress: (request) => send(request, "progress", { event: "testStart" }) });
     }
     if (request.restore) {
       const saved = JSON.parse(readFileSync6(options.state, "utf8"));
@@ -3423,7 +3531,7 @@ async function handle(request) {
       const restoredInputs = new Map(saved.fingerprints);
       for (const [file, digest] of fingerprints)
         if (restoredInputs.get(file) !== digest)
-          throw failure("EC_MUTATION_INPUT", `Input closure changed while restoring worker: ${file}`);
+          throw failure2("EC_MUTATION_INPUT", `Input closure changed while restoring worker: ${file}`);
       inventory = new Map(saved.inventory);
       fingerprints = restoredInputs;
       verifyInputs();
@@ -3434,10 +3542,10 @@ async function handle(request) {
     return;
   }
   if (!options)
-    throw failure("EC_MUTATION_PROTOCOL", "Driver was not opened");
+    throw failure2("EC_MUTATION_PROTOCOL", "Driver was not opened");
   if (request.op === "prime") {
     if (!baseline)
-      throw failure("EC_MUTATION_PROTOCOL", "Missing restored worker baseline");
+      throw failure2("EC_MUTATION_PROTOCOL", "Missing restored worker baseline");
     const measured = await execute("probe", request);
     baseline = measured;
     send(request, "primed", { execution: measured, ...options.cache ? { cacheFacts: cacheFacts() } : {} });
@@ -3446,7 +3554,7 @@ async function handle(request) {
   }
   if (request.op === "cache-facts") {
     if (!options.cache)
-      throw failure("EC_MUTATION_PROTOCOL", "Result caching was not requested");
+      throw failure2("EC_MUTATION_PROTOCOL", "Result caching was not requested");
     verifyInputs();
     send(request, "done", { count: 0, cacheFacts: cacheFacts() });
     return;
@@ -3455,36 +3563,9 @@ async function handle(request) {
     plain = await execute("plain", request);
     send(request, "baseline", { execution: plain });
     if (plain.failedModules.length || plain.errors.length || !plain.tests.some((t) => t.started && t.status === "passed") || plain.tests.some((t) => t.status === "failed"))
-      throw failure("EC_MUTATION_BASELINE", "Unmodified baseline failed or executed no tests");
+      throw failure2("EC_MUTATION_BASELINE", "Unmodified baseline failed or executed no tests");
     let count = 0;
-    for (const [file, entry] of inventory) {
-      const generated = pendingGenerated.get(file) ?? entry.generated ?? await generateSource(entry.source, rel(file));
-      pendingGenerated.delete(file);
-      delete entry.generated;
-      entry.candidates = generated.candidates;
-      entry.critical = generated.critical || [];
-      for (const c of entry.candidates)
-        if (c.regex) {
-          try {
-            new RegExp(...c.regex);
-          } catch {
-            c.ignored = "Regex replacement is invalid for the original flags";
-          }
-        }
-      entry.emitted = instrument(entry.source, entry.candidates, file, runId);
-      try {
-        native(entry.emitted.code, rel(file), true);
-      } catch (error) {
-        for (const c of entry.candidates.filter((c) => !c.ignored)) {
-          try {
-            native(instrument(entry.source, [c], file, runId).code, rel(file), true);
-          } catch {
-            c.ignored = "Switch placement is not valid in this syntax context";
-          }
-        }
-        entry.emitted = instrument(entry.source, entry.candidates, file, runId);
-        native(entry.emitted.code, rel(file), true);
-      }
+    for await (const { file, entry, generated } of preparedSources()) {
       if (generated.metadata) {
         for (const scope of Object.values(generated.metadata.scopes))
           if (scope.entryKey && !entry.candidates.some((c) => c.key === scope.entryKey && !c.ignored))
@@ -3504,15 +3585,15 @@ async function handle(request) {
   }
   if (request.op === "probe") {
     if (!plain || baseline)
-      throw failure("EC_MUTATION_PROTOCOL", "Probe requires an unprepared current baseline");
+      throw failure2("EC_MUTATION_PROTOCOL", "Probe requires an unprepared current baseline");
     await prepareProbe(request, 0);
     return;
   }
   if (request.op === "run") {
     if (!baseline)
-      throw failure("EC_MUTATION_PROTOCOL", "Missing baseline");
+      throw failure2("EC_MUTATION_PROTOCOL", "Missing baseline");
     if (![...inventory.values()].some((entry) => entry.candidates.some((c) => c.key === request.key && !c.ignored)))
-      throw failure("EC_MUTATION_PROTOCOL", "Unknown or ignored active mutant key");
+      throw failure2("EC_MUTATION_PROTOCOL", "Unknown or ignored active mutant key");
     const execution = await execute("mutant", request);
     send(request, "attempt", { key: request.key, execution });
     send(request, "done", { count: 1 });
@@ -3520,7 +3601,7 @@ async function handle(request) {
   }
   if (request.op === "typecheck") {
     if (!baseline)
-      throw failure("EC_MUTATION_PROTOCOL", "Missing baseline");
+      throw failure2("EC_MUTATION_PROTOCOL", "Missing baseline");
     verifyInputs();
     try {
       const keys = new Set(request.keys);
@@ -3531,7 +3612,7 @@ async function handle(request) {
       send(request, "done", { count: result.outcomes.length });
       return;
     } catch (error) {
-      throw failure("EC_MUTATION_TYPECHECK", error.stack || String(error));
+      throw failure2("EC_MUTATION_TYPECHECK", error.stack || String(error));
     }
   }
   if (request.op === "close") {
@@ -3549,7 +3630,7 @@ async function handle(request) {
     send(request, "done", { count: 0, ...options.cache ? { cacheFacts: cacheFacts() } : {} });
     return;
   }
-  throw failure("EC_MUTATION_PROTOCOL", `Unknown operation: ${request.op}`);
+  throw failure2("EC_MUTATION_PROTOCOL", `Unknown operation: ${request.op}`);
 }
 async function prepareProbe(request, count) {
   if (request.coverage) {
@@ -3559,7 +3640,7 @@ async function prepareProbe(request, count) {
     baseline = await execute("probe", request);
   const identity = (e) => e.tests.map((t) => [t.id, t.status, t.started]);
   if (JSON.stringify(identity(plain)) !== JSON.stringify(identity(baseline)) || baseline.errors.length || baseline.failedModules.length)
-    throw failure("EC_MUTATION_INSTRUMENTATION", "Probe baseline changed test registration or results");
+    throw failure2("EC_MUTATION_INSTRUMENTATION", "Probe baseline changed test registration or results");
   writeFileSync3(options.state, JSON.stringify({ baseline, plain, testSpecs, projectName, inventory: [...inventory], fingerprints: [...fingerprints] }));
   send(request, "prepared", { execution: baseline, ...options.reuseSession ? { sessionReuse: reuseMode } : {}, ...options.cache ? { cacheFacts: cacheFacts() } : {} });
   send(request, "done", { count });
@@ -3581,7 +3662,7 @@ for await (const line of lines) {
         await closeContext(saved.ctx);
       }
     } catch (cleanup) {
-      error = failure(error.code || "EC_MUTATION_RUNNER", `${error.stack || error}
+      error = failure2(error.code || "EC_MUTATION_RUNNER", `${error.stack || error}
 Cleanup failed: ${cleanup.stack || cleanup}`);
     }
     send(request || { requestId: 0 }, "error", { code: error.code?.startsWith("EC_MUTATION_") ? error.code : "EC_MUTATION_RUNNER", message: error.stack || String(error) });

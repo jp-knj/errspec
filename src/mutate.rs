@@ -1,6 +1,6 @@
 //! Mutation process ownership, protocol validation, and acquisition.
+mod source_protocol;
 mod worker_pool;
-use crate::mutation_source;
 use errspec::mutation::options::Options as MutationRequest;
 use errspec::mutation::{self, Candidate, Execution, Mutant, Report, Status};
 use serde_json::{Value, json};
@@ -27,25 +27,14 @@ pub(crate) fn source_entry() -> ExitCode {
             io::stdin()
                 .read_to_string(&mut input)
                 .map_err(|e| e.to_string())?;
-            let mut input: Value = serde_json::from_str(&input).map_err(|e| e.to_string())?;
-            if let Some(expected) = input
-                .as_object_mut()
-                .and_then(|object| object.remove("engineFingerprint"))
-                && expected.as_str() != Some(mutation::cache::ENGINE_FINGERPRINT)
-            {
-                return Err(
-                    "EC_MUTATION_INPUT: Native mutation engine changed during execution".into(),
-                );
-            }
-            let request = serde_json::from_value(input).map_err(|e| e.to_string())?;
-            mutation_source::generate(request)
+            source_protocol::respond(&input)
         })
         .map_err(|e| e.to_string())
         .and_then(|worker| worker.join().map_err(|_| "Mutation parser panicked".into()))
         .and_then(|r| r);
     match result {
         Ok(result) => {
-            println!("{}", serde_json::to_string(&result).unwrap());
+            println!("{result}");
             ExitCode::SUCCESS
         }
         Err(error) => {

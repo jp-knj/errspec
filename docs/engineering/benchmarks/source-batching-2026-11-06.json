@@ -1,0 +1,204 @@
+{
+  "baseRevision": "b6e8491d4d8a530732e0c04935bc0a1cbb54405c",
+  "referenceRevision": "025870640d46e93e97285d67e4c265074cf8b295",
+  "throughput": {
+    "kind": "errspec/source-throughput",
+    "files": 200,
+    "repeats": 5,
+    "node": "24.22.2",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "timingsMs": {
+      "individual": [
+        9303.886083,
+        10677.188959000001,
+        9770.805333,
+        10145.640124999998,
+        9288.025625000002
+      ],
+      "batched": [
+        1122.0722920000007,
+        1176.9750000000004,
+        1219.4025839999995,
+        1314.5872909999962,
+        1088.844624999998
+      ]
+    },
+    "medianMs": {
+      "individual": 9770.805333,
+      "batched": 1176.9750000000004
+    },
+    "speedup": 8.301625211240678,
+    "exactResultsEqual": true
+  },
+  "endToEnd": [
+    {
+      "tool": "before",
+      "cold": true,
+      "repeat": 0,
+      "elapsedMs": 18482.482833000002,
+      "executed": 60,
+      "reused": 0,
+      "hostExit": 0
+    },
+    {
+      "tool": "before",
+      "cold": false,
+      "repeat": 0,
+      "elapsedMs": 3594.367291999999,
+      "executed": 0,
+      "reused": 60,
+      "hostExit": 0
+    },
+    {
+      "tool": "after",
+      "cold": true,
+      "repeat": 0,
+      "elapsedMs": 19105.496791,
+      "executed": 60,
+      "reused": 0,
+      "hostExit": 0
+    },
+    {
+      "tool": "after",
+      "cold": false,
+      "repeat": 0,
+      "elapsedMs": 3361.9351250000036,
+      "executed": 0,
+      "reused": 60,
+      "hostExit": 0
+    },
+    {
+      "tool": "mutator",
+      "cold": true,
+      "repeat": 0,
+      "elapsedMs": 12129.543166000003,
+      "apiElapsedMs": 9901.583458000001,
+      "executed": 60,
+      "dryRunFiles": 12,
+      "hostExit": 1
+    },
+    {
+      "tool": "mutator",
+      "cold": false,
+      "repeat": 0,
+      "elapsedMs": 2430.8131250000006,
+      "apiElapsedMs": 184.561458,
+      "executed": 0,
+      "dryRunFiles": 0,
+      "hostExit": 0
+    },
+    {
+      "tool": "after",
+      "cold": true,
+      "repeat": 1,
+      "elapsedMs": 21832.603999999992,
+      "executed": 60,
+      "reused": 0,
+      "hostExit": 0
+    },
+    {
+      "tool": "after",
+      "cold": false,
+      "repeat": 1,
+      "elapsedMs": 3151.209499999997,
+      "executed": 0,
+      "reused": 60,
+      "hostExit": 0
+    },
+    {
+      "tool": "before",
+      "cold": true,
+      "repeat": 1,
+      "elapsedMs": 20864.992083999998,
+      "executed": 60,
+      "reused": 0,
+      "hostExit": 0
+    },
+    {
+      "tool": "before",
+      "cold": false,
+      "repeat": 1,
+      "elapsedMs": 3829.112459000011,
+      "executed": 0,
+      "reused": 60,
+      "hostExit": 0
+    },
+    {
+      "tool": "mutator",
+      "cold": true,
+      "repeat": 1,
+      "elapsedMs": 12729.337415999995,
+      "apiElapsedMs": 10510.887916,
+      "executed": 60,
+      "dryRunFiles": 12,
+      "hostExit": 1
+    },
+    {
+      "tool": "mutator",
+      "cold": false,
+      "repeat": 1,
+      "elapsedMs": 2377.094624999998,
+      "apiElapsedMs": 149.47895799999998,
+      "executed": 0,
+      "dryRunFiles": 0,
+      "hostExit": 0
+    },
+    {
+      "tool": "before",
+      "cold": true,
+      "repeat": 2,
+      "elapsedMs": 19251.882750000004,
+      "executed": 60,
+      "reused": 0,
+      "hostExit": 0
+    },
+    {
+      "tool": "before",
+      "cold": false,
+      "repeat": 2,
+      "elapsedMs": 3640.6964579999913,
+      "executed": 0,
+      "reused": 60,
+      "hostExit": 0
+    },
+    {
+      "tool": "after",
+      "cold": true,
+      "repeat": 2,
+      "elapsedMs": 18655.740333000023,
+      "executed": 60,
+      "reused": 0,
+      "hostExit": 0
+    },
+    {
+      "tool": "after",
+      "cold": false,
+      "repeat": 2,
+      "elapsedMs": 3314.3864170000015,
+      "executed": 0,
+      "reused": 60,
+      "hostExit": 0
+    },
+    {
+      "tool": "mutator",
+      "cold": true,
+      "repeat": 2,
+      "elapsedMs": 11656.357458999992,
+      "apiElapsedMs": 9432.773833000001,
+      "executed": 60,
+      "dryRunFiles": 12,
+      "hostExit": 1
+    },
+    {
+      "tool": "mutator",
+      "cold": false,
+      "repeat": 2,
+      "elapsedMs": 2364.1587500000023,
+      "apiElapsedMs": 133.737042,
+      "executed": 0,
+      "dryRunFiles": 0,
+      "hostExit": 0
+    }
+  ]
+}
