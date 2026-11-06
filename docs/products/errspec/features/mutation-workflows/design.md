@@ -78,6 +78,13 @@ Node module hooks acquire import/require dependencies and package manifests and 
 
 Rank current coverage of changed function scopes. Historical killing IDs may rank ahead only if still current covering tests; they are hints, not proof of current killing. Remove deleted tests. Changed tests/helpers/settings, outside-inventory changes, deleted lines, module edits, or unobserved functions fall back to all current files. Preserve deletion-only hunks; a removed old scope must not select only its neighbor.
 
+Acquire the Git-base text and syntax for changed inventory files. Compare the old
+and current module text after excluding each version's function byte spans. An
+import or module statement changed or removed on the same line as a function
+therefore cannot restrict recommendations to that function's coverage. Missing
+old text or syntax also falls back to all current files; function-only edits keep
+their bounded recommendations.
+
 Return `errspec/test-selection` JSON or files with uncollected-test warnings/fallback reasons. Re-enumerate final source/test inventory, including ignored-by-Git files added during acquisition. Acquisition/final mismatch returns incomplete exit 2 and no file recommendation.
 
 `--kill-matrix`/`killMatrix` requires complete all-covering-test acquisition, with a negative flag. Adapters declare complete capability and force bail/global retry to zero so late killers execute; fingerprint the forced settings. Do not narrow to weak-infected tests.

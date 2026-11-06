@@ -44,8 +44,8 @@ jobs:
       - run: node --test tests/package.test.mjs
       - run: node --test tests/vitest-recorder.test.mjs
       - run: node --test tests/analysis-driver.test.mjs
-      - run: node --test --test-concurrency=1 tests/mutation-reports.test.mjs tests/mutation-child-process.test.mjs tests/action.test.mjs tests/skills.test.mjs
       - run: node --test tests/mutator-comparison.test.mjs
+      - run: node --test --test-concurrency=1 tests/mutation-reports.test.mjs tests/mutation-child-process.test.mjs tests/action.test.mjs tests/skills.test.mjs
       - run: node --test tests/mutation-emitter.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-plugins.test.mjs
       - run: node --test --test-concurrency=1 tests/mutation-matrix-selection.test.mjs

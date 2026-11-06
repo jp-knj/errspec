@@ -1022,8 +1022,45 @@ fn run_inner(
         let hints = crate::mutation_cache::historical(&request)
             .map(|history| history.killer_hints(&report.mutants))
             .unwrap_or_default();
-        let fallback =
-            mutation::test_selection::fallback(changes.as_ref().unwrap(), &report.mutants, &syntax);
+        let previous = changes
+            .as_ref()
+            .unwrap()
+            .files
+            .keys()
+            .filter(|file| syntax.contains_key(*file))
+            .filter_map(|file| {
+                let text = crate::mutation_git::source_at(
+                    &request.root,
+                    &changes.as_ref().unwrap().base,
+                    file,
+                    &signal,
+                )
+                .ok()?;
+                let source =
+                    crate::mutation_source::SourceRequest::for_facts(file.clone(), text.clone());
+                let metadata = std::thread::Builder::new()
+                    .stack_size(32 * 1024 * 1024)
+                    .spawn(move || {
+                        crate::mutation_source::generate(source)
+                            .ok()
+                            .and_then(|result| result.metadata)
+                    })
+                    .ok()?
+                    .join()
+                    .ok()??;
+                Some((
+                    file.clone(),
+                    mutation::test_selection::PreviousSource { text, metadata },
+                ))
+            })
+            .collect();
+        let fallback = mutation::test_selection::fallback(
+            changes.as_ref().unwrap(),
+            &report.mutants,
+            &syntax,
+            &sources,
+            &previous,
+        );
         report.test_selection = Some(mutation::test_selection::rank(
             request.since.as_deref().unwrap(),
             changes.as_ref().unwrap(),
