@@ -2,6 +2,9 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 
 export function defineConfig(config) { return config; }
+export function defineMutator(definition) { return definition; }
+export function defineIgnorer(definition) { return definition; }
+export function definePlugin(definition) { return definition; }
 
 /** Run native planning/judgment directly; quality failure still returns its report. */
 export async function runMutation(options = {}, transport = {}) {

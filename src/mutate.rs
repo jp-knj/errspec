@@ -358,7 +358,7 @@ fn run_inner(
     }
     let beginning = Instant::now();
     for family in &request.exclude_mutator {
-        if !mutation::MUTATORS.contains(&family.as_str()) {
+        if !mutation::MUTATORS.contains(&family.as_str()) && request.plugins.is_empty() {
             return Err(Failure::new(
                 "EC_MUTATION_CONFIG",
                 format!("Unknown mutator: {family}"),
@@ -509,6 +509,9 @@ fn run_inner(
     open.check_error()?;
     expected(&open.messages, &["done"], 0)?;
     let info = only(&open.messages, "done")?;
+    let custom_mutators: Vec<String> =
+        serde_json::from_value(info.get("mutators").cloned().unwrap_or(json!([])))
+            .map_err(|e| Failure::protocol(e.to_string()))?;
     report.engine.node = info["node"].as_str().map(String::from);
     report.engine.vitest = info["vitest"].as_str().map(String::from);
     if driver.endpoint_available == Some(false) {
@@ -569,7 +572,8 @@ fn run_inner(
         for candidate in candidates {
             if candidate.location.file != name
                 || !keys.insert(candidate.key.clone())
-                || !mutation::MUTATORS.contains(&candidate.mutator.as_str())
+                || !(mutation::MUTATORS.contains(&candidate.mutator.as_str())
+                    || custom_mutators.contains(&candidate.mutator))
                 || candidate.location.byte_offset > candidate.end
                 || candidate.key.len() != 64
             {

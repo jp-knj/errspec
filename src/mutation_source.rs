@@ -12,8 +12,9 @@ mod callgraph;
 mod comments;
 mod dependencies;
 mod facts;
+mod plugins;
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceRequest {
     pub file: String,
@@ -30,6 +31,24 @@ pub(crate) struct SourceRequest {
     pub arid: bool,
     #[serde(default)]
     pub arid_callees: Option<Vec<String>>,
+    #[serde(default)]
+    pub custom_mutators: Vec<String>,
+    #[serde(default)]
+    plugin_edits: Vec<plugins::Edit>,
+    #[serde(default)]
+    plugin_ignores: Vec<plugins::Ignore>,
+    #[serde(default)]
+    pub plugin_arid_callees: Vec<String>,
+}
+impl SourceRequest {
+    pub(crate) fn for_facts(file: String, source: String) -> Self {
+        Self {
+            file,
+            source,
+            facts: true,
+            ..Self::default()
+        }
+    }
 }
 #[derive(Serialize)]
 pub(crate) struct SourceResult {
@@ -42,11 +61,29 @@ pub(crate) struct SourceResult {
 
 pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
     for name in &request.exclude_mutators {
-        if !MUTATORS.contains(&name.as_str()) {
+        if !MUTATORS.contains(&name.as_str()) && !request.custom_mutators.contains(name) {
             return Err(format!("Unknown mutator: {name}"));
         }
     }
     let file = parse_source(&request.file, request.source)?;
+    plugins::validate(
+        file,
+        &request.custom_mutators,
+        &request.plugin_edits,
+        &request.plugin_ignores,
+    )?;
+    let arid_callees = if request.plugin_arid_callees.is_empty() {
+        request.arid_callees
+    } else {
+        let mut patterns = request.arid_callees.unwrap_or_else(|| {
+            errspec::mutation::exclusions::ARID_CALLEES
+                .iter()
+                .map(|name| (*name).into())
+                .collect()
+        });
+        patterns.extend(request.plugin_arid_callees);
+        Some(patterns)
+    };
     let mut rules = Rules {
         file,
         name: &request.file,
@@ -59,7 +96,9 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
             file.text(),
             comments::acquire(file),
         ),
-        arid: arid::Arid::new(file, request.arid, request.arid_callees)?,
+        arid: arid::Arid::new(file, request.arid, arid_callees)?,
+        plugin_edits: &request.plugin_edits,
+        applied_plugin_edits: BTreeSet::new(),
         weak_mutation: request.weak_mutation,
         facts: request.facts,
         owners: std::collections::BTreeMap::new(),
@@ -69,17 +108,42 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
     };
     if !request.validate_only {
         rules.visit(file.as_node(), "module", &[]);
+        for (index, edit) in request.plugin_edits.iter().enumerate() {
+            if !rules.applied_plugin_edits.contains(&index) {
+                return Err(format!(
+                    "Plugin mutator {} anchor is not runtime syntax",
+                    edit.mutator
+                ));
+            }
+        }
     }
     rules.candidates.sort_by_key(|c| {
         (
             c.location.byte_offset,
-            MUTATORS.iter().position(|m| *m == c.mutator).unwrap(),
+            MUTATORS
+                .iter()
+                .position(|m| *m == c.mutator)
+                .unwrap_or(MUTATORS.len()),
+            (!MUTATORS.contains(&c.mutator.as_str()))
+                .then(|| (c.mutator.clone(), c.replacement.clone())),
         )
     });
     let mut seen = BTreeSet::new();
     rules
         .candidates
         .retain(|c| seen.insert((c.location.byte_offset, c.end, c.replacement.clone())));
+    for candidate in &mut rules.candidates {
+        if candidate.ignored.is_none() {
+            candidate.ignored = request
+                .plugin_ignores
+                .iter()
+                .find(|ignore| {
+                    ignore.start <= candidate.location.byte_offset as usize
+                        && candidate.end as usize <= ignore.end
+                })
+                .map(|ignore| ignore.reason.clone());
+        }
+    }
     let metadata = request.facts.then(|| facts::collect(&rules));
     Ok(SourceResult {
         metadata,
@@ -109,6 +173,8 @@ struct Rules<'a> {
     scopes: std::collections::BTreeMap<String, P<Node>>,
     parents: std::collections::BTreeMap<String, String>,
     calls: Vec<errspec::mutation::syntax::Call>,
+    plugin_edits: &'a [plugins::Edit],
+    applied_plugin_edits: BTreeSet<usize>,
 }
 impl Rules<'_> {
     fn start(&self, node: P<Node>) -> usize {
@@ -375,6 +441,7 @@ impl Rules<'_> {
                 });
         }
         self.apply(node, owner, path);
+        plugins::apply(self, node, owner, path);
         let mut index = 0;
         node.for_each_child(&mut |child| {
             let mut child_path = path.to_vec();

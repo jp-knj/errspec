@@ -73,16 +73,10 @@ fn acquire(
             return Err("Report sources exceed 64 MiB".into());
         }
         let scopes = if matches!(reporter, Reporter::Agent | Reporter::Simplify) {
-            crate::mutation_source::generate(crate::mutation_source::SourceRequest {
-                file: file.clone(),
-                source: text.clone(),
-                validate_only: false,
-                exclude_mutators: vec![],
-                weak_mutation: false,
-                facts: true,
-                arid: false,
-                arid_callees: None,
-            })?
+            crate::mutation_source::generate(crate::mutation_source::SourceRequest::for_facts(
+                file.clone(),
+                text.clone(),
+            ))?
             .metadata
             .ok_or("Missing report syntax facts")?
             .scopes

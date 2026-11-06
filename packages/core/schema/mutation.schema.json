@@ -67,27 +67,17 @@
       "items": {
         "type": "string",
         "minLength": 1,
-        "enum": [
-          "ArithmeticOperator",
-          "ArrayDeclaration",
-          "ArrowFunction",
-          "AssignmentOperator",
-          "BlockStatement",
-          "BooleanLiteral",
-          "CallExpression",
-          "ConditionalExpression",
-          "EqualityOperator",
-          "FnValue",
-          "LogicalOperator",
-          "MethodExpression",
-          "ObjectLiteral",
-          "OptionalChaining",
-          "Regex",
-          "StringLiteral",
-          "UnaryOperator",
-          "UpdateOperator"
-        ]
+        "pattern": "^[A-Za-z0-9_.-]+$"
       }
+    },
+    "plugins": {
+      "type": "array",
+      "items": { "anyOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "object", "additionalProperties": false, "required": ["module"], "properties": {
+          "module": { "type": "string", "minLength": 1 }, "settings": {}
+        } }
+      ] }
     },
     "failOnUndetected": {
       "type": "boolean"

@@ -12,6 +12,7 @@ export interface MutationPolicy {
 export interface MutationOptions {
   reporters?: MutationReporter[];
   reportDir?: string | null;
+  plugins?: (string | { module: string; settings?: JsonValue })[];
   since?: string | null;
   diffUnit?: "node" | "scope" | null;
   shard?: { index: number; total: number } | null;
@@ -40,6 +41,43 @@ export interface MutationOptions {
   typecheckPackage?: string | null;
   policy?: MutationPolicy;
 }
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+/** Owned TypeScript syntax facts; start/end and edit ranges are UTF-8 byte offsets. */
+export interface MutationNode {
+  readonly id: number; readonly kind: string; readonly start: number; readonly end: number;
+  readonly parent: number | null; readonly children: readonly number[];
+  readonly name: string | null; readonly text: string;
+}
+export interface PluginContext {
+  readonly file: string; readonly source: string; readonly root: string;
+  readonly settings: JsonValue; readonly parent: MutationNode | null;
+  readonly nodes: readonly MutationNode[];
+  text(range: { start: number; end: number }): string;
+  /** Read a file relative to the plugin module and acquire it for cache invalidation. */
+  readInput(path: string): string;
+}
+export interface MutationEdit { replacement: string; range?: { start: number; end: number } }
+export interface PluginInputs {
+  name: string;
+  /** Promise deterministic behavior from the acquired module closure, settings and inputs. */
+  cache?: "deterministic";
+  /** Additional paths relative to the module. Use readInput for computed paths. */
+  inputs?: string[];
+}
+export interface MutatorDefinition extends PluginInputs {
+  visit(node: MutationNode, context: PluginContext): MutationEdit[] | void | Promise<MutationEdit[] | void>;
+}
+export interface IgnorerDefinition extends PluginInputs {
+  shouldIgnore(node: MutationNode, context: PluginContext): string | false | void | Promise<string | false | void>;
+}
+export interface MutationPlugin extends PluginInputs {
+  mutators?: MutatorDefinition[];
+  ignorers?: IgnorerDefinition[];
+  aridCallees?: string[];
+}
+export function defineMutator<T extends MutatorDefinition>(definition: T): T;
+export function defineIgnorer<T extends IgnorerDefinition>(definition: T): T;
+export function definePlugin<T extends MutationPlugin>(definition: T): T;
 export type MutationConfig = MutationOptions & { $schema?: string };
 export type MutationStatus = "Killed" | "Survived" | "NoCoverage" | "Timeout" |
   "RuntimeError" | "CompileError" | "Ignored" | "Pending";

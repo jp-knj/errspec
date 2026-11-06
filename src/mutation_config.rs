@@ -163,6 +163,7 @@ pub(crate) fn overlay(config: &mut Value, cli: &Value, keys: &BTreeSet<String>) 
         ("include", "include"),
         ("exclude", "exclude"),
         ("exclude_mutator", "excludeMutator"),
+        ("plugins", "plugins"),
         ("vitest_config", "vitestConfig"),
         ("vitest_project", "vitestProject"),
         ("vitest_package", "vitestPackage"),

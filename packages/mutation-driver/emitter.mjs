@@ -64,7 +64,9 @@ export function instrument(source, candidates, file, runId) {
         const prefixLength=indices.get(c.guardOffset)-group.start;
         if(!Number.isInteger(prefixLength)||prefixLength<1)throw new Error("Invalid body guard position");
         const directive=original.slice(1,prefixLength);
-        const branch = c.replacement.slice(1,-1).trim() || "return;";
+        // A whole-body replacement may intentionally fall through. Finish the
+        // function here instead of continuing into the original body.
+        const branch = `${c.replacement.slice(1,-1).trim()}\nreturn;`;
         original = `{${directive}\nif(${check}){${branch}}${original.slice(prefixLength)}`;
       } else {
         original = `{if(${check}){${c.replacement}}else{${original}}}`;

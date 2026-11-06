@@ -67,8 +67,9 @@ the CLI/API `node` option (or `node` on PATH), before a file can supply its own
 execution option. Loader logs go to stderr, with a 10-second deadline and 1 MiB
 output limits. Configuration scripts run as local project code.
 
-`selectTests`, plugin APIs and additional runner packages are subsequent
-implementation stages. `formatReport` uses the same native presentation as the CLI.
+`selectTests` and additional runner packages are subsequent implementation stages.
+`formatReport` shares the native presentation with the CLI; `defineMutator`,
+`defineIgnorer` and `definePlugin` define module plugins.
 
 ## Git selection
 
@@ -452,3 +453,69 @@ that a particular function ran. Agent/MTE/HTML distinguish this possibility, and
 simplify excludes those files. A command without a discovered project script does
 not create a generic warning. No warning establishes that every subprocess was
 observable or that child execution was safely mutation-tested.
+
+## Custom mutation plugins
+
+Use `plugins: ["./mutation-plugin.mjs", "package-name"]` in configuration/API,
+or repeat `--plugin <module-or-package>` in the CLI. Relative modules resolve from
+the project root; package names resolve from that project's dependencies. Each
+module exports a mutator, ignorer, plugin bundle, or an array as its default.
+Node 24 also supports TypeScript modules with erasable syntax.
+
+```js
+import { defineMutator, defineIgnorer, definePlugin } from "@errspec/core";
+
+export default definePlugin({
+  name: "project-rules",
+  cache: "deterministic",
+  mutators: [defineMutator({
+    name: "ReplaceConstant",
+    visit(node, context) {
+      if (node.kind === "NumericLiteral" && node.text === "2") {
+        return [{ replacement: context.settings?.replacement ?? "3" }];
+      }
+    },
+  })],
+  ignorers: [defineIgnorer({
+    name: "Invariant",
+    shouldIgnore(node) {
+      if (node.kind === "CallExpression" && node.text.startsWith("invariant(")) {
+        return "assertion helper";
+      }
+    },
+  })],
+  aridCallees: ["metrics.*"],
+});
+```
+
+Pass JSON settings as `plugins: [{ module: "./mutation-plugin.mjs", settings:
+{ replacement: "4" } }]`. Callbacks stay in the imported module; execution options
+remain JSON values. The three definition helpers preserve callbacks and provide
+types. `PluginContext.settings` is a JSON value: narrow it when using TypeScript.
+
+Nodes expose TypeScript syntax `kind`, `name`, `text`, byte `start`/`end`, and
+parent/child indexes into `context.nodes`. `context.parent` returns the parent
+node; `context.text({start,end})` reads UTF-8 byte ranges. A mutator returns edits
+inside its visited node, optionally with `range: {start,end}`. Visit the complete
+runtime expression when editing a property token. Rust validates anchors and
+ranges, reparses the changed file, chooses safe switch placement and generates
+stable IDs. Block anchors require block replacements. Unsupported anchors and
+invalid syntax fail with the mutator name; an unsafe switch is reported Ignored.
+
+`excludeMutator: ["ReplaceConstant"]` or `--exclude-mutator ReplaceConstant`
+disables a custom family. Names must be unique and cannot shadow built-ins.
+Ignorers apply to a node's descendants and report `<name>: <reason>`.
+Built-in safety rules, explicit disable/Stryker comments and arid rules retain
+their earlier reasons. Plugin `aridCallees` extend the configured patterns when
+`arid` is enabled. Generation does not change existing built-in IDs.
+
+Caching is conservative by default. `cache: "deterministic"` promises that the
+plugin depends only on its imported module closure, JSON settings, environment
+and acquired files. Set it on a bundle to cover its members. Module imports,
+package manifests and their contents are acquired automatically, including
+imports performed by async visitors. Declare other files with `inputs: [...]`
+or read them with `context.readInput(path)`; these paths resolve from the plugin
+module. Generation acquires these inputs before baseline tests execute and rejects
+changes during the run. Changes to plugin code, dependencies, settings or acquired data invalidate
+both result and reachability reuse. Omit the promise for plugins depending on
+time, randomness, services or undeclared file reads; those runs verify afresh.

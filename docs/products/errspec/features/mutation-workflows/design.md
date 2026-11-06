@@ -66,6 +66,14 @@ scope指紋は完全一致のraw指紋と一回の入力取得で作ります。
 
 aridは既存結果を維持するため既定offとし、`--arid`／設定・APIのaridで明示的に有効化します。`--no-arid`で設定のtrueを解除します。console/logger/logのreceiver、debug/traceのproperty、debug関数を既定とし、aridCalleesと反復可能な`--arid-callee`でpattern集合を置換します。空集合は一致なし、nullは既定へ戻す指定です。ASTからcalleeのdotted pathを取得し、computed accessやcastは照合しません。callと、それだけからなる非空block／ifをaridとしてmemo化し、candidateの祖先をたどります。mixed statement・宣言・return・function境界では伝播を止め、candidate.ignoredへ理由を入れます。明示commentとbuiltin理由を優先し、有効化とpatternはcache指紋に含めます。これはloggingに関する命名heuristicであり、引数・条件を含む副作用の同値性は保証しません。
 
+### 独自mutatorとignorer
+
+`plugins`はmodule文字列または`{module, settings}`の配列とし、CLIでは`--plugin`を繰り返します。相対moduleはproject root、package名はprojectのmodule解決を基準にします。moduleのdefault exportは`defineMutator`、`defineIgnorer`、`definePlugin`で定義したobjectまたはその配列です。定義helperは型付きidentity関数とし、callbackをJSONや生成した実行可能sourceへ変換しません。
+
+Nodeはmoduleを取得し、Rustが取得した構文nodeのkind・親子関係・UTF-8位置・本文をvisitorへ渡します。mutatorは訪問node内の置換を返し、ignorerは除外理由を返します。Rustはnodeとrangeを照合し、置換後のファイルを再parseし、安全なruntime expression／statement／bodyへ配置して従来と同じIDを生成します。calleeやassignment referenceは全体のexpressionへ持ち上げます。型や宣言tokenなどruntime switchを置けないanchorはエラー、switch自体が成立しないcontextは理由付きのIgnoredとします。builtinと独自mutatorの名前は重複できず、`excludeMutator`で個別に除外できます。builtin安全規則、disable／Strykerコメント、arid、ignorerの順で理由を優先します。pluginの`aridCallees`は追加規則とし、`arid`が無効なら適用しません。
+
+moduleのimport／requireとpackage manifestはNodeのmodule hookで取得し、世代中の内容変化を検査します。明示の`inputs`とcontextの`readInput`も同じ入力記録へ加えます。`cache: "deterministic"`は、取得済みmodule・settings・環境・追加入力から決定的に動くというplugin作者の契約です。時刻、乱数、未宣言の外部読取に依存するpluginは指定せず、cacheを保守的に無効化します。設定、plugin本体、依存module、追加入力の変更はnativeの指紋を変え、実行結果と到達記録を再取得します。scope cacheでもpluginの取得済み入力を省きません。
+
 ### ランナーと実行計画
 
 `-j`／`--concurrency`と設定・APIの`concurrency`は1〜64の整数とし、既定1を維持します。2以上ではRustのqueueから各workerへ候補を割り当て、逐次実行と同じtrial・再確認・判定を使います。samplingとcache照合は配分前に行い、時間予算は要求全体の開始時刻で共有します。開始済みのtrialは完了させ、開始前の候補はPendingにします。完了順によらずinventory順へ結果を戻し、engine.parallelに要求数と起動したtrial worker数を示します。
