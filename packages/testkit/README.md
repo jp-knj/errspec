@@ -2,8 +2,8 @@
 
 A small ESM package that records failure-scenario observations for the Rust CLI
 from Bun test and Vitest. The runtime is ordinary JavaScript with declarations in
-`index.d.mts` and no external runtime dependencies. The equivalent TypeScript
-implementation is included as `index.ts`; the package entry remains `index.mjs`.
+`index.d.mts` and no external runtime dependencies. `index.ts` is the canonical
+implementation and can also be copied on its own; the package entry remains `index.mjs`.
 Node standard modules are required, so browser tests are outside this API's scope.
 
 This repository uses relative imports. Another project can copy the directory and
@@ -21,6 +21,14 @@ strict typechecking and Bun/Vitest. Node module types require `@types/node` or
 `@types/bun`. The same tests run against `index.ts` and `index.mjs` to check their
 behavior. Record the source commit when copying: manual changes can obscure which
 upstream version the copy represents.
+
+Maintainers edit `index.ts`, then run `node scripts/build-testkit.mjs` from the
+repository to regenerate `index.mjs` and `index.d.mts`. The script reuses the
+pinned TypeScript 6.0.3 development compiler from `packages/analysis-driver`;
+install those dependencies with `npm ci --prefix packages/analysis-driver` first.
+`node scripts/build-testkit.mjs --check` verifies the committed artifacts without
+rewriting them. Check and Distribution CI enforce this before testing or packing.
+Consumers of either the package or the copied TypeScript file require no build.
 
 ```ts
 import { test } from "bun:test"; // or vitest

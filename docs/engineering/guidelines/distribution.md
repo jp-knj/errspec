@@ -10,6 +10,7 @@ and Chromium used by the runner fixtures before the installed-runner smoke; the
 setup and platform-specific prerequisites:
 
 ```sh
+node scripts/build-testkit.mjs --check
 cargo build --release --locked
 node scripts/pack.mjs linux-x64 target/release/errspec
 node scripts/package-smoke.mjs artifacts/npm/manifest-linux-x64.json

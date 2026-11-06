@@ -1,5 +1,5 @@
-// TypeScript copy of index.mjs for projects that vendor the testkit next to typed tests.
-// Behavior must match index.mjs; tests/testkit.test.mjs runs against both files.
+// Canonical source: packages/testkit/index.ts, also a standalone vendored TypeScript helper.
+// scripts/build-testkit.mjs generates the package's JavaScript and declarations.
 import { deepStrictEqual } from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { renameSync, writeFileSync } from "node:fs";
@@ -49,8 +49,7 @@ type ObservationRecord = {
 function nonempty(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
 
 function isThenable(value: unknown): boolean {
-  const candidate = typeof value === "object" && value !== null || typeof value === "function";
-  return candidate && "then" in value && typeof value.then === "function";
+  return typeof (value as { then?: unknown } | null | undefined)?.then === "function";
 }
 
 export function scenarioTestName(contract: string, id: string): string {
