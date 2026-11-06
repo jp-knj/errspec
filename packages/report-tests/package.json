@@ -3,5 +3,8 @@
   "private": true,
   "type": "module",
   "description": "Development-only upstream mutation report schema validation",
-  "devDependencies": { "ajv": "8.17.1" }
+  "devDependencies": {
+    "ajv": "8.17.1",
+    "yaml": "2.8.2"
+  }
 }

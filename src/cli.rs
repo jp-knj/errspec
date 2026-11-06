@@ -239,6 +239,13 @@ struct MutationArgs {
 
 #[derive(Subcommand)]
 enum Action {
+    /// Install bundled Agent Skills without replacing edited files by default.
+    InitSkill {
+        #[arg(long, default_value = ".agents/skills")]
+        dir: PathBuf,
+        #[arg(long)]
+        force: bool,
+    },
     /// Record reasoned approval of equivalent or intentionally untested mutants.
     Accept {
         #[arg(long, default_value = ".")]
@@ -369,6 +376,22 @@ impl Cli {
             return Err("--typescript-package conflicts with --analysis-engine tsrs".into());
         }
         let command = match self.command {
+            Action::InitSkill { dir, force } => {
+                if explicit_config
+                    || self.baseline.is_some()
+                    || self.strict_baseline
+                    || explicit_analysis
+                {
+                    return Err("init-skill does not accept contract or analysis options".into());
+                }
+                return Ok((
+                    Request::InitSkill {
+                        directory: dir,
+                        force,
+                    },
+                    self.format,
+                ));
+            }
             Action::Accept {
                 root,
                 accepted_file,

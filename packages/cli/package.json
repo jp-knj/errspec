@@ -17,7 +17,8 @@
     "platforms.mjs",
     "README.md",
     "LICENSE",
-    "native.mjs"
+    "native.mjs",
+    "skills"
   ],
   "engines": {
     "node": ">=22"

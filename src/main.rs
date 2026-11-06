@@ -1,6 +1,7 @@
 mod analysis_backend;
 mod app;
 mod cli;
+mod command_output;
 mod coverage_runner;
 mod failure_paths;
 mod input;
@@ -21,6 +22,7 @@ mod runner;
 mod scaffold;
 mod scan;
 mod scenario_source;
+mod skill_actions;
 mod tsrs_adapter;
 mod verification;
 

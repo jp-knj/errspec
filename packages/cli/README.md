@@ -21,3 +21,23 @@ Install `@errspec/testkit` at the same version and your chosen runner before exe
 Use `errspec --help` for commands and options. `verify` uses all runner-discovered tests by default; `--only-contract-tests` selects the registered files for gradual adoption. A reviewed baseline plus `--strict-baseline` detects removal of required checks from both the configuration and tests.
 
 `errspec mutate` independently checks existing Vitest tests against 18 mutation families. This command requires Node.js 24+ and a local Vitest 5.x installation, and needs neither errspec configuration nor testkit. The native binary embeds its driver; users do not build JavaScript assets. Use `--vitest-project NAME` to select one Node project, `--format json` for the `errspec/mutation` report, and `--fail-on-undetected` to exit 1 on survived or uncovered mutations. Incomplete runs exit 2. Sources are transformed in memory and snapshot updates are disabled. Browser Mode, native require, and separate child processes are outside its instrumentation scope.
+
+## Bundled Agent Skills
+
+The CLI package includes `skills/errspec`, `skills/errspec-test-loop` and
+`skills/errspec-playwright` in the skills-npm layout. They cover installation and
+runner choice, behavior-focused gap repair, and the Playwright fixture/Vite setup.
+The same files are embedded in the native executable:
+
+```sh
+errspec init-skill
+errspec init-skill --dir .claude/skills
+```
+
+The default destination is `.agents/skills`. Identical copies remain unchanged;
+a differing file stops the whole preflight before any other skill is written.
+`--force` replaces only bundled files and retains unrelated project notes. Symlinked
+targets/directories are refused. A later write failure rolls back this operation's
+new files and overwritten bytes when they have not changed concurrently.
+`--format json` reports written/unchanged skills or `EC_SKILL_INIT` with exit 2.
+This command installs instructions; it does not install dependencies or run tests.

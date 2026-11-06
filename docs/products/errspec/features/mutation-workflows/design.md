@@ -114,7 +114,9 @@ Native supervisorをgroup leaderとし、Nodeは同じgroupとstdioを継承し�
 
 Rustの結果からtext、mutation-testing-elements形式、agent、simplify、テスト選択、kill matrixを生成します。表示とquality gateは別の判定にし、保存先とstdoutを区別します。追加のnpm APIは機械可読の内部要求を使い、CLI引数の解析を実装の契約に含めません。
 
-Actionは基準の取得と履歴の復元・保存を行い、失敗時も保存します。Skillと初期生成は同じ導入・反復修正・Playwrightの手順を提供します。
+Actionは基準の取得と履歴の復元・保存を行い、失敗時も保存します。ActionのNode coordinatorはJSON optionsを既存のrunMutationへ直接渡し、判定・cache同一性・終了コードを再実装しません。差分baseはPRのbase SHAを既定とし、shallow checkoutで不足するcommitをoriginから取得します。GitHub公式cacheのrestore/saveを分け、失敗時もalwaysで専用mutation historyを保存します。既存のplatform配布物のnative executable、またはprojectへ導入済みのCLIを利用し、未公開npmへfallbackしません。native/agent/MTE JSON、offline HTML、summaryとdiff annotationは共通formatterから取得します。環境の指紋を緩めず、restored cacheの再利用可否はnative判定へ委ねます。
+
+Skillと初期生成は同じ導入・反復修正・Playwrightの手順を提供します。skills-npm形式のCLI package内skillsを単一の本文とし、nativeへも同じファイルを埋め込みます。init-skillは既存ファイルを全件取得してから衝突を判定し、同一本文を変更しません。明示forceの場合だけbundled fileを更新し、無関係なproject notesは保持します。後続writeが失敗した場合は今回の変更だけをrollbackし、並行更新を上書きしません。初期化は依存取得・テスト実行・ソース変更を行いません。
 
 ## アーキテクチャ・シーケンス図
 

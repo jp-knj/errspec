@@ -1,0 +1,78 @@
+name: errspec mutation testing
+description: Run an installed errspec native engine, fetch a Git base, and carry mutation history between CI runs.
+branding:
+  icon: check-circle
+  color: blue
+inputs:
+  working-directory:
+    description: Project root, relative to the checkout.
+    default: .
+  native-binary:
+    description: Native executable from a verified distribution artifact. Otherwise use the project's installed @errspec/cli.
+    default: ''
+  since:
+    description: Git base. Defaults to the pull request base SHA; non-PR events run the full project.
+    default: ''
+  options:
+    description: JSON mutation options, using the same schema as @errspec/core. Use the dedicated inputs for root and since.
+    default: '{}'
+  config-file:
+    description: Explicit mutation configuration file, relative to the project. Otherwise discover the default configuration.
+    default: ''
+  cache:
+    description: Restore and save the dedicated mutation cache, including on a failed run.
+    default: 'true'
+  cache-directory:
+    description: Dedicated mutation history directory, relative to the project.
+    default: .errspec/mutation-cache
+  report-directory:
+    description: Native, agent, MTE JSON and offline HTML destination, relative to the project.
+    default: .errspec/action-report
+outputs:
+  report-directory:
+    description: Absolute report directory.
+    value: ${{ steps.prepare.outputs.report-directory }}
+  exit-code:
+    description: Native exit code, when a report was produced.
+    value: ${{ steps.run.outputs.exit-code }}
+  run-complete:
+    description: Whether the requested native run completed.
+    value: ${{ steps.run.outputs.run-complete }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve the installed engine and Git base
+      id: prepare
+      shell: bash
+      env:
+        ERRSPEC_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        ERRSPEC_NATIVE_BINARY: ${{ inputs.native-binary }}
+        ERRSPEC_SINCE: ${{ inputs.since }}
+        ERRSPEC_OPTIONS: ${{ inputs.options }}
+        ERRSPEC_CONFIG_FILE: ${{ inputs.config-file }}
+        ERRSPEC_CACHE: ${{ inputs.cache }}
+        ERRSPEC_CACHE_DIRECTORY: ${{ inputs.cache-directory }}
+        ERRSPEC_REPORT_DIRECTORY: ${{ inputs.report-directory }}
+      run: node "$GITHUB_ACTION_PATH/scripts/action.mjs" prepare
+    - name: Restore mutation history
+      if: inputs.cache == 'true'
+      continue-on-error: true
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.prepare.outputs.cache-path }}
+        key: ${{ steps.prepare.outputs.cache-key }}
+        restore-keys: |
+          ${{ steps.prepare.outputs.restore-ref }}
+          ${{ steps.prepare.outputs.restore-base }}
+    - name: Run native mutation testing
+      id: run
+      shell: bash
+      env:
+        ERRSPEC_ACTION_STATE: ${{ steps.prepare.outputs.state }}
+      run: node "$GITHUB_ACTION_PATH/scripts/action.mjs" run
+    - name: Save mutation history even on failure
+      if: always() && inputs.cache == 'true' && steps.prepare.outcome == 'success'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.prepare.outputs.cache-path }}
+        key: ${{ steps.prepare.outputs.cache-key }}
