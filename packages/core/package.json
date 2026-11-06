@@ -14,6 +14,7 @@
   },
   "files": [
     "index.mjs",
+    "native-transport.mjs",
     "index.d.mts",
     "schema",
     "README.md",
