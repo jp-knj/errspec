@@ -81,6 +81,11 @@ Use no network. TS 6.0.3 Compiler API and TS 7.0.2 `unstable/sync` are the compa
 baseline; the unstable API needs capability checks and per-version comparison.
 Open a project per request, convert results to values and close it. Release Node
 snapshots/APIs in `finally`; Rust owns temporary files and child-process lifetime.
+The bridge delegates bounded command acquisition to `owned_process`, which also
+serves Git and configuration loading. The analysis adapter supplies JSON stdin,
+separate stream limits and its interruption predicate, and maps acquisition
+failures to the existing analysis diagnostics. The common owner stops the group
+before reaping its child, including normal completion and early failures.
 Bound waits to 300 seconds, stdout to 64 MiB and stderr to 4 MiB. Limits or
 SIGINT/SIGTERM produce incomplete results and terminate the process group. There
 is no between-run cache.
