@@ -1,5 +1,5 @@
 // Generated from index.ts by scripts/build-testkit.mjs. Do not edit.
-// Canonical testkit implementation; this file also works as a standalone vendored helper.
+// Canonical source: packages/testkit/index.ts, also a standalone vendored TypeScript helper.
 // scripts/build-testkit.mjs generates the package's JavaScript and declarations.
 import { deepStrictEqual } from "node:assert/strict";
 import { randomUUID } from "node:crypto";
