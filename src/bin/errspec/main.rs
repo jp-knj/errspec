@@ -1,30 +1,27 @@
-mod analysis_backend;
+mod analysis;
 mod app;
 mod cli;
-mod command_output;
-mod coverage_runner;
-mod failure_paths;
-mod input;
-mod mutate;
-mod mutation_actions;
-mod mutation_api;
-mod mutation_cache;
-mod mutation_config;
-mod mutation_git;
-mod mutation_ownership;
-mod mutation_reporting;
-mod mutation_source;
-mod onboard;
+mod contracts;
+mod coverage;
+mod discovery;
+mod init;
+mod mutation;
 mod output;
-mod owned_process;
 mod request;
-mod runner;
-mod scaffold;
-mod scan;
-mod scenario_source;
-mod skill_actions;
-mod tsrs_adapter;
-mod verification;
+mod support;
+
+// Preserve crate-root names while feature directories own the implementations.
+pub(crate) use analysis::{backend as analysis_backend, tsrs as tsrs_adapter};
+pub(crate) use contracts::{failure_paths, runner, source as scenario_source, verification};
+pub(crate) use coverage::run as coverage_runner;
+pub(crate) use discovery::scan;
+pub(crate) use init::{run as onboard, scaffold, skills as skill_actions};
+pub(crate) use mutation::{
+    actions as mutation_actions, api as mutation_api, cache as mutation_cache,
+    config as mutation_config, git as mutation_git, ownership as mutation_ownership,
+    reporting as mutation_reporting, run as mutate, source as mutation_source,
+};
+pub(crate) use support::{command_output, input, owned_process};
 
 use clap::{CommandFactory, FromArgMatches};
 use std::process::ExitCode;
