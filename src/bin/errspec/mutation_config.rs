@@ -246,7 +246,10 @@ fn script(node: &Path, path: &Path) -> Result<Vec<u8>, ConfigFailure> {
         let source = dir.path().join("config.mjs");
         fs::write(
             &source,
-            include_str!("../packages/mutation-driver/config.mjs"),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/packages/mutation-driver/config.mjs"
+            )),
         )?;
         let mut handlers = Signals(vec![]);
         for number in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {

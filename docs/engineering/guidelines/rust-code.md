@@ -5,6 +5,16 @@ contract.
 
 ## Functions and types
 
+The CLI entry point and its private modules live under `src/bin/errspec/`, with
+`main.rs` selected by Cargo's explicit `[[bin]]` target. Preserve child-module
+relationships and keep the Vitest recorder with its CLI owner. The public library
+retains `src/lib.rs`, its existing module paths and file locations.
+
+Resolve embedded package assets from `CARGO_MANIFEST_DIR` so moving a CLI module
+does not change the included content. The build-fixed engine fingerprint includes
+native source paths and bytes; relocation invalidates old mutation evidence once.
+Preserve fingerprint inputs and validation rules rather than relabeling old caches.
+
 - A function used by one feature belongs to that feature's module.
 - Share a function in a clearly named common module only when its input conditions,
   result meaning and failure conditions are the same for every caller.

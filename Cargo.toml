@@ -8,6 +8,10 @@ license = "MIT"
 repository = "https://github.com/jp-knj/errspec"
 description = "Link TypeScript error variants to explicit failure contracts and test evidence"
 
+[[bin]]
+name = "errspec"
+path = "src/bin/errspec/main.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
