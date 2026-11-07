@@ -6,9 +6,31 @@ contract.
 ## Functions and types
 
 The CLI entry point and its private modules live under `src/bin/errspec/`, with
-`main.rs` selected by Cargo's explicit `[[bin]]` target. Preserve child-module
-relationships and keep the Vitest recorder with its CLI owner. The public library
-retains `src/lib.rs`, its existing module paths and file locations.
+`main.rs` selected by Cargo's explicit `[[bin]]` target. Group implementations by
+responsibility while keeping the entry point, argument conversion, requests,
+orchestration and display in `main`, `cli`, `request`, `app` and `output`.
+
+| CLI directory | Responsibility |
+| --- | --- |
+| `analysis/` | Backend selection and shared tsrs acquisition |
+| `contracts/` | Scenario/failure-path acquisition, runner execution and verification |
+| `discovery/` | Candidate scanning and propagation facts |
+| `init/` | Initial configuration, test scaffolds and bundled Skills |
+| `coverage/` | Coverage execution and its Vitest recorder |
+| `mutation/` | Mutation execution, configuration/API, persistence and source generation |
+| `support/` | Shared file acquisition, bounded command output and owned processes |
+
+Crate-root aliases retain existing CLI import names. Mutation source helpers stay
+under `mutation/source/`; protocol and worker helpers stay under `mutation/run/`
+so their parent-module access keeps the same meaning. Keep contract runners and
+mutation workers separate because their execution and failure contracts differ.
+
+The public library retains `src/lib.rs` and every existing public module path.
+Contract comparisons and evidence live in `src/contracts/`, and runner-report
+parsers in `src/runners/`; `#[path]` declarations preserve their public names.
+Discovery, coverage and mutation use their own directories with `mod.rs` entries.
+Shared types stay in `model`, including the existing `discovery::Location`
+re-export. Moving files must not introduce duplicate type definitions.
 
 Resolve embedded package assets from `CARGO_MANIFEST_DIR` so moving a CLI module
 does not change the included content. The build-fixed engine fingerprint includes

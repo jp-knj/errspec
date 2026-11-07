@@ -5,8 +5,13 @@ This design implements [Product](../../product.md) and the [requirements](requir
 ## Responsibility boundaries
 
 CLI orchestration, acquisition and rendering live under `src/bin/errspec/`,
-separate from the public library. Existing module names and child relationships
-remain unchanged, preserving public APIs, execution order and report contracts.
+separate from the public library. Feature directories group contract verification,
+analysis, discovery, initialization, coverage and mutation. Crate-root aliases
+preserve existing orchestration imports and helper ownership. Public contract
+judgments and runner-report parsers have separate physical directories, with
+`#[path]` declarations preserving their public module names. This arrangement
+keeps public APIs, execution order and report contracts unchanged; the
+[Rust guide](../../../../engineering/guidelines/rust-code.md) defines the layout.
 
 | Module | Responsibility |
 |---|---|

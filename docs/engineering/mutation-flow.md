@@ -6,11 +6,11 @@ and runner processes.
 
 | Responsibility | Current entry points | Owned output |
 | --- | --- | --- |
-| Resolve CLI/API/configuration | `src/bin/errspec/cli.rs`, `src/bin/errspec/mutation_api.rs`, `src/bin/errspec/mutation_config.rs` | `mutation::options::Options` |
-| Parse source and generate switches | `src/bin/errspec/mutation_source.rs`, `src/bin/errspec/mutation_source/` | Candidates and source-bound syntax metadata |
+| Resolve CLI/API/configuration | `src/bin/errspec/cli.rs`, `src/bin/errspec/mutation/api.rs`, `src/bin/errspec/mutation/config.rs` | `mutation::options::Options` |
+| Parse source and generate switches | `src/bin/errspec/mutation/source/mod.rs`, `src/bin/errspec/mutation/source/` | Candidates and source-bound syntax metadata |
 | Acquire compiler/runner execution | `packages/mutation-driver/` and embedded analysis adapter | Execution, registration, coverage, infection and input facts |
 | Select, reuse and judge | `src/mutation/` | Selected keys, reusable evidence, verdicts and gates |
-| Own processes and persist files | `src/bin/errspec/mutate.rs`, `src/bin/errspec/mutate/worker_pool.rs`, `src/bin/errspec/mutation_ownership.rs`, `src/bin/errspec/mutation_cache.rs` | Validated requests, stopped workers and atomic cache documents |
+| Own processes and persist files | `src/bin/errspec/mutation/run.rs`, `src/bin/errspec/mutation/run/worker_pool.rs`, `src/bin/errspec/mutation/ownership.rs`, `src/bin/errspec/mutation/cache.rs` | Validated requests, stopped workers and atomic cache documents |
 
 ```mermaid
 sequenceDiagram
