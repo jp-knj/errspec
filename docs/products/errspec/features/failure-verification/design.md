@@ -4,6 +4,10 @@ This design implements [Product](../../product.md) and the [requirements](requir
 
 ## Responsibility boundaries
 
+CLI orchestration, acquisition and rendering live under `src/bin/errspec/`,
+separate from the public library. Existing module names and child relationships
+remain unchanged, preserving public APIs, execution order and report contracts.
+
 | Module | Responsibility |
 |---|---|
 | `analysis_backend` | Select the backend from explicit options and installed versions; own official-API requests, responses, and processes |

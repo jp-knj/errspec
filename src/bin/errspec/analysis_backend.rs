@@ -320,23 +320,38 @@ fn invoke(
         for (name, source) in [
             (
                 "driver.mjs",
-                include_str!("../packages/analysis-driver/driver.mjs"),
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/packages/analysis-driver/driver.mjs"
+                )),
             ),
             (
                 "compiler.mjs",
-                include_str!("../packages/analysis-driver/compiler.mjs"),
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/packages/analysis-driver/compiler.mjs"
+                )),
             ),
             (
                 "scan.mjs",
-                include_str!("../packages/analysis-driver/scan.mjs"),
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/packages/analysis-driver/scan.mjs"
+                )),
             ),
             (
                 "scenarios.mjs",
-                include_str!("../packages/analysis-driver/scenarios.mjs"),
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/packages/analysis-driver/scenarios.mjs"
+                )),
             ),
             (
                 "entries.mjs",
-                include_str!("../packages/analysis-driver/entries.mjs"),
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/packages/analysis-driver/entries.mjs"
+                )),
             ),
         ] {
             fs::write(directory.path().join(name), source)?;

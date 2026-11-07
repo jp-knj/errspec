@@ -4,10 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { checkedValues, collect, testFullName } from "../src/coverage/vitest-recorder.mjs";
+import { checkedValues, collect, testFullName } from "../src/bin/errspec/coverage/vitest-recorder.mjs";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const recorder = join(project, "src/coverage/vitest-recorder.mjs");
+const recorder = join(project, "src/bin/errspec/coverage/vitest-recorder.mjs");
 // The checkout example is the repository's only installed Vitest; CI runs npm ci there first.
 const example = join(project, "examples/checkout");
 const vitest = join(example, "node_modules/.bin/vitest");

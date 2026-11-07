@@ -16,27 +16,42 @@ const FILES: &[Template] = &[
     Template {
         name: "errspec",
         file: "errspec/SKILL.md",
-        bytes: include_bytes!("../packages/cli/skills/errspec/SKILL.md"),
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/cli/skills/errspec/SKILL.md"
+        )),
     },
     Template {
         name: "errspec",
         file: "errspec/references/configuration.md",
-        bytes: include_bytes!("../packages/cli/skills/errspec/references/configuration.md"),
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/cli/skills/errspec/references/configuration.md"
+        )),
     },
     Template {
         name: "errspec",
         file: "errspec/references/runners.md",
-        bytes: include_bytes!("../packages/cli/skills/errspec/references/runners.md"),
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/cli/skills/errspec/references/runners.md"
+        )),
     },
     Template {
         name: "errspec-playwright",
         file: "errspec-playwright/SKILL.md",
-        bytes: include_bytes!("../packages/cli/skills/errspec-playwright/SKILL.md"),
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/cli/skills/errspec-playwright/SKILL.md"
+        )),
     },
     Template {
         name: "errspec-test-loop",
         file: "errspec-test-loop/SKILL.md",
-        bytes: include_bytes!("../packages/cli/skills/errspec-test-loop/SKILL.md"),
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/cli/skills/errspec-test-loop/SKILL.md"
+        )),
     },
 ];
 struct Planned {

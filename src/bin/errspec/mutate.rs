@@ -489,15 +489,24 @@ fn run_inner(
     let setup = temp.path().join("setup.mjs");
     fs::write(
         &script,
-        include_str!("../packages/mutation-driver/dist/driver.mjs"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/mutation-driver/dist/driver.mjs"
+        )),
     )?;
     fs::write(
         &setup,
-        include_str!("../packages/mutation-driver/setup.mjs"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/mutation-driver/setup.mjs"
+        )),
     )?;
     fs::write(
         temp.path().join("weak-runtime.mjs"),
-        include_str!("../packages/mutation-driver/weak-runtime.mjs"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/mutation-driver/weak-runtime.mjs"
+        )),
     )?;
     let run_id = temp
         .path()
@@ -507,7 +516,10 @@ fn run_inner(
         .replace('-', "");
     fs::write(
         temp.path().join("child-process.mjs"),
-        include_str!("../packages/mutation-driver/child-process.mjs"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/mutation-driver/child-process.mjs"
+        )),
     )?;
     let mut options = serde_json::to_value(&request).unwrap();
     options["binary"] = json!(std::env::current_exe()?);

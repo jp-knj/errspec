@@ -26,6 +26,12 @@ Raw input changes intentionally refresh the complete probe, including scope mode
 
 Fingerprints bind build-fixed Rust/driver/lock/compiler configuration identity, Node/runtime/environment, resolved runner options, project files, acquired runtime files, and resolved packages/content. Preserve graph edges for cyclic/shared packages, including edges into already acquired packages. Exclude own cache output and current temporary directory. Unreadable/opaque inputs disable reuse. Default reuse requires exact inputs in the same checkout, including position-only edits.
 
+The build-fixed identity includes native source paths as well as bytes. Moving
+CLI modules to `src/bin/errspec/` therefore invalidates previously cached mutation
+evidence; the first run rebuilds that evidence and subsequent compatible runs can
+reuse it. Fingerprint coverage and validation rules remain unchanged, and old
+cache identities are never relabeled to bypass validation.
+
 The embedded driver's `source-inventory` module shares raw source registration, per-source plugin generation, and ancestor manifest acquisition. Runner adapters retain enumeration, exclusion rules, and acquisition order. Plugin generation remains once per source before the baseline, and each adapter's final input validation uses the same acquired record.
 
 Even an all-cache-hit run re-enumerates current files before completion without another test run, rechecks fingerprints, and rejects changes during reuse. Corrupt/inconsistent cache falls back to fresh execution. Save only after final validation. Uncontrolled external-state-dependent tests are outside the cache contract.
