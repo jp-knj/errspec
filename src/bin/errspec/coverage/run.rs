@@ -13,7 +13,7 @@ use std::{
     process::Command,
 };
 
-const RECORDER: &str = include_str!("coverage/vitest-recorder.mjs");
+const RECORDER: &str = include_str!("vitest-recorder.mjs");
 const CONFIG_NAMES: &[&str] = &[
     "vitest.config.ts",
     "vitest.config.mts",

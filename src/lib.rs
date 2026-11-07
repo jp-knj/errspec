@@ -1,15 +1,25 @@
 //! Framework-independent contract comparison. The tsrs adapter is isolated in the CLI.
+#[path = "runners/bun.rs"]
 pub mod bun;
+#[path = "contracts/config.rs"]
 pub mod config;
+#[path = "contracts/contract.rs"]
 pub mod contract;
 pub mod coverage;
 pub mod discovery;
+#[path = "contracts/evidence.rs"]
 pub mod evidence;
 pub mod model;
 pub mod mutation;
+#[path = "contracts/observation.rs"]
 pub mod observation;
+#[path = "contracts/observation_io.rs"]
 pub mod observation_io;
+#[path = "contracts/reach.rs"]
 pub mod reach;
+#[path = "contracts/report.rs"]
 pub mod report;
+#[path = "contracts/snapshot.rs"]
 pub mod snapshot;
+#[path = "runners/vitest.rs"]
 pub mod vitest;
