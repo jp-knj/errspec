@@ -27,6 +27,104 @@ fn generate(source: &str, options: Value) -> std::process::Output {
 }
 
 #[test]
+fn template_plugin_nodes_preserve_literal_text_and_expression_comments() {
+    let source = r"export const text = tag`https://\${literal}/${host /* } */}//${value}/*tail*/`;";
+    let output = generate(source, json!({"facts":true}));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    insta::assert_json_snapshot!("template_plugin_nodes", result["metadata"]["nodes"]);
+}
+
+#[test]
+fn template_plugin_tokens_preserve_escaped_delimiters_and_nested_templates() {
+    for (template, expected) in [
+        (r"`https://${host}/path`", vec!["`https://${", "}/path`"]),
+        (r"`/* ${value} */`", vec!["`/* ${", "} */`"]),
+        (
+            r"`\${literal} ${value}\`tail`",
+            vec![r"`\${literal} ${", r"}\`tail`"],
+        ),
+        (r"`${first}${second}`", vec!["`${", "}${", "}`"]),
+        (
+            r"`あ${first}\${literal} /* ${second}終`",
+            vec!["`あ${", r"}\${literal} /* ${", "}終`"],
+        ),
+        (
+            r"`outer${`https://${host}`}tail`",
+            vec!["`outer${", "`https://${", "}`", "}tail`"],
+        ),
+        (r"tag`\unicode${value}`", vec![r"`\unicode${", "}`"]),
+    ] {
+        let source = format!("export const text = {template};");
+        let output = generate(&source, json!({"facts":true}));
+        assert!(
+            output.status.success(),
+            "{template}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let tokens: Vec<_> = result["metadata"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|node| {
+                matches!(
+                    node["kind"].as_str(),
+                    Some("TemplateHead" | "TemplateMiddle" | "TemplateTail")
+                )
+            })
+            .map(|node| {
+                &source[node["start"].as_u64().unwrap() as usize
+                    ..node["end"].as_u64().unwrap() as usize]
+            })
+            .collect();
+        assert_eq!(tokens, expected, "{template}");
+    }
+}
+
+#[test]
+fn line_comments_end_at_every_ecmascript_line_terminator() {
+    for terminator in ["\n", "\r", "\r\n", "\u{2028}", "\u{2029}"] {
+        let expression = format!("1 // ignored +{terminator} /* ignored +{terminator} */ + 2");
+        let source = format!("// lead{terminator}export const n = {expression};");
+        for facts in [false, true] {
+            let output = generate(&source, json!({"facts":facts}));
+            assert!(
+                output.status.success(),
+                "{terminator:?}, facts={facts}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let candidates = result["candidates"].as_array().unwrap();
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(candidates[0]["mutator"], "ArithmeticOperator");
+            assert_eq!(candidates[0]["original"], expression);
+            assert_eq!(
+                candidates[0]["replacement"],
+                expression.replace("*/ +", "*/ -")
+            );
+            assert_eq!(candidates[0]["byteOffset"], source.find('1').unwrap());
+            assert_eq!(candidates[0]["end"], source.len() - 1);
+            if facts {
+                let nodes = result["metadata"]["nodes"].as_array().unwrap();
+                assert_eq!(nodes[0]["start"], source.find("export").unwrap());
+                let operator = nodes
+                    .iter()
+                    .find(|node| node["kind"] == "PlusToken")
+                    .unwrap();
+                assert_eq!(operator["start"], source.rfind('+').unwrap());
+                assert_eq!(operator["end"], source.rfind('+').unwrap() + 1);
+            }
+        }
+    }
+}
+
+#[test]
 fn native_plugin_candidates_keep_owned_ids_locations_and_exclusion_reasons() {
     let source =
         "// errspec-disable-next-line Double: protocol constant\nexport const value=()=>2;";

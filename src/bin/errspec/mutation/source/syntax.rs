@@ -569,7 +569,9 @@ pub(super) fn graph_token(source: &str, mut start: usize, end: usize, token: &st
     while start < end {
         let s = &source[start..end];
         if s.starts_with("//") {
-            start += s.find('\n').unwrap_or(s.len());
+            start += s
+                .find(['\n', '\r', '\u{2028}', '\u{2029}'])
+                .unwrap_or(s.len());
             continue;
         }
         if s.starts_with("/*") {
