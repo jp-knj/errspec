@@ -40,6 +40,34 @@ selection or verdict rules belong in `src/mutation/`; new file traversal belongs
 with acquisition. A second runner should translate its facts into the existing
 execution contract before introducing another verdict loop.
 
+## Coordinator phases and ownership
+
+`run.rs` handles the public command entry, interruption registration and final
+report completion. Its `run_inner` sequences private phases under `run/`:
+
+| Module | Input and owned result |
+| --- | --- |
+| `configuration` | Validate the request, recover owned workers and acquire Git/acceptance inputs; return configuration and the common budget start time |
+| `session` / `driver` | Materialize embedded assets and open the validated driver protocol; own the process and its temporary directory |
+| `prepare` / `prepare::inventory` | Acquire candidates, syntax, ordinary baseline and probe; return current evidence, cache store and fingerprint projections |
+| `plan` | Apply key/Git/shard selection, acquire typecheck facts, attribute covering tests and rank test-selection requests |
+| `execute` / `worker_pool` | Apply sampling/reuse and execute serial or parallel trials through the same confirmation and verdict functions |
+| `finalize` | Close/reopen for final acquisition, compare Git inputs, merge worker facts, validate fingerprints, persist evidence and apply acceptance |
+
+The request's report stays available across phase failures. Inventory acquisition
+retains successful file/baseline evidence before checking later driver errors.
+In sequential execution, sampling/reuse and each trial keep their original
+per-candidate order, so a failed trial does not newly mark later rows as reused.
+Parallel execution prepares its queue first and restores result order by index.
+
+`Session` drops its driver before its temporary resources. Trial execution binds
+the resources before moving the driver, preserving that order on early errors;
+the worker pool joins owned workers before returning or deleting their files.
+Finalization runs only after successful trial coordination, and marks completion
+only after the existing close/input/cache checks. No public protocol, cache
+eligibility, deadline, retry or concurrency default changes with this extraction.
+Native source changes still invalidate the build-fixed engine fingerprint.
+
 ## Evidence that must survive a refactor
 
 The ordinary baseline is current. A passing case cannot conceal a failed module

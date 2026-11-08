@@ -42,6 +42,7 @@ functional inclusion does not require copying mutator's public interface.
 - [KARTE source-free failure-verification trial](products/errspec/practical-failure-trial.md)
 - [Journey full/repeat comparison](engineering/benchmarks/journey-2026-11-05.md) and [scope/test-improvement trial](products/errspec/practical-mutation-trial.md)
 - [Bounded source batching: reproducible throughput and end-to-end limits](engineering/benchmarks/source-batching-2026-11-06.md)
+- [Mutation concurrency: time, process-tree RSS and coordinator extraction](engineering/benchmarks/mutation-concurrency-2026-11-08.md)
 
 English is the maintained documentation language. Git and PRs retain earlier
 wording, decisions and validation history. No specification bootstrap is required.
