@@ -16,6 +16,7 @@ pub mod selection;
 pub mod sharding;
 pub mod syntax;
 pub mod test_selection;
+pub mod typecheck;
 
 pub const RULES_VERSION: &str = "2";
 pub const MUTATORS: [&str; 18] = [

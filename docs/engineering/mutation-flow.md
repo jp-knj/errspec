@@ -50,7 +50,8 @@ report completion. Its `run_inner` sequences private phases under `run/`:
 | `configuration` | Validate the request, recover owned workers and acquire Git/acceptance inputs; return configuration and the common budget start time |
 | `session` / `driver` | Materialize embedded assets and open the validated driver protocol; own the process and its temporary directory |
 | `prepare` / `prepare::inventory` | Acquire candidates, syntax, ordinary baseline and probe; return current evidence, cache store and fingerprint projections |
-| `plan` | Apply key/Git/shard selection, acquire typecheck facts, attribute covering tests and rank test-selection requests |
+| `plan` | Apply key/Git/shard selection, coordinate typecheck acquisition/judgment and apply updates, attribute covering tests and rank test-selection requests |
+| `typecheck` | Request typechecking through the driver, validate the envelope and decode owned facts without accessing the report |
 | `execute` / `worker_pool` | Apply sampling/reuse and execute serial or parallel trials through the same confirmation and verdict functions |
 | `finalize` | Close/reopen for final acquisition, compare Git inputs, merge worker facts, validate fingerprints, persist evidence and apply acceptance |
 
@@ -67,6 +68,39 @@ Finalization runs only after successful trial coordination, and marks completion
 only after the existing close/input/cache checks. No public protocol, cache
 eligibility, deadline, retry or concurrency default changes with this extraction.
 Native source changes still invalidate the build-fixed engine fingerprint.
+
+## Typecheck acquisition, judgment, and report application
+
+`run/typecheck.rs` sends the selected keys in report order, including keys that
+the compiler adapter excludes, with the existing unlimited total deadline and
+120-second progress-stall deadline. It validates timeout/driver errors, the single
+`typechecked` response, outcomes array, allowed messages and terminal count, then
+decodes `TypecheckInfo`. It returns `mutation::typecheck::Facts`; missing, invalid,
+and explicit null candidate fields remain distinguishable.
+
+`src/mutation/typecheck.rs` has no driver or report dependency. Call
+`evaluate(expected_keys, facts)` with the selected non-ignored TypeScript keys.
+Its `Evaluation` contains confirmed updates in response order and
+`completion: Result<TypecheckInfo, Error>`. Key and compiler-fact validation stops
+at the first invalid candidate. Completeness, aggregate counts and nonempty
+compiler version are checked after all candidates. A pair of null facts emits no
+update, preserving the candidate's existing status and reason.
+
+`plan.rs` applies the updates before returning any completion error. It sets
+`engine.typecheck` and the aggregate information only on success. Keep this order:
+buffering updates does not make report changes atomic. An error in the second
+candidate retains the first update; a final count mismatch retains every update.
+When typechecking is disabled, skip acquisition and report application entirely.
+
+Change compiler/process integration in acquisition, fact interpretation in the
+library, and report application in the coordinator. Pure judgment tests supply
+owned values without starting processes or constructing reports. Report snapshots
+captured before extraction check partial results and diagnostic precedence, while
+Node integration tests exercise installed TypeScript versions, disabled checks,
+weak mutation, parallel trials, cache reuse and shards. Preserve existing protocol,
+JSON and diagnostic expectations when changing these boundaries. Source changes
+invalidate old engine-bound caches once under the existing fingerprint rules;
+subsequent compatible runs can reuse newly acquired evidence.
 
 ## Evidence that must survive a refactor
 

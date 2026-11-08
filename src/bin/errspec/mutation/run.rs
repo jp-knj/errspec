@@ -8,11 +8,12 @@ mod prepare;
 mod session;
 mod source_lines;
 mod source_protocol;
-pub(crate) use source_lines::entry as source_lines_entry;
+mod typecheck;
 mod worker_pool;
 use configuration::Configuration;
 use errspec::mutation::options::Options as MutationRequest;
 use errspec::mutation::{self, Report};
+pub(crate) use source_lines::entry as source_lines_entry;
 use std::{
     io::{self, Read},
     process::ExitCode,
