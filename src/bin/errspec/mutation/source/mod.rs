@@ -1,12 +1,13 @@
 //! Syntax-driven mutation rules. File acquisition is owned by the caller.
-use crate::tsrs_adapter::{line_at, parse_source};
+use crate::tsrs_adapter::line_at;
+mod syntax;
 use errspec::model::Location;
 use errspec::mutation::{Candidate, MUTATORS, Placement};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-use tsrs_ast::{Kind, Node, SourceFile, is_type_node_kind};
-use tsrs_core::P;
+use syntax::{Graph, Node, graph_token};
+use tsrs_ast::{Kind, is_type_node_kind};
 mod arid;
 mod callgraph;
 mod comments;
@@ -65,7 +66,8 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
             return Err(format!("Unknown mutator: {name}"));
         }
     }
-    let file = parse_source(&request.file, request.source)?;
+    let graph = Graph::parse(&request.file, &request.source, request.facts)?;
+    let file = graph.root();
     plugins::validate(
         file,
         &request.custom_mutators,
@@ -158,7 +160,7 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
 }
 
 struct Rules<'a> {
-    file: P<SourceFile>,
+    file: Node<'a>,
     name: &'a str,
     excluded: &'a [String],
     candidates: Vec<Candidate>,
@@ -166,24 +168,24 @@ struct Rules<'a> {
     critical: BTreeSet<String>,
     in_critical: bool,
     disabled: errspec::mutation::exclusions::Disabled,
-    arid: arid::Arid,
+    arid: arid::Arid<'a>,
     weak_mutation: bool,
     facts: bool,
     owners: std::collections::BTreeMap<String, String>,
-    scopes: std::collections::BTreeMap<String, P<Node>>,
+    scopes: std::collections::BTreeMap<String, Node<'a>>,
     parents: std::collections::BTreeMap<String, String>,
     calls: Vec<errspec::mutation::syntax::Call>,
     plugin_edits: &'a [plugins::Edit],
     applied_plugin_edits: BTreeSet<usize>,
 }
-impl Rules<'_> {
-    fn start(&self, node: P<Node>) -> usize {
-        tsrs_scanner::get_token_pos_of_node(node, self.file, false) as usize
+impl<'a> Rules<'a> {
+    fn start(&self, node: Node<'a>) -> usize {
+        node.start()
     }
-    fn end(&self, node: P<Node>) -> usize {
-        node.end().source_offset().unwrap_or(0) as usize
+    fn end(&self, node: Node<'a>) -> usize {
+        node.end_offset()
     }
-    fn raw(&self, node: P<Node>) -> &str {
+    fn raw(&self, node: Node<'a>) -> &str {
         self.file
             .text()
             .get(self.start(node)..self.end(node))
@@ -192,7 +194,7 @@ impl Rules<'_> {
     #[allow(clippy::too_many_arguments)]
     fn add(
         &mut self,
-        node: P<Node>,
+        node: Node<'a>,
         family: &str,
         replacement: String,
         placement: Placement,
@@ -206,7 +208,8 @@ impl Rules<'_> {
         }
         let start = self.start(node) as u32;
         let end = self.end(node) as u32;
-        let identity = serde_json::to_vec(&(self.name, owner, path, family, &replacement)).unwrap();
+        let identity =
+            serde_json::to_vec(&("oxc-v1", self.name, owner, path, family, &replacement)).unwrap();
         let key = format!("{:x}", Sha256::digest(identity));
         if self.facts {
             self.owners.insert(key.clone(), owner.into());
@@ -222,7 +225,7 @@ impl Rules<'_> {
                         .expression()
                         .is_some_and(|n| n.kind() == Kind::StringLiteral)
                 {
-                    offset = self.end(*statement) as u32;
+                    offset = self.end(statement) as u32;
                 } else {
                     break;
                 }
@@ -260,7 +263,7 @@ impl Rules<'_> {
     }
     fn expression(
         &mut self,
-        node: P<Node>,
+        node: Node<'a>,
         family: &str,
         value: String,
         owner: &str,
@@ -345,7 +348,7 @@ impl Rules<'_> {
             self.candidates.last_mut().unwrap().weak = weak;
         }
     }
-    fn splice(&self, outer: P<Node>, inner: P<Node>, value: &str) -> String {
+    fn splice(&self, outer: Node<'a>, inner: Node<'a>, value: &str) -> String {
         let a = self.start(outer);
         let b = self.start(inner);
         let c = self.end(inner);
@@ -357,7 +360,7 @@ impl Rules<'_> {
             &self.file.text()[c..d]
         )
     }
-    fn visit(&mut self, node: P<Node>, owner: &str, path: &[usize]) {
+    fn visit(&mut self, node: Node<'a>, owner: &str, path: &[usize]) {
         let kind = node.kind();
         let runtime_heritage = kind == Kind::ExpressionWithTypeArguments
             && node.parent().is_some_and(|parent| {
@@ -381,7 +384,7 @@ impl Rules<'_> {
         {
             return;
         }
-        if tsrs_ast::has_syntactic_modifier(node, tsrs_ast::ModifierFlags::Ambient) {
+        if node.ambient() {
             return;
         }
         let named_owner = matches!(
@@ -428,7 +431,7 @@ impl Rules<'_> {
                 | Kind::MethodDeclaration
                 | Kind::PropertyDeclaration
         ) {
-            let full = node.pos().source_offset().unwrap_or(0) as usize;
+            let full = node.leading_start();
             let leading = self.file.text().get(full..self.start(node)).unwrap_or("");
             self.in_critical |= leading
                 .lines()
@@ -452,7 +455,7 @@ impl Rules<'_> {
         });
         self.in_critical = was_critical;
     }
-    fn apply(&mut self, node: P<Node>, owner: &str, path: &[usize]) {
+    fn apply(&mut self, node: Node<'a>, owner: &str, path: &[usize]) {
         let raw = self.raw(node).to_string();
         match node.kind() {
             Kind::BinaryExpression => {
@@ -570,13 +573,12 @@ impl Rules<'_> {
             Kind::Block => {
                 if !node.statements().is_empty() {
                     let parent = node.parent();
-                    let function = parent.is_some_and(tsrs_ast::is_function_like_declaration);
+                    let function = parent.is_some_and(Node::is_function);
                     let unsafe_body = parent.is_some_and(|n| {
                         matches!(
                             n.kind(),
                             Kind::Constructor | Kind::GetAccessor | Kind::SetAccessor
-                        ) || tsrs_ast::get_function_flags(Some(n))
-                            .intersects(tsrs_ast::FunctionFlags::Generator)
+                        ) || n.generator()
                     });
                     let unsafe_declaration = node
                         .statements()
@@ -644,9 +646,12 @@ impl Rules<'_> {
                     );
                 }
             }
-            Kind::IfStatement => {
-                self.condition(node.as_if_statement().expression(), false, owner, path)
-            }
+            Kind::IfStatement => self.condition(
+                node.as_if_statement().expression().unwrap(),
+                false,
+                owner,
+                path,
+            ),
             Kind::ConditionalExpression => self.condition(
                 node.as_conditional_expression().condition(),
                 false,
@@ -667,13 +672,14 @@ impl Rules<'_> {
                         .initializer()
                         .map(|n| self.end(n))
                         .unwrap_or(self.start(node));
-                    let mut scanner = tsrs_scanner::Scanner::new();
-                    scanner.set_text(
-                        &self.file.text()[start..self.start(node.as_for_statement().statement())],
-                    );
-                    while !matches!(scanner.scan(), Kind::SemicolonToken | Kind::EndOfFile) {}
-                    if scanner.token() == Kind::SemicolonToken {
-                        let offset = start + scanner.token_end() as usize;
+                    if let Some(offset) = graph_token(
+                        self.file.text(),
+                        start,
+                        self.start(node.as_for_statement().statement()),
+                        ";",
+                    )
+                    .map(|s| s.end as usize)
+                    {
                         let count = self.candidates.len();
                         self.add(
                             node,
@@ -761,7 +767,7 @@ impl Rules<'_> {
             _ => (),
         }
     }
-    fn condition(&mut self, node: P<Node>, loop_test: bool, owner: &str, path: &[usize]) {
+    fn condition(&mut self, node: Node<'a>, loop_test: bool, owner: &str, path: &[usize]) {
         let mut current = node;
         let mut parent = node.parent();
         let mut looping = loop_test;
@@ -791,7 +797,7 @@ impl Rules<'_> {
         }
         self.expression(node, "ConditionalExpression", "false".into(), owner, path);
     }
-    fn skip_string(&self, node: P<Node>) -> bool {
+    fn skip_string(&self, node: Node<'a>) -> bool {
         node.parent().is_some_and(|p| {
             matches!(
                 p.kind(),
@@ -808,7 +814,7 @@ impl Rules<'_> {
                     })
         })
     }
-    fn directive(&self, statement: P<Node>) -> bool {
+    fn directive(&self, statement: Node<'a>) -> bool {
         let Some(parent) = statement.parent() else {
             return false;
         };
@@ -823,13 +829,13 @@ impl Rules<'_> {
             {
                 return false;
             }
-            if *item == statement {
+            if item == statement {
                 return true;
             }
         }
         false
     }
-    fn call(&mut self, node: P<Node>, owner: &str, path: &[usize]) {
+    fn call(&mut self, node: Node<'a>, owner: &str, path: &[usize]) {
         let Some(callee) = node.expression() else {
             return;
         };
@@ -924,7 +930,7 @@ impl Rules<'_> {
             );
         }
     }
-    fn fn_value(&mut self, node: P<Node>, owner: &str, path: &[usize]) {
+    fn fn_value(&mut self, node: Node<'a>, owner: &str, path: &[usize]) {
         let Some(body) = node.body() else { return };
         let Some(mut typ) = node.type_node() else {
             return;
@@ -932,11 +938,10 @@ impl Rules<'_> {
         while typ.kind() == Kind::ParenthesizedType {
             typ = typ.type_node().unwrap();
         }
-        if tsrs_ast::get_function_flags(Some(node)).intersects(tsrs_ast::FunctionFlags::Generator) {
+        if node.generator() {
             return;
         }
-        let is_async =
-            tsrs_ast::get_function_flags(Some(node)).intersects(tsrs_ast::FunctionFlags::Async);
+        let is_async = node.is_async();
         let promise = if typ.kind() == Kind::TypeReference
             && self.raw(typ.as_type_reference_node().type_name()) == "Promise"
             && typ.type_arguments().len() == 1
@@ -989,7 +994,7 @@ impl Rules<'_> {
             }
         }
     }
-    fn same_value(&self, mut node: P<Node>, value: &str) -> bool {
+    fn same_value(&self, mut node: Node<'a>, value: &str) -> bool {
         while node.kind() == Kind::ParenthesizedExpression {
             node = node.expression().unwrap();
         }
@@ -999,8 +1004,9 @@ impl Rules<'_> {
                 Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral
             ) && serde_json::from_str::<String>(value).is_ok_and(|v| v == node.text())
     }
-    fn type_values(&self, typ: P<Node>) -> Vec<String> {
+    fn type_values(&self, typ: Node<'a>) -> Vec<String> {
         let values: &[&str] = match typ.kind() {
+            Kind::NullKeyword => &["null"],
             Kind::BooleanKeyword => &["true", "false"],
             Kind::NumberKeyword => &["0", "1", "-1"],
             Kind::StringKeyword => &["\"\"", "\"xyzzy\""],
@@ -1010,7 +1016,7 @@ impl Rules<'_> {
             Kind::ParenthesizedType => return self.type_values(typ.type_node().unwrap()),
             Kind::UnionType => {
                 let mut result = vec![];
-                for child in typ.as_union_type_node().types().nodes() {
+                for child in typ.children().iter() {
                     for value in self.type_values(*child) {
                         if !result.contains(&value) {
                             result.push(value);

@@ -27,6 +27,9 @@ use clap::{CommandFactory, FromArgMatches};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("__mutation-source-lines") {
+        return mutate::source_lines_entry();
+    }
     if let Err(error) = owned_process::retain_children() {
         eprintln!("Cannot retain child-process ownership: {error}");
         return ExitCode::from(2);

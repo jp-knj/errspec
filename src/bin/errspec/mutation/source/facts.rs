@@ -1,10 +1,10 @@
 //! Owned syntax facts shared by selection, reuse, plugins and mutation reports.
 use super::*;
-use errspec::mutation::syntax::{Metadata, Scope, SyntaxNode};
+use errspec::mutation::syntax::{Metadata, Scope};
 use std::collections::BTreeMap;
 type Entries<'a> = BTreeMap<(usize, usize), Vec<&'a Candidate>>;
 
-fn pure(node: P<Node>) -> bool {
+fn pure(node: Node<'_>) -> bool {
     match node.kind() {
         // Anonymous default declarations have no independently tracked owner.
         // Their bodies must therefore stay in the module's envelope.
@@ -28,13 +28,8 @@ fn pure(node: P<Node>) -> bool {
         }
         Kind::VariableStatement => {
             let mut declarations = Vec::new();
-            node.for_each_child(&mut |list| {
-                if list.kind() == Kind::VariableDeclarationList {
-                    list.for_each_child(&mut |declaration| {
-                        declarations.push(declaration);
-                        false
-                    });
-                }
+            node.for_each_child(&mut |child| {
+                declarations.push(child);
                 false
             });
             !declarations.is_empty() && declarations.into_iter().all(pure)
@@ -43,11 +38,11 @@ fn pure(node: P<Node>) -> bool {
     }
 }
 
-fn fingerprint(rules: &Rules<'_>, node: P<Node>, effects_only: bool, hash: &mut Sha256) {
+fn fingerprint(rules: &Rules<'_>, node: Node<'_>, effects_only: bool, hash: &mut Sha256) {
     if node.kind() == Kind::JSDoc {
         return;
     }
-    hash.update(format!("{:?}:{};", node.kind(), node.flags().bits()));
+    hash.update(format!("{:?}:{};", node.kind(), node.flags()));
     if matches!(
         node.kind(),
         Kind::Identifier
@@ -55,6 +50,7 @@ fn fingerprint(rules: &Rules<'_>, node: P<Node>, effects_only: bool, hash: &mut 
             | Kind::StringLiteral
             | Kind::NumericLiteral
             | Kind::BigIntLiteral
+            | Kind::TemplateExpression
             | Kind::NoSubstitutionTemplateLiteral
             | Kind::TemplateHead
             | Kind::TemplateMiddle
@@ -77,8 +73,8 @@ fn fingerprint(rules: &Rules<'_>, node: P<Node>, effects_only: bool, hash: &mut 
 }
 
 // Definitions keep their public binding/signature but do not execute their function bodies.
-fn skeleton(rules: &Rules<'_>, node: P<Node>, hash: &mut Sha256) {
-    hash.update(format!("{:?}:{};", node.kind(), node.flags().bits()));
+fn skeleton(rules: &Rules<'_>, node: Node<'_>, hash: &mut Sha256) {
+    hash.update(format!("{:?}:{};", node.kind(), node.flags()));
     node.for_each_child(&mut |child| {
         if node.body() == Some(child) {
             return false;
@@ -98,7 +94,7 @@ fn skeleton(rules: &Rules<'_>, node: P<Node>, hash: &mut Sha256) {
     });
 }
 
-fn references(node: P<Node>, root: P<Node>, out: &mut BTreeSet<String>, unknown: &mut bool) {
+fn references(node: Node<'_>, root: Node<'_>, out: &mut BTreeSet<String>, unknown: &mut bool) {
     if root.kind() == Kind::SourceFile && node != root && node.parent() == Some(root) && pure(node)
     {
         return;
@@ -120,13 +116,13 @@ fn references(node: P<Node>, root: P<Node>, out: &mut BTreeSet<String>, unknown:
             )
     });
     if node.kind() == Kind::Identifier && !binding {
-        out.insert(crate::tsrs_adapter::text(node));
+        out.insert(node.text().to_owned());
     }
     if node.kind() == Kind::CallExpression
         && node.expression().is_none_or(|callee| {
             callee.kind() != Kind::Identifier
                 || matches!(
-                    crate::tsrs_adapter::text(callee).as_str(),
+                    callee.text().to_owned().as_str(),
                     "eval" | "Function" | "require"
                 )
         })
@@ -139,32 +135,8 @@ fn references(node: P<Node>, root: P<Node>, out: &mut BTreeSet<String>, unknown:
     });
 }
 
-fn syntax(
-    rules: &Rules<'_>,
-    node: P<Node>,
-    parent: Option<usize>,
-    nodes: &mut Vec<SyntaxNode>,
-) -> usize {
-    let id = nodes.len();
-    nodes.push(SyntaxNode {
-        kind: format!("{:?}", node.kind()),
-        start: rules.start(node),
-        end: rules.end(node),
-        parent,
-        name: node.name().map(|name| rules.raw(name).into()),
-        children: vec![],
-    });
-    let mut children = vec![];
-    node.for_each_child(&mut |child| {
-        children.push(syntax(rules, child, Some(id), nodes));
-        false
-    });
-    nodes[id].children = children;
-    id
-}
-
-fn entry(rules: &Rules<'_>, entries: &Entries<'_>, owner: &str, node: P<Node>) -> Option<String> {
-    let function = if tsrs_ast::is_function_like_declaration(node) {
+fn entry(rules: &Rules<'_>, entries: &Entries<'_>, owner: &str, node: Node<'_>) -> Option<String> {
+    let function = if node.is_function() {
         Some(node)
     } else if matches!(
         node.kind(),
@@ -262,8 +234,7 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
             )
         })
         .collect();
-    let mut nodes = vec![];
-    syntax(rules, rules.file.as_node(), None, &mut nodes);
+    let nodes = rules.file.plugin_nodes();
     Metadata {
         version: 2,
         source_hash: format!("{:x}", Sha256::digest(rules.file.text().as_bytes())),

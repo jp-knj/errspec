@@ -1,18 +1,17 @@
 //! Syntax-only logging heuristics. No runtime purity or equivalence is claimed.
-use crate::tsrs_adapter::walk;
+use super::syntax::Node;
 use errspec::mutation::exclusions::{ARID_CALLEES, logging_path, valid_callee};
 use std::collections::HashMap;
-use tsrs_ast::{Kind, Node, SourceFile};
-use tsrs_core::P;
+use tsrs_ast::Kind;
 
-pub(super) struct Arid {
-    file: P<SourceFile>,
+pub(super) struct Arid<'a> {
+    file: Node<'a>,
     patterns: Vec<String>,
-    statements: HashMap<P<Node>, bool>,
+    statements: HashMap<Node<'a>, bool>,
 }
-impl Arid {
+impl<'a> Arid<'a> {
     pub(super) fn new(
-        file: P<SourceFile>,
+        file: Node<'a>,
         enabled: bool,
         patterns: Option<Vec<String>>,
     ) -> Result<Self, String> {
@@ -28,13 +27,13 @@ impl Arid {
         };
         // Cache each statement once; ancestors are then constant-time lookups.
         if enabled {
-            walk(file.as_node(), &mut |node| {
+            file.walk(&mut |node| {
                 result.statement(node);
             });
         }
         Ok(result)
     }
-    fn unwrap(mut node: P<Node>, await_call: bool) -> P<Node> {
+    fn unwrap(mut node: Node<'a>, await_call: bool) -> Node<'a> {
         while matches!(
             node.kind(),
             Kind::ParenthesizedExpression | Kind::NonNullExpression
@@ -47,17 +46,12 @@ impl Arid {
         }
         node
     }
-    fn path(&self, node: P<Node>) -> Option<String> {
+    fn path(&self, node: Node<'a>) -> Option<String> {
         let node = Self::unwrap(node, false);
         match node.kind() {
             Kind::Identifier | Kind::ThisKeyword => {
-                let start = tsrs_scanner::get_token_pos_of_node(node, self.file, false) as usize;
-                Some(
-                    self.file
-                        .text()
-                        .get(start..node.end().source_offset()? as usize)?
-                        .into(),
-                )
+                let start = node.start();
+                Some(self.file.text().get(start..node.end_offset())?.into())
             }
             Kind::PropertyAccessExpression => {
                 let name = self.path(node.name()?)?;
@@ -71,7 +65,7 @@ impl Arid {
             _ => None,
         }
     }
-    fn logging_call(&self, node: P<Node>) -> bool {
+    fn logging_call(&self, node: Node<'a>) -> bool {
         let node = Self::unwrap(node, true);
         node.kind() == Kind::CallExpression
             && node
@@ -79,7 +73,7 @@ impl Arid {
                 .and_then(|callee| self.path(callee))
                 .is_some_and(|path| logging_path(&path, &self.patterns))
     }
-    fn statement(&mut self, node: P<Node>) -> bool {
+    fn statement(&mut self, node: Node<'a>) -> bool {
         if let Some(result) = self.statements.get(&node) {
             return *result;
         }
@@ -104,7 +98,7 @@ impl Arid {
         self.statements.insert(node, result);
         result
     }
-    pub(super) fn ignores(&self, mut node: P<Node>) -> bool {
+    pub(super) fn ignores(&self, mut node: Node<'a>) -> bool {
         if self.patterns.is_empty() {
             return false;
         }
@@ -113,8 +107,8 @@ impl Arid {
                 return true;
             }
             if node.kind() == Kind::SourceFile
-                || tsrs_ast::is_function_like_declaration(node)
-                || (tsrs_ast::is_statement(node)
+                || node.is_function()
+                || (node.is_statement()
                     && !matches!(
                         node.kind(),
                         Kind::ExpressionStatement | Kind::Block | Kind::IfStatement

@@ -7,7 +7,7 @@ This design implements the [requirements](requirements.md) and [Product](../../p
 | Component | Responsibility |
 |---|---|
 | Rust CLI/coordinator | Validate requests, start drivers, sequence baselines/trials, select exit status |
-| tsrs adapter/generator | Parse runtime syntax and acquire candidate/placement facts |
+| Oxc syntax adapter/generator | Parse runtime syntax and acquire candidate/placement facts |
 | Node driver | Resolve Vitest, enumerate source/tests, emit transformed text/maps, execute tests |
 | Worker runtime | Track active key and per-test/module hit counts for the current request |
 | Rust judgments/reporting | Judge owned validated values and convert them into output |
@@ -26,7 +26,7 @@ The initial mode uses fresh sessions for ordinary baseline, probe, and each atte
 
 ## Runtime syntax and candidate order
 
-A syntax-only adapter entry uses `tsrs_parser` pinned to the existing compiler revision. It does not change semantic `TsrsAdapter::open`, type-error, or `noCheck` rules. Traverse runtime expressions/statements, excluding types, ambient declarations, decorators, import/reexport specifiers, and directives. For `as`/`satisfies`, traverse only the expression. Return annotations supply `FnValue` choices but are not mutated.
+A syntax-only adapter uses Oxc parser, AST visitor and semantic parent nodes, pinned to `0.157.0`. It projects runtime nodes into the existing mutation/plugin vocabulary and returns owned candidates and metadata. It does not change semantic `TsrsAdapter::open`, type-error, or `noCheck` rules. Traverse runtime expressions/statements, excluding types, ambient declarations, decorators, import/reexport specifiers, and directives. For `as`/`satisfies`, traverse only the expression. Return annotations supply `FnValue` choices but are not mutated.
 
 The [fixed reference](../../mutator-coverage.md) anchors these rules. Table order defines family order; enumeration within a row defines replacement order.
 
@@ -61,7 +61,7 @@ Record edit range separately from the enclosing runtime expression/statement/bod
 
 Evaluate the original branch once. Do not wrap only a callee or assignment reference. Preserve `this`, short-circuiting, await/yield, labels, ASI, directives, and `super()` order. Unsafe candidates are `Ignored` with reasons. Keep original formatting except required insertions/replacements. Empty for conditions use insertion while retaining labels; AST directive boundaries determine body guards even with comments/omitted semicolons.
 
-Keys are SHA-256 of a JSON tuple containing root-relative file, syntactic owner identity, owner-relative AST path, family, and replacement. Byte positions and temporary paths are excluded. Keep content, positions, and rule version separately. Key stability alone does not establish cache validity.
+Keys are SHA-256 of a JSON tuple containing the `oxc-v1` identity namespace, root-relative file, syntactic owner identity, owner-relative AST path, family, and replacement. Byte positions and temporary paths are excluded. Keep content, positions, and rule version separately. Key stability alone does not establish cache validity.
 
 ## Positions, emission, and validation
 
@@ -69,26 +69,36 @@ Rust uses half-open UTF-8 byte ranges and shared `Location`. The driver scans co
 
 Reparse transformed text using the same ScriptKind before registration. Invalid emission is an instrumentation failure, never a kill. If an earlier Vite transform supplies text different from registered source, reject unsupported ordering/input change rather than guessing original positions.
 
-The shared driver batches pure source generation and emitted-text validation into
-one-shot native parser children. Each invocation handles at most eight requests;
-the driver splits at 1 MiB of serialized request input, except that an individually
-larger file keeps its existing isolated path. Compiler arenas die with the child,
-so batching does not introduce an unbounded persistent parser. The internal batch
-envelope authenticates the compiled engine fingerprint, preserves request order,
-and returns independent success/error results. The existing single-source entry
-and public CLI/JSON contracts remain unchanged.
+Each driver lazily starts one native generator and reuses it through a private,
+sequential `__mutation-source-lines` JSON Lines protocol. Requests authenticate
+the compiled engine fingerprint. Monotonic request IDs bind responses; each
+request releases its parser, semantic model, AST and allocator before the next
+request. Only owned results cross the boundary. The single-source and bounded
+batch `__mutation-source` entry remains available for existing internal callers.
+
+Each request retains the 60-second deadline and 64 MiB transport limit. Syntax
+failures are independent request errors; malformed frames, wrong IDs, unexpected
+EOF and response overflow stop the process as communication failures. A changed
+engine remains an input error. Normal close ends stdin and joins the child;
+interruption, timeout or failed shutdown kills and reaps it. Existing worker
+process-group ownership also covers cancellation and supervisor recovery.
 
 Every emitted file is still parsed. A syntax failure takes the existing individual
-placement checks, while engine/protocol failures stop acquisition. If aggregate
-output exceeds the 64 MiB transport buffer, retry files individually; a transport
-limit must not silently discard candidates. Plugin visitors keep their original
-per-source execution and input acquisition. This optimization changes neither
-ordinary/probe baselines nor cache eligibility or final input validation. The
-[emitter acceptance](../../../../../tests/mutation-emitter.test.mjs) compares full
-individual/batched results, mixed syntax failures, ordering, process counts, byte
-bounds, fingerprint failures and malformed responses. The reproducible
-[throughput benchmark](../../../../../scripts/benchmark-mutation-source.mjs)
-asserts complete result equality separately from runner wall time.
+placement checks; input and protocol failures stop acquisition. Plugin callbacks,
+ordinary/probe baselines, cache eligibility and final input validation retain
+existing behavior. Child-process dependency facts are acquired sequentially after
+runner callbacks so callback overlap cannot multiplex generator requests.
+
+Reports identify `engine.parser` as Oxc `0.157.0`, with rules version `2`. The new
+candidate namespace also applies to native plugin edits. Existing cache engine
+fingerprints invalidate old results; old acceptance IDs remain visibly stale.
+This does not change the tsrs backend used for type analysis.
+
+[Generator tests](../../../../../tests/mutation-generator.test.mjs) cover repeated
+requests, syntax recovery, communication failures, deadlines, shutdown and memory
+retention. [Emitter tests](../../../../../tests/mutation-emitter.test.mjs) retain
+single/batch parity, per-placement parsing and inactive-behavior checks. Process,
+plugin, selection and cache suites exercise integration with current workflows.
 
 ## Vitest acquisition and coverage
 

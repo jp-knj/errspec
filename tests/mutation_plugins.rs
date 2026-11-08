@@ -89,3 +89,49 @@ fn plugin_replacements_cannot_change_function_strictness_or_target_erased_types(
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Type"));
 }
+
+#[test]
+fn dynamic_import_plugin_anchors_and_runtime_dependency_facts_are_preserved() {
+    let source = "import type {T} from './types'; import main, {type U, value as local} from './mod'; export * from './other'; const lazy = import('./lazy'); require('./cjs');";
+    let start = source.find("import('./lazy')").unwrap();
+    let end = start + "import('./lazy')".len();
+    let output = generate(
+        source,
+        json!({"facts":true,"customMutators":["Load"],"pluginEdits":[{"mutator":"Load","anchorKind":"CallExpression","anchorStart":start,"anchorEnd":end,"start":start,"end":end,"replacement":"Promise.resolve({})"}]}),
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        result["metadata"]["dependencies"],
+        json!(["./cjs", "./lazy", "./mod", "./other"])
+    );
+    let imports = result["metadata"]["imports"].as_array().unwrap();
+    assert_eq!(imports.len(), 2);
+    assert_eq!(
+        (&imports[0]["imported"], &imports[0]["local"]),
+        (&json!("default"), &json!("main"))
+    );
+    assert_eq!(
+        (&imports[1]["imported"], &imports[1]["local"]),
+        (&json!("value"), &json!("local"))
+    );
+    let nodes = result["metadata"]["nodes"].as_array().unwrap();
+    let call = nodes
+        .iter()
+        .find(|node| node["kind"] == "CallExpression" && node["start"] == start)
+        .unwrap();
+    assert_eq!(call["children"].as_array().unwrap().len(), 2);
+    assert!(
+        result["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["mutator"] == "Load"
+                && c["original"] == "import('./lazy')"
+                && c["ignored"].is_null())
+    );
+}

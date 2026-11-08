@@ -13,7 +13,7 @@ import { registerSources, generatePluginSources, rememberProjectManifests } from
 import { detectRunner, resolvePackage } from "./runners.mjs";
 import { createJestAdapter } from "./jest.mjs";
 import { createPlaywrightAdapter } from "./playwright.mjs";
-import { nativeSource, nativeSources } from "./native-source.mjs";
+import { Generator } from "./generator.mjs";
 
 const protocolWrite = process.stdout.write.bind(process.stdout);
 // Config evaluation happens in this process, before Vitest redirects test logs.
@@ -57,12 +57,32 @@ function verifyInputs() {
 function sourceRequest(source,file,validateOnly=false,pluginInputs={},facts=false) {
   return {source,file,validateOnly,excludeMutators:options.excludeMutator,weakMutation:options.weakMutation,arid:options.arid,aridCallees:options.aridCallees,facts:!!(facts || options.since || options.cache && options.cacheScope || options.plugins?.length),customMutators:mutationPlugins?.names,pluginAridCallees:mutationPlugins?.aridCallees,...pluginInputs};
 }
-function native(...args) {
-  return nativeSource(options.binary,options.engineFingerprint,sourceRequest(...args));
+let generator;
+async function nativeRequest(request) {
+  generator ??= new Generator(options.binary);
+  return generator.call({...request,engineFingerprint:options.engineFingerprint});
+}
+function native(...args) { return nativeRequest(sourceRequest(...args)); }
+async function nativeSources(requests) {
+  const results=[];
+  for(const request of requests) {
+    try {results.push({Ok:await nativeRequest(request)});}
+    catch(error) {
+      if(error.code!=="EC_MUTATION_INSTRUMENTATION")throw error;
+      results.push({Err:error.message});
+    }
+  }
+  return results;
+}
+async function closeGenerator() {
+  if(!generator)return;
+  const current=generator;generator=undefined;
+  await current.close();
+  if(current.failure)throw current.failure;
 }
 async function generateSource(source,file,base) {
   if(!options.plugins?.length)return base??native(source,file);
-  const acquired=base??native(source,file);
+  const acquired=base??await native(source,file);
   const edits=await mutationPlugins.edits(source,file,acquired.metadata);
   return native(source,file,false,edits);
 }
@@ -72,7 +92,7 @@ async function* preparedSources() {
     let group=entries.slice(start,start+8),generationFailure;
     const missing=group.filter(([file,entry])=>!pendingGenerated.has(file)&&!entry.generated);
     if(!options.plugins?.length) {
-      const generated=nativeSources(options.binary,options.engineFingerprint,missing.map(([file,entry])=>sourceRequest(entry.source,rel(file))));
+      const generated=await nativeSources(missing.map(([file,entry])=>sourceRequest(entry.source,rel(file))));
       for(let index=0;index<missing.length;index++) {
         if("Err" in generated[index]) {
           generationFailure=failure("EC_MUTATION_INSTRUMENTATION",generated[index].Err);
@@ -90,20 +110,20 @@ async function* preparedSources() {
       for(const c of entry.candidates)if(c.regex) {try{new RegExp(...c.regex);}catch{c.ignored="Regex replacement is invalid for the original flags";}}
       entry.emitted=instrument(entry.source,entry.candidates,file,runId);
     }
-    const validations=nativeSources(options.binary,options.engineFingerprint,group.map(([file,entry])=>sourceRequest(entry.emitted.code,rel(file),true)));
+    const validations=await nativeSources(group.map(([file,entry])=>sourceRequest(entry.emitted.code,rel(file),true)));
     for(let index=0;index<group.length;index++) {
       const [file,entry]=group[index];
       if("Err" in validations[index]) {
         // Reject an unsafe placement individually; valid rules in this file still run.
         for(const c of entry.candidates.filter(c=>!c.ignored)) {
-          try {native(instrument(entry.source,[c],file,runId).code,rel(file),true);}
+          try {await native(instrument(entry.source,[c],file,runId).code,rel(file),true);}
           catch(error) {
             if(error.code!=="EC_MUTATION_INSTRUMENTATION")throw error;
             c.ignored="Switch placement is not valid in this syntax context";
           }
         }
         entry.emitted=instrument(entry.source,entry.candidates,file,runId);
-        native(entry.emitted.code,rel(file),true);
+        await native(entry.emitted.code,rel(file),true);
       }
       const generated=entry.generated;delete entry.generated;
       yield {file,entry,generated};
@@ -144,7 +164,7 @@ function plugin(phase) {
   }};
 }
 const childDependencies=new Map();
-function childProcessClosure(entries) {
+async function childProcessClosure(entries) {
   const pending=entries.map(file=>resolve(root,file)),seen=new Set();
   while(pending.length) {
     const file=pending.pop();if(seen.has(file))continue;seen.add(file);
@@ -153,7 +173,7 @@ function childProcessClosure(entries) {
     if(!dependencies) {
       dependencies=[];
       const source=inventory.get(file)?.source??readFileSync(file,'utf8');
-      for(const specifier of native(source,rel(file),true,{},true).metadata?.dependencies||[]) {
+      for(const specifier of (await native(source,rel(file),true,{},true)).metadata?.dependencies||[]) {
         if(!specifier.startsWith('.'))continue;
         const target=resolve(dirname(file),specifier);
         const candidates=[target,...['.ts','.tsx','.mts','.cts','.js','.jsx','.mjs','.cjs'].map(ext=>target+ext),...['index.ts','index.js','index.mjs','index.cjs'].map(name=>join(target,name))];
@@ -166,7 +186,7 @@ function childProcessClosure(entries) {
   }
   return [...seen].map(rel).sort();
 }
-function childProcessEntries(fact) {
+async function childProcessEntries(fact) {
   const tokens=fact.method==='execSync'||fact.argv[1]==='-c'
     ?(fact.argv.at(-1).match(/(?:[^\s"'\\]|\\.|"[^"]*"|'[^']*')+/g)||[]).map(v=>v.replace(/^(["'])([\s\S]*)\1$/,'$2').replace(/\\([\s"'])/g,'$1'))
     :fact.argv.slice(1);
@@ -180,13 +200,20 @@ function childProcessEntries(fact) {
   }
   return childProcessClosure([...entries]);
 }
+const pendingChildProcesses=new WeakMap();
 function recordChildProcesses(execution,moduleFile,facts) {
-  for(const fact of facts) {
-    const entries=childProcessEntries(fact);
+  const pending=pendingChildProcesses.get(execution)||[];
+  pending.push(...facts.map(fact=>({moduleFile,fact})));
+  pendingChildProcesses.set(execution,pending);
+}
+async function acquireChildProcesses(execution) {
+  for(const {moduleFile,fact} of pendingChildProcesses.get(execution)||[]) {
+    const entries=await childProcessEntries(fact);
     if(!entries.length)continue;
     const test=execution.tests.find(t=>t.file===moduleFile&&t.taskId===fact.taskId&&t.started)?.id||null;
     (execution.childProcesses||=[]).push({test,file:moduleFile,executable:basename(fact.argv[0]),entries,method:fact.method});
   }
+  pendingChildProcesses.delete(execution);
 }
 function recordModule(module,execution,request) {
   const counts=new Map();
@@ -255,6 +282,7 @@ async function executeAdapter(phase,request) {
     throw failure("EC_MUTATION_INPUT","Source or test file inventory changed during the run");
   if(phase==="inspect"){verifyInputs();return;}
   const result=await adapter.execute(phase,request,inventory,baseline);
+  await acquireChildProcesses(result.execution);
   verifyInputs();
   return result.execution;
 }
@@ -385,6 +413,7 @@ async function execute(phase,request) {
         const file=module.file;
         if(file&&!file.includes("/node_modules/")&&!file.startsWith(options.temp)&&existsSync(file))remember(file);
       }
+    await acquireChildProcesses(execution);
     verifyInputs();
     execution.tests.sort((a,b)=>a.file<b.file?-1:a.file>b.file?1:0); // retain registration order within each module
     completed=true;
@@ -408,7 +437,7 @@ function cacheFacts(){
 async function acquireStaticImports(project) {
   const container=project.vite.environments?.__vitest__?.pluginContainer ?? project.vite.environments?.ssr?.pluginContainer;
   for(const [file,entry] of inventory) {
-    const generated=entry.generated ?? await generateSource(entry.source,rel(file),native(entry.source,rel(file)));
+    const generated=entry.generated ?? await generateSource(entry.source,rel(file),await native(entry.source,rel(file)));
     pendingGenerated.set(file,generated);
     for(const binding of generated.metadata?.imports||[]) {
       binding.resolved=null;
@@ -529,6 +558,7 @@ async function handle(request) {
     // newly added source or test cannot disappear behind cached coverage.
     if((options.cache||options.concurrency>1||options.killMatrix||options.selectionOnly)&&baseline)await execute("inspect",request);
     if(warmContext){const saved=warmContext;warmContext=undefined;await closeContext(saved.ctx);if(saved.state.failure)throw saved.state.failure;}
+    await closeGenerator();
     verifyInputs();send(request,"done",{count:0,...(options.cache?{cacheFacts:cacheFacts()}:{})});return;
   }
   throw failure("EC_MUTATION_PROTOCOL",`Unknown operation: ${request.op}`);
@@ -545,6 +575,7 @@ async function prepareProbe(request,count){
     send(request,"prepared",{execution:baseline,...(options.reuseSession?{sessionReuse:reuseMode}:{}),...(options.cache?{cacheFacts:cacheFacts()}:{})});send(request,"done",{count});return;
 }
 const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
+try {
 for await(const line of lines) {
   let request;
   try {request=JSON.parse(line);await handle(request);}
@@ -553,8 +584,10 @@ for await(const line of lines) {
       if(current)await closeContext(current);
       if(warmContext){const saved=warmContext;warmContext=undefined;await closeContext(saved.ctx);}
     }catch(cleanup){error=failure(error.code||"EC_MUTATION_RUNNER",`${error.stack||error}\nCleanup failed: ${cleanup.stack||cleanup}`);}
+    try {await closeGenerator();}catch(cleanup){error=failure(error.code||"EC_MUTATION_PROTOCOL",`${error.stack||error}\nGenerator cleanup failed: ${cleanup.stack||cleanup}`);}
     send(request||{requestId:0},"error",{code:error.code?.startsWith("EC_MUTATION_")?error.code:"EC_MUTATION_RUNNER",message:error.stack||String(error)});
     process.exitCode=0;
   }
 }
 if(warmContext)await closeContext(warmContext.ctx);
+} finally {await closeGenerator();}

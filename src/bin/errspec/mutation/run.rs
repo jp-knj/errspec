@@ -1,5 +1,7 @@
 //! Mutation process ownership, protocol validation, and acquisition.
+mod source_lines;
 mod source_protocol;
+pub(crate) use source_lines::entry as source_lines_entry;
 mod worker_pool;
 use errspec::mutation::options::Options as MutationRequest;
 use errspec::mutation::{self, Candidate, Execution, Mutant, Report, Status};

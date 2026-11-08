@@ -9,41 +9,6 @@ use tsrs_core::{ModuleResolutionKind, P, Tristate};
 use tsrs_tsoptions::ParseConfigHost;
 use tsrs_vfs::{FS, bundled, osvfs};
 
-/// Parser-only entry for mutation generation. Contract analysis still uses `open`.
-pub(crate) fn parse_source(file: &str, source: String) -> Result<P<tsrs_ast::SourceFile>, String> {
-    let kind = match Path::new(file).extension().and_then(|s| s.to_str()) {
-        Some("jsx") => tsrs_core::ScriptKind::JSX,
-        Some("js" | "mjs" | "cjs") => tsrs_core::ScriptKind::JS,
-        Some("tsx") => tsrs_core::ScriptKind::TSX,
-        _ => tsrs_core::ScriptKind::TS,
-    };
-    let file_name = if Path::new(file).is_absolute() {
-        file.into()
-    } else {
-        format!("/__errspec_mutation__/{file}")
-    };
-    let parsed = tsrs_parser::parse_source_file_owned(
-        tsrs_ast::SourceFileParseOptions {
-            file_name,
-            ..Default::default()
-        },
-        source,
-        kind,
-    );
-    if !parsed.diagnostics().is_empty() {
-        return Err(parsed
-            .diagnostics()
-            .iter()
-            .map(|d| d.localize())
-            .collect::<Vec<_>>()
-            .join("; "));
-    }
-    walk(parsed.as_node(), &mut |n| {
-        tsrs_ast::set_parent_in_children(n)
-    });
-    Ok(parsed)
-}
-
 pub(crate) fn location(root: &Path, node: P<Node>) -> Location {
     let file = get_source_file_of_node(node).expect("source node");
     let offset = tsrs_scanner::get_token_pos_of_node(node, file, false) as usize;

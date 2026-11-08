@@ -1,5 +1,6 @@
 ---
 source: tests/mutation_plugins.rs
+assertion_line: 42
 expression: "result[\"candidates\"]"
 ---
 [
@@ -9,7 +10,7 @@ expression: "result[\"candidates\"]"
     "file": "src/plugin.ts",
     "guardOffset": null,
     "ignored": null,
-    "key": "0a73de7911f3c28f323035ff6450fda02763a67094a8aff9bafe1907c30af6a4",
+    "key": "512fb7904c5e98a6cb0a403af01b33829541492840b035a1d754185aa261575e",
     "line": 2,
     "mutator": "ArrowFunction",
     "original": "2",
@@ -23,7 +24,7 @@ expression: "result[\"candidates\"]"
     "file": "src/plugin.ts",
     "guardOffset": null,
     "ignored": "disabled: protocol constant",
-    "key": "f764b66a6dc27a10bd9350fb9de571d705a50fbf2cebebf5177e470399f2935e",
+    "key": "6610655854ec5410074db7ef2b86f946e5466d84b94098a99ef2da9831005607",
     "line": 2,
     "mutator": "Double",
     "original": "2",
