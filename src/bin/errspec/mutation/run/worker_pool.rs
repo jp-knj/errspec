@@ -1,6 +1,23 @@
 //! Independent owned drivers; all verdicts still use the sequential trial path.
-use super::*;
-use std::{collections::VecDeque, sync::Mutex};
+use super::{
+    Failure, MutationRequest,
+    driver::{Driver, execution, expected, only},
+    execute::{TrialContext, execute_trial, reopen},
+};
+use errspec::mutation::{self, Mutant, Report, Status};
+use serde_json::{Value, json};
+use std::{
+    collections::VecDeque,
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::{Duration, Instant},
+};
 
 struct Worker {
     driver: Driver,

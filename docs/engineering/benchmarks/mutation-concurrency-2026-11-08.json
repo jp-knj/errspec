@@ -1,0 +1,493 @@
+{
+  "baseCommit": "56a496647ff73232a70fbc1229a585a2c120859c",
+  "method": "Three runs per worker count, rotating 1/2/4 order. 100 ms samples of summed CLI/descendant RSS from ps. Fresh sessions and no result/probe cache. Not physical/private memory.",
+  "runs": {
+    "before": {
+      "metadata": {
+        "label": "before",
+        "binary": "/private/tmp/errspec-phases-baseline/errspec",
+        "binarySha256": "230248a3e4c64b59f92427194c1e9b6f42196a5be7a4cf5864c4fc6ed1d74bc2",
+        "node": "v24.8.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "release": "25.5.0",
+        "cpu": "Apple M2",
+        "logicalCpus": 8,
+        "memoryBytes": 17179869184,
+        "fixture": "/private/tmp/errspec-phases-measurements/fixture",
+        "inputs": {
+          "package.json": "b77d17f662a3317a927d88048eefb91e86841c104038450f17f96e09a23ae425",
+          "src/value-0.ts": "fb7bb047e2a1bbb160591580d4accc72dfc7cf478dcf632b575d945299ebf2b4",
+          "src/value-1.ts": "981dca6ced564f234c2b307ca8840665ed8e5dddde7cf181303cfd303e3432ee",
+          "src/value-10.ts": "5c0084e4d858eed6325ff1388a23c7a6acf12ad83fe1475b569e12ad07ad5de0",
+          "src/value-11.ts": "7d43cfa776db745c18a62504205e06f56b0c9e23654b990a861a631cdcdf48c2",
+          "src/value-2.ts": "2c744f925b88628d54e6c1939dccafaf05a3e68bf5aaa7c0393d8292df33776c",
+          "src/value-3.ts": "4349a576e695490cd11c9f7a90974127ddbdcad068abdf3817e89d36dc82b446",
+          "src/value-4.ts": "5ce1da4808e79c854c623680f629b9e7c10daa36cc63822dcb79e0c55d1197d2",
+          "src/value-5.ts": "1b517ab8c049da7b026338ef1345d6eb6c10b3ea00821505855063a9e6a23f1e",
+          "src/value-6.ts": "fd95d9c115f1b69cd1f726298527033bdd08b1a94ffdd23f86be4b4b4b6960b6",
+          "src/value-7.ts": "e4167aaca8cdd6efe142f27f3748f5de53e8381a5204bc8894b59f45a43e3f2b",
+          "src/value-8.ts": "cf144026011da8ff31211ab09b9f06b9821d412fd5174406811cea2551ecafe8",
+          "src/value-9.ts": "affa64772a2e5c586808ac4198df206a5c02463179e821906dcc127e81e35d97",
+          "value-0.test.ts": "6084ce5830c45e56dd65338c5c346c67e40d18f917a29681e9f5e53fba79c957",
+          "value-1.test.ts": "2329967051a1953213137aa1909281fb48289cf616670245e8a2489ad911aaec",
+          "value-10.test.ts": "020a5bb7ee0781a2f5f5c6d7f9d0bcfa3e74a57e814aa39e7ba009c91f8ef684",
+          "value-11.test.ts": "86318f63b9b7f763aa6cf983bfbed696f9a14a20f2bed76cbbf70c5af7d39685",
+          "value-2.test.ts": "6a07acc7f1a04218edc0fa9266a8d9ce0609f0823928aa73648df510bb7c70f7",
+          "value-3.test.ts": "18a7b50694841f04dc13bcb3082ed0234ec1c81462d7e5e79e7a248d379b0d8e",
+          "value-4.test.ts": "166f4be95eebcb8fe0b4303fb7a311add5eec5de0c2cf81c7599cf3d1dee448d",
+          "value-5.test.ts": "7df1033e9ea8d999bd5cd8febe802d9eb3029f0c9f1eabe3c70d64f97b0e8cf0",
+          "value-6.test.ts": "4c1b17c58477a8e57711497cf15fe527850fe1c699d19dcac58d789998c07dbb",
+          "value-7.test.ts": "d58eb002e27120fa9f83376c0a9bd09c556d140244fb51cf0fa75326bc7e68aa",
+          "value-8.test.ts": "11e0a54d8f9a4acb558fa91572d83a1b493ab6a79e8bcbfef2544dcf6a1213be",
+          "value-9.test.ts": "48e26e1cb1580cc9cfdf641ddef4498a55dcb8adeb97f50da4007f9c73b64536",
+          "vitest.config.mjs": "543de7069363fb3f558331ea440f5b3a62649135622e94c2c2ed423964453f10"
+        },
+        "dependencies": "/private/tmp/errspec-mutation-phases-pr/examples/checkout/node_modules",
+        "vitest": "5.0.5",
+        "sampleIntervalMs": 100,
+        "repeats": 3,
+        "concurrency": [
+          1,
+          2,
+          4
+        ],
+        "mode": "fresh sessions, result/probe caches disabled, default candidate selection"
+      },
+      "observations": [
+        {
+          "concurrency": 1,
+          "repeat": 0,
+          "elapsedMs": 8261.797584,
+          "peakTreeRssKiB": 295632,
+          "peakProcesses": 4,
+          "samples": 81,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 2,
+          "repeat": 0,
+          "elapsedMs": 5582.1884580000005,
+          "peakTreeRssKiB": 534864,
+          "peakProcesses": 8,
+          "samples": 55,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 4,
+          "repeat": 0,
+          "elapsedMs": 5030.243541000002,
+          "peakTreeRssKiB": 923968,
+          "peakProcesses": 14,
+          "samples": 49,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 2,
+          "repeat": 1,
+          "elapsedMs": 5507.876833999999,
+          "peakTreeRssKiB": 521152,
+          "peakProcesses": 7,
+          "samples": 54,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 4,
+          "repeat": 1,
+          "elapsedMs": 5718.513332999999,
+          "peakTreeRssKiB": 880704,
+          "peakProcesses": 13,
+          "samples": 56,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 1,
+          "repeat": 1,
+          "elapsedMs": 7481.016707999999,
+          "peakTreeRssKiB": 300288,
+          "peakProcesses": 4,
+          "samples": 74,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 4,
+          "repeat": 2,
+          "elapsedMs": 5300.492124999997,
+          "peakTreeRssKiB": 910192,
+          "peakProcesses": 13,
+          "samples": 52,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 1,
+          "repeat": 2,
+          "elapsedMs": 7409.676749999999,
+          "peakTreeRssKiB": 307776,
+          "peakProcesses": 4,
+          "samples": 73,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 2,
+          "repeat": 2,
+          "elapsedMs": 5644.014458000005,
+          "peakTreeRssKiB": 488640,
+          "peakProcesses": 7,
+          "samples": 55,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        }
+      ],
+      "semanticSha256": "d5f136656d20dbdffd38bd261bd19c6e5d8b40f7f10bf1c7d0c8745e891988a2"
+    },
+    "after": {
+      "metadata": {
+        "label": "after",
+        "binary": "/private/tmp/errspec-mutation-phases-pr/target/release/errspec",
+        "binarySha256": "5cb621a17526253c421f076da65ed60ae246e5cbf1d899e2b991602f768f73aa",
+        "node": "v24.8.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "release": "25.5.0",
+        "cpu": "Apple M2",
+        "logicalCpus": 8,
+        "memoryBytes": 17179869184,
+        "fixture": "/private/tmp/errspec-phases-measurements/fixture",
+        "inputs": {
+          "package.json": "b77d17f662a3317a927d88048eefb91e86841c104038450f17f96e09a23ae425",
+          "src/value-0.ts": "fb7bb047e2a1bbb160591580d4accc72dfc7cf478dcf632b575d945299ebf2b4",
+          "src/value-1.ts": "981dca6ced564f234c2b307ca8840665ed8e5dddde7cf181303cfd303e3432ee",
+          "src/value-10.ts": "5c0084e4d858eed6325ff1388a23c7a6acf12ad83fe1475b569e12ad07ad5de0",
+          "src/value-11.ts": "7d43cfa776db745c18a62504205e06f56b0c9e23654b990a861a631cdcdf48c2",
+          "src/value-2.ts": "2c744f925b88628d54e6c1939dccafaf05a3e68bf5aaa7c0393d8292df33776c",
+          "src/value-3.ts": "4349a576e695490cd11c9f7a90974127ddbdcad068abdf3817e89d36dc82b446",
+          "src/value-4.ts": "5ce1da4808e79c854c623680f629b9e7c10daa36cc63822dcb79e0c55d1197d2",
+          "src/value-5.ts": "1b517ab8c049da7b026338ef1345d6eb6c10b3ea00821505855063a9e6a23f1e",
+          "src/value-6.ts": "fd95d9c115f1b69cd1f726298527033bdd08b1a94ffdd23f86be4b4b4b6960b6",
+          "src/value-7.ts": "e4167aaca8cdd6efe142f27f3748f5de53e8381a5204bc8894b59f45a43e3f2b",
+          "src/value-8.ts": "cf144026011da8ff31211ab09b9f06b9821d412fd5174406811cea2551ecafe8",
+          "src/value-9.ts": "affa64772a2e5c586808ac4198df206a5c02463179e821906dcc127e81e35d97",
+          "value-0.test.ts": "6084ce5830c45e56dd65338c5c346c67e40d18f917a29681e9f5e53fba79c957",
+          "value-1.test.ts": "2329967051a1953213137aa1909281fb48289cf616670245e8a2489ad911aaec",
+          "value-10.test.ts": "020a5bb7ee0781a2f5f5c6d7f9d0bcfa3e74a57e814aa39e7ba009c91f8ef684",
+          "value-11.test.ts": "86318f63b9b7f763aa6cf983bfbed696f9a14a20f2bed76cbbf70c5af7d39685",
+          "value-2.test.ts": "6a07acc7f1a04218edc0fa9266a8d9ce0609f0823928aa73648df510bb7c70f7",
+          "value-3.test.ts": "18a7b50694841f04dc13bcb3082ed0234ec1c81462d7e5e79e7a248d379b0d8e",
+          "value-4.test.ts": "166f4be95eebcb8fe0b4303fb7a311add5eec5de0c2cf81c7599cf3d1dee448d",
+          "value-5.test.ts": "7df1033e9ea8d999bd5cd8febe802d9eb3029f0c9f1eabe3c70d64f97b0e8cf0",
+          "value-6.test.ts": "4c1b17c58477a8e57711497cf15fe527850fe1c699d19dcac58d789998c07dbb",
+          "value-7.test.ts": "d58eb002e27120fa9f83376c0a9bd09c556d140244fb51cf0fa75326bc7e68aa",
+          "value-8.test.ts": "11e0a54d8f9a4acb558fa91572d83a1b493ab6a79e8bcbfef2544dcf6a1213be",
+          "value-9.test.ts": "48e26e1cb1580cc9cfdf641ddef4498a55dcb8adeb97f50da4007f9c73b64536",
+          "vitest.config.mjs": "543de7069363fb3f558331ea440f5b3a62649135622e94c2c2ed423964453f10"
+        },
+        "dependencies": "/private/tmp/errspec-mutation-phases-pr/examples/checkout/node_modules",
+        "vitest": "5.0.5",
+        "sampleIntervalMs": 100,
+        "repeats": 3,
+        "concurrency": [
+          1,
+          2,
+          4
+        ],
+        "mode": "fresh sessions, result/probe caches disabled, default candidate selection"
+      },
+      "observations": [
+        {
+          "concurrency": 1,
+          "repeat": 0,
+          "elapsedMs": 10448.396833,
+          "peakTreeRssKiB": 311968,
+          "peakProcesses": 5,
+          "samples": 103,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 2,
+          "repeat": 0,
+          "elapsedMs": 6614.010042,
+          "peakTreeRssKiB": 529680,
+          "peakProcesses": 8,
+          "samples": 65,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 4,
+          "repeat": 0,
+          "elapsedMs": 8656.012041999998,
+          "peakTreeRssKiB": 924320,
+          "peakProcesses": 13,
+          "samples": 85,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 2,
+          "repeat": 1,
+          "elapsedMs": 6710.454125,
+          "peakTreeRssKiB": 538864,
+          "peakProcesses": 7,
+          "samples": 66,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 4,
+          "repeat": 1,
+          "elapsedMs": 6898.370625,
+          "peakTreeRssKiB": 901584,
+          "peakProcesses": 13,
+          "samples": 67,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 1,
+          "repeat": 1,
+          "elapsedMs": 8352.696041999996,
+          "peakTreeRssKiB": 336672,
+          "peakProcesses": 5,
+          "samples": 82,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 4,
+          "repeat": 2,
+          "elapsedMs": 19139.880791999996,
+          "peakTreeRssKiB": 938976,
+          "peakProcesses": 14,
+          "samples": 185,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 1,
+          "repeat": 2,
+          "elapsedMs": 30204.846250000002,
+          "peakTreeRssKiB": 304080,
+          "peakProcesses": 5,
+          "samples": 291,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 2,
+          "repeat": 2,
+          "elapsedMs": 14330.649625000005,
+          "peakTreeRssKiB": 525072,
+          "peakProcesses": 8,
+          "samples": 140,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        }
+      ],
+      "semanticSha256": "d5f136656d20dbdffd38bd261bd19c6e5d8b40f7f10bf1c7d0c8745e891988a2"
+    }
+  },
+  "summaries": {
+    "before": [
+      {
+        "concurrency": 1,
+        "medianSeconds": 7.481,
+        "minSeconds": 7.41,
+        "maxSeconds": 8.262,
+        "medianPeakTreeRssMiB": 293.2,
+        "minPeakTreeRssMiB": 288.7,
+        "maxPeakTreeRssMiB": 300.6
+      },
+      {
+        "concurrency": 2,
+        "medianSeconds": 5.582,
+        "minSeconds": 5.508,
+        "maxSeconds": 5.644,
+        "medianPeakTreeRssMiB": 508.9,
+        "minPeakTreeRssMiB": 477.2,
+        "maxPeakTreeRssMiB": 522.3
+      },
+      {
+        "concurrency": 4,
+        "medianSeconds": 5.3,
+        "minSeconds": 5.03,
+        "maxSeconds": 5.719,
+        "medianPeakTreeRssMiB": 888.9,
+        "minPeakTreeRssMiB": 860.1,
+        "maxPeakTreeRssMiB": 902.3
+      }
+    ],
+    "after": [
+      {
+        "concurrency": 1,
+        "medianSeconds": 10.448,
+        "minSeconds": 8.353,
+        "maxSeconds": 30.205,
+        "medianPeakTreeRssMiB": 304.7,
+        "minPeakTreeRssMiB": 297.0,
+        "maxPeakTreeRssMiB": 328.8
+      },
+      {
+        "concurrency": 2,
+        "medianSeconds": 6.71,
+        "minSeconds": 6.614,
+        "maxSeconds": 14.331,
+        "medianPeakTreeRssMiB": 517.3,
+        "minPeakTreeRssMiB": 512.8,
+        "maxPeakTreeRssMiB": 526.2
+      },
+      {
+        "concurrency": 4,
+        "medianSeconds": 8.656,
+        "minSeconds": 6.898,
+        "maxSeconds": 19.14,
+        "medianPeakTreeRssMiB": 902.7,
+        "minPeakTreeRssMiB": 880.5,
+        "maxPeakTreeRssMiB": 917.0
+      }
+    ]
+  },
+  "excluded": [
+    {
+      "reason": "An earlier after block overlapped a local cargo build. Replaced in the summary, retained here for transparency.",
+      "observations": [
+        {
+          "concurrency": 1,
+          "repeat": 0,
+          "elapsedMs": 8246.003666999999,
+          "peakTreeRssKiB": 299328,
+          "peakProcesses": 4,
+          "samples": 81,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 2,
+          "repeat": 0,
+          "elapsedMs": 5563.746292,
+          "peakTreeRssKiB": 514064,
+          "peakProcesses": 7,
+          "samples": 55,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 4,
+          "repeat": 0,
+          "elapsedMs": 5228.808707999999,
+          "peakTreeRssKiB": 870752,
+          "peakProcesses": 14,
+          "samples": 51,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 2,
+          "repeat": 1,
+          "elapsedMs": 5773.375499999998,
+          "peakTreeRssKiB": 490656,
+          "peakProcesses": 7,
+          "samples": 57,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 4,
+          "repeat": 1,
+          "elapsedMs": 5275.592042,
+          "peakTreeRssKiB": 908928,
+          "peakProcesses": 13,
+          "samples": 52,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 1,
+          "repeat": 1,
+          "elapsedMs": 7579.5014999999985,
+          "peakTreeRssKiB": 302944,
+          "peakProcesses": 4,
+          "samples": 75,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 4,
+          "repeat": 2,
+          "elapsedMs": 7422.154208,
+          "peakTreeRssKiB": 919248,
+          "peakProcesses": 14,
+          "samples": 73,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 1,
+          "repeat": 2,
+          "elapsedMs": 14209.841042,
+          "peakTreeRssKiB": 310480,
+          "peakProcesses": 4,
+          "samples": 139,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        },
+        {
+          "concurrency": 2,
+          "repeat": 2,
+          "elapsedMs": 6924.984583000005,
+          "peakTreeRssKiB": 518432,
+          "peakProcesses": 7,
+          "samples": 68,
+          "hostExit": 0,
+          "mutants": 60,
+          "killed": 60
+        }
+      ]
+    }
+  ],
+  "loadObservationDuringAfter": {
+    "loadAverage": [
+      21.5224609375,
+      10.9404296875,
+      7.49853515625
+    ],
+    "logicalCpus": 8,
+    "freeMemoryBytes": 319815680,
+    "swapUsedMiB": 3854.44,
+    "note": "One mid-block observation, not a per-run measure. Other system work was not controlled. No before/after speed claim."
+  }
+}
