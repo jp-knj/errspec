@@ -108,6 +108,16 @@ Complete acquisition may restart a runner/browser after each failing test, so th
 
 Concurrency is integer 1–64 through `-j`/`--concurrency`/configuration/API, default 1. Rust queues candidates to independent drivers using the same attempt/confirmation/verdict code. Sampling/cache decisions precede allocation. Time budget uses the request's common start time; started trials finish, unstarted candidates become Pending. Restore inventory result order independent of completion order. `engine.parallel` records requested and started trial workers.
 
+The native coordinator separates configuration/session setup, inventory and probe
+acquisition, candidate planning, trial execution, and final input/cache validation.
+Each phase receives owned facts or explicit borrows; partial reports remain
+available on failure. Serial trials retain the existing per-candidate sampling
+and reuse order. Parallel workers return their execution facts before final
+validation and persistence. Driver ownership outlives every request, while
+temporary resources outlive the driver, including interruption and early errors.
+The [execution guide](../../../../engineering/mutation-flow.md) records module
+ownership and the boundaries that must survive further extraction.
+
 Each worker owns driver/run ID/temp directory/process group. Extra workers take full probes and match test registration/state/reach/infection against the primary, rebinding task IDs locally. Restarted timeout workers revalidate probes. One worker's failure interrupts peers. SIGINT/SIGTERM or parent SIGKILL stops all owned groups. Before cache save, merge runtime inputs: incompatible settings disable save; input-content conflicts or inconsistent reused evidence make the run incomplete. External service state is not isolated; users need concurrency-safe tests.
 
 `--shard INDEX/TOTAL` partitions candidates after Git/only selection using first 64 key bits modulo total. Configuration/API use one-based `{index,total}`. `report.shard` discloses selected/omitted counts and method; score/gate apply only to that request's shard. Baseline/probe cover the project; typecheck/trials cover the shard. Exclude shard setting from common cache fingerprint and retain all-key records for sequential aggregation. Atomic writes prevent corruption; concurrent lost updates require fresh work rather than assumed evidence. Samples/budgets apply within each shard invocation.
