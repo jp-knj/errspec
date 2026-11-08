@@ -68,6 +68,34 @@ test("one child serves repeated requests and recovers from a syntax error", asyn
     await stopped(g);
   }
 });
+test("one child accepts template text and every line-comment terminator", async () => {
+  const g = new Generator(binary);
+  try {
+    const first = await g.call(request),
+      pid = g.child.pid;
+    const sources = [
+      "export const text = `https://${host}/path`;",
+      "export const text = `/* ${value} */`;",
+      ...["\n", "\r", "\r\n", "\u2028", "\u2029"].map(
+        (end) => `// lead${end}export const n = 1 // comment${end} + 2;`,
+      ),
+    ];
+    for (const source of sources) {
+      const input = { ...request, source };
+      const result = await g.call(input);
+      const single = spawnSync(binary, ["__mutation-source"], {
+        input: JSON.stringify(input),
+        encoding: "utf8",
+      });
+      assert.equal(single.status, 0, single.stderr);
+      assert.deepEqual(result, JSON.parse(single.stdout));
+      assert.equal(g.child.pid, pid);
+    }
+    assert.deepEqual(await g.call(request), first);
+  } finally {
+    await stopped(g);
+  }
+});
 for (const [name, body] of [
   [
     "malformed JSON",

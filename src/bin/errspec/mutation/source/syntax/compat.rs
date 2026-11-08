@@ -74,16 +74,6 @@ fn trivia_end(source: &str, comments: &[(u32, u32)], mut start: usize) -> usize 
                 .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
                 .len();
         start = next;
-        if source[start..].starts_with("//") {
-            start += source[start..].find('\n').unwrap_or(source.len() - start);
-            continue;
-        }
-        if source[start..].starts_with("/*") {
-            start += source[start..]
-                .find("*/")
-                .map_or(source.len() - start, |n| n + 2);
-            continue;
-        }
         if let Some(&(_, end)) = comments.iter().find(|&&(begin, _)| begin as usize == start) {
             start = end as usize;
         } else {
@@ -497,36 +487,14 @@ impl<'a> Visit<'a> for Projection<'_> {
                 );
             }
             A::TemplateLiteral(n) if !n.expressions.is_empty() => {
-                let first = &n.expressions[0];
-                let head_end = graph_token(
-                    &self.graph.source,
-                    n.span.start as usize,
-                    first.span().start as usize,
-                    "${",
-                )
-                .unwrap()
-                .end;
+                // Oxc quasi spans exclude the opening ` or } and closing ${ or `.
+                // Literal text can contain comment markers and escaped delimiters.
+                let head_end = n.quasis[0].span.end + 2;
                 self.graph
                     .token(index, Span::new(n.span.start, head_end), Kind::TemplateHead);
-                for (i, expr) in n.expressions.iter().enumerate() {
-                    let tail_start = graph_token(
-                        &self.graph.source,
-                        expr.span().end as usize,
-                        n.span.end as usize,
-                        "}",
-                    )
-                    .unwrap()
-                    .start;
-                    let tail_end = n.expressions.get(i + 1).map_or(n.span.end, |next| {
-                        graph_token(
-                            &self.graph.source,
-                            tail_start as usize,
-                            next.span().start as usize,
-                            "${",
-                        )
-                        .unwrap()
-                        .end
-                    });
+                for (expr, quasi) in n.expressions.iter().zip(n.quasis.iter().skip(1)) {
+                    let tail_start = quasi.span.start - 1;
+                    let tail_end = quasi.span.end + if quasi.tail { 1 } else { 2 };
                     let wrapper = self.wrap(
                         index,
                         Span::new(expr.span().start, tail_end),
@@ -536,7 +504,7 @@ impl<'a> Visit<'a> for Projection<'_> {
                     self.graph.token(
                         wrapper,
                         Span::new(tail_start, tail_end),
-                        if i + 1 == n.expressions.len() {
+                        if quasi.tail {
                             Kind::TemplateTail
                         } else {
                             Kind::TemplateMiddle

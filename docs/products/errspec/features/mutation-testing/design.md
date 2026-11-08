@@ -28,6 +28,13 @@ The initial mode uses fresh sessions for ordinary baseline, probe, and each atte
 
 A syntax-only adapter uses Oxc parser, AST visitor and semantic parent nodes, pinned to `0.157.0`. It projects runtime nodes into the existing mutation/plugin vocabulary and returns owned candidates and metadata. It does not change semantic `TsrsAdapter::open`, type-error, or `noCheck` rules. Traverse runtime expressions/statements, excluding types, ambient declarations, decorators, import/reexport specifiers, and directives. For `as`/`satisfies`, traverse only the expression. Return annotations supply `FnValue` choices but are not mutated.
 
+Template plugin tokens use Oxc's quasi spans, expanded to include their delimiters.
+Do not search raw template text for punctuation: comment markers and escaped
+`${` are literal content there. Leading trivia uses acquired comment spans;
+punctuation searches between AST operands recognize LF, CR, U+2028 and U+2029 as
+line-comment terminators. These rules preserve plugin byte ranges and prevent
+valid source text from aborting the persistent generator.
+
 The [fixed reference](../../mutator-coverage.md) anchors these rules. Table order defines family order; enumeration within a row defines replacement order.
 
 | Family | Changes and conditions |
