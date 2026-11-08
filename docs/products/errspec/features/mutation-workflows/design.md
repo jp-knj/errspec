@@ -14,6 +14,28 @@ The typecheck request identifies tsconfig, installed TypeScript, and candidates.
 
 Restore text between candidates and close compiler state in `finally`. Reject `noCheck` as typechecking. Optional-chain equivalence requires strictNullChecks, noUncheckedIndexedAccess, and a receiver type excluding null/undefined. The complete replacement must match exactly one optional-token removal from the original expression; altered property names, indices, arguments, call shapes, suffixes, or multiple removals require normal diagnostic acquisition. Semantic discovery backend options remain distinct from mutation typecheck options.
 
+Separate compiler acquisition, value-based judgment, and report application. The
+CLI requests keys in selected inventory order, checks the response envelope and
+terminal count, and decodes aggregate compiler information before returning owned
+facts. Candidate fields retain missing, null, and invalid values in response order;
+decoding must not reject a later candidate before earlier facts can be judged.
+
+The library's `mutation::typecheck::evaluate` accepts the expected key set and
+acquired facts, returning confirmed status/reason updates plus a completion result.
+Expected keys are the selected, non-ignored `.ts`, `.tsx`, `.mts`, and `.cts`
+candidates. Validate each key and its facts in response order, then compare the
+complete key set, aggregate counts, and compiler version. New diagnostics yield
+`CompileError`, equivalence reasons yield `Ignored`, and two explicit nulls leave
+the candidate unchanged.
+
+The coordinator applies every confirmed update before handling completion. An
+invalid second candidate retains the first candidate's update and leaves later
+candidates unchanged; a final count mismatch retains all confirmed updates. Only
+successful completion sets the report's typecheck information and completion flag.
+Disabled typechecking performs no request or updates. This value boundary makes
+judgment rules testable without a compiler process or a report, while process
+management, report serialization, and their public contracts remain independent.
+
 ## History and probe reuse
 
 Mutation history is a versioned format separate from error-contract baselines. It stores input fingerprints, acquisition mode, reach, and eligible verdicts by location-independent key. Write through temporary-file rename. A key match alone never permits reuse.

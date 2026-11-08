@@ -7,6 +7,7 @@ mod plan;
 mod prepare;
 mod session;
 mod source_protocol;
+mod typecheck;
 mod worker_pool;
 use configuration::Configuration;
 use errspec::mutation::options::Options as MutationRequest;

@@ -1,6 +1,14 @@
 //! Expectations captured from the coordinator before extracting typecheck judgments.
+use super::super::driver::Response;
 use super::*;
 use errspec::mutation::Mutant;
+use serde_json::{Value, json};
+
+fn apply_typecheck_response(response: Response, report: &mut Report) -> Result<(), Failure> {
+    let facts = typecheck::decode(response)?;
+    let evaluation = mutation::typecheck::evaluate(&expected_typecheck_keys(report), facts);
+    apply_typecheck(evaluation, report)
+}
 
 fn mutant(key: &str, file: &str, status: Status) -> Mutant {
     serde_json::from_value(json!({
@@ -150,5 +158,90 @@ fn typecheck_protocol_errors_do_not_update_reports() {
         assert_eq!(error.code, code);
         assert_eq!(error.message, message);
         assert_eq!(serde_json::to_value(report).unwrap(), before);
+    }
+}
+
+#[test]
+fn typecheck_decoding_preserves_unvalidated_candidate_fields() {
+    for value in [
+        Value::Null,
+        json!(false),
+        json!(1),
+        json!(""),
+        json!([]),
+        json!({}),
+    ] {
+        let mut response = valid_response();
+        response.messages[1]["outcomes"][1]["diagnostic"] = value.clone();
+        let facts = typecheck::decode(response).ok().unwrap();
+        assert_eq!(facts.outcomes[1].diagnostic, Some(value));
+    }
+    let mut response = valid_response();
+    response.messages[1]["outcomes"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("diagnostic");
+    let facts = typecheck::decode(response).ok().unwrap();
+    assert_eq!(facts.outcomes[1].diagnostic, None);
+
+    for value in [Value::Null, json!(false), json!(1), json!(""), json!([])] {
+        let mut response = valid_response();
+        response.messages[1]["outcomes"][1] = value;
+        let mut report = report();
+        let error = apply_typecheck_response(response, &mut report)
+            .err()
+            .unwrap();
+        assert_eq!(error.message, "Missing typecheck key");
+        assert_eq!(report.mutants[2].status, Status::Ignored);
+        assert_eq!(report.mutants[0].status, Status::Pending);
+        assert_eq!(report.engine.typecheck, "not_run");
+        assert!(report.typecheck.is_none());
+    }
+}
+
+#[test]
+fn typecheck_info_is_decoded_before_candidate_validation() {
+    let mut response = valid_response();
+    response.messages[1]["info"]["compileErrors"] = json!(false);
+    response.messages[1]["outcomes"][0] = Value::Null;
+    let mut report = report();
+    let before = serde_json::to_value(&report).unwrap();
+    let error = apply_typecheck_response(response, &mut report)
+        .err()
+        .unwrap();
+    assert_eq!(error.code, "EC_MUTATION_PROTOCOL");
+    assert_eq!(
+        error.message,
+        "invalid type: boolean `false`, expected usize"
+    );
+    assert_eq!(serde_json::to_value(report).unwrap(), before);
+}
+
+#[test]
+fn typecheck_targets_include_only_non_ignored_typescript_candidates() {
+    let mut report = report();
+    report.mutants.extend([
+        mutant("jsx", "src/view.jsx", Status::Pending),
+        mutant("suffix", "src/a.ts.bak", Status::Pending),
+        mutant("upper", "src/a.TS", Status::Pending),
+    ]);
+    assert_eq!(
+        expected_typecheck_keys(&report),
+        BTreeSet::from_iter(["a", "b", "c", "d"].map(str::to_owned))
+    );
+    for key in ["js", "ignored", "jsx", "suffix", "upper"] {
+        let response = response(
+            json!([
+                {"key":key, "diagnostic":null, "equivalentReason":null}
+            ]),
+            0,
+            0,
+        );
+        let before = serde_json::to_value(&report).unwrap();
+        let error = apply_typecheck_response(response, &mut report)
+            .err()
+            .unwrap();
+        assert_eq!(error.message, "Unknown or duplicate typecheck key");
+        assert_eq!(serde_json::to_value(&report).unwrap(), before);
     }
 }
