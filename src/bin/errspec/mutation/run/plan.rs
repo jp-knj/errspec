@@ -1,7 +1,7 @@
 //! Select candidates, acquire typecheck facts and map current tests before trials.
 use super::{
     Configuration, Failure, MutationRequest,
-    driver::{Driver, expected, only},
+    driver::{Driver, Response, expected, only},
     prepare::{Inventory, Prepared},
     session::Session,
 };
@@ -98,80 +98,85 @@ fn typecheck(
     let startup = Duration::from_secs(120);
     if request.typecheck {
         let response = driver.request(json!({"op":"typecheck", "keys":report.mutants.iter().map(|m| &m.candidate.key).collect::<Vec<_>>()}), Duration::MAX, startup)?;
-        if response.timeout {
-            return Err(Failure::new(
-                "EC_MUTATION_TYPECHECK",
-                "Mutant typechecker timed out",
-            ));
-        }
-        response.check_error()?;
-        let result = only(&response.messages, "typechecked")?;
-        let outcomes = result["outcomes"]
-            .as_array()
-            .ok_or_else(|| Failure::protocol("Missing typecheck outcomes"))?;
-        expected(
-            &response.messages,
-            &["progress", "typechecked", "done"],
-            outcomes.len(),
-        )?;
-        let info: mutation::TypecheckInfo = serde_json::from_value(result["info"].clone())
-            .map_err(|e| Failure::protocol(e.to_string()))?;
-        let wanted: BTreeSet<_> = report
-            .mutants
-            .iter()
-            .filter(|m| {
-                m.status != Status::Ignored
-                    && [".ts", ".tsx", ".mts", ".cts"]
-                        .iter()
-                        .any(|ext| m.candidate.location.file.ends_with(ext))
-            })
-            .map(|m| m.candidate.key.clone())
-            .collect();
-        let mut seen = BTreeSet::new();
-        let mut errors = 0;
-        let mut equivalent = 0;
-        for outcome in outcomes {
-            let key = outcome["key"]
-                .as_str()
-                .ok_or_else(|| Failure::protocol("Missing typecheck key"))?;
-            if !wanted.contains(key) || !seen.insert(key.to_owned()) {
-                return Err(Failure::protocol("Unknown or duplicate typecheck key"));
-            }
-            let mutant = report
-                .mutants
-                .iter_mut()
-                .find(|m| m.candidate.key == key)
-                .unwrap();
-            let diagnostic = outcome.get("diagnostic");
-            let equivalent_reason = outcome.get("equivalentReason");
-            match (diagnostic, equivalent_reason) {
-                (Some(Value::Null), Some(Value::Null)) => (),
-                (Some(Value::String(reason)), Some(Value::Null)) if !reason.is_empty() => {
-                    mutant.status = Status::CompileError;
-                    mutant.reason = Some(reason.clone());
-                    errors += 1;
-                }
-                (Some(Value::Null), Some(Value::String(reason)))
-                    if reason.starts_with("equivalent:") =>
-                {
-                    mutant.status = Status::Ignored;
-                    mutant.reason = Some(reason.clone());
-                    equivalent += 1;
-                }
-                _ => return Err(Failure::protocol("Invalid typecheck compiler facts")),
-            }
-        }
-        if wanted != seen
-            || info.checked != outcomes.len()
-            || info.compile_errors != errors
-            || info.equivalent != equivalent
-            || info.version.is_empty()
-        {
-            return Err(Failure::protocol("Incomplete typecheck results or counts"));
-        }
-        report.engine.typecheck = "complete";
-        report.typecheck = Some(info);
+        apply_typecheck_response(response, report)?;
     }
+    Ok(())
+}
+
+fn apply_typecheck_response(response: Response, report: &mut Report) -> Result<(), Failure> {
+    if response.timeout {
+        return Err(Failure::new(
+            "EC_MUTATION_TYPECHECK",
+            "Mutant typechecker timed out",
+        ));
+    }
+    response.check_error()?;
+    let result = only(&response.messages, "typechecked")?;
+    let outcomes = result["outcomes"]
+        .as_array()
+        .ok_or_else(|| Failure::protocol("Missing typecheck outcomes"))?;
+    expected(
+        &response.messages,
+        &["progress", "typechecked", "done"],
+        outcomes.len(),
+    )?;
+    let info: mutation::TypecheckInfo = serde_json::from_value(result["info"].clone())
+        .map_err(|e| Failure::protocol(e.to_string()))?;
+    let wanted: BTreeSet<_> = report
+        .mutants
+        .iter()
+        .filter(|m| {
+            m.status != Status::Ignored
+                && [".ts", ".tsx", ".mts", ".cts"]
+                    .iter()
+                    .any(|ext| m.candidate.location.file.ends_with(ext))
+        })
+        .map(|m| m.candidate.key.clone())
+        .collect();
+    let mut seen = BTreeSet::new();
+    let mut errors = 0;
+    let mut equivalent = 0;
+    for outcome in outcomes {
+        let key = outcome["key"]
+            .as_str()
+            .ok_or_else(|| Failure::protocol("Missing typecheck key"))?;
+        if !wanted.contains(key) || !seen.insert(key.to_owned()) {
+            return Err(Failure::protocol("Unknown or duplicate typecheck key"));
+        }
+        let mutant = report
+            .mutants
+            .iter_mut()
+            .find(|m| m.candidate.key == key)
+            .unwrap();
+        let diagnostic = outcome.get("diagnostic");
+        let equivalent_reason = outcome.get("equivalentReason");
+        match (diagnostic, equivalent_reason) {
+            (Some(Value::Null), Some(Value::Null)) => (),
+            (Some(Value::String(reason)), Some(Value::Null)) if !reason.is_empty() => {
+                mutant.status = Status::CompileError;
+                mutant.reason = Some(reason.clone());
+                errors += 1;
+            }
+            (Some(Value::Null), Some(Value::String(reason)))
+                if reason.starts_with("equivalent:") =>
+            {
+                mutant.status = Status::Ignored;
+                mutant.reason = Some(reason.clone());
+                equivalent += 1;
+            }
+            _ => return Err(Failure::protocol("Invalid typecheck compiler facts")),
+        }
+    }
+    if wanted != seen
+        || info.checked != outcomes.len()
+        || info.compile_errors != errors
+        || info.equivalent != equivalent
+        || info.version.is_empty()
+    {
+        return Err(Failure::protocol("Incomplete typecheck results or counts"));
+    }
+    report.engine.typecheck = "complete";
+    report.typecheck = Some(info);
     Ok(())
 }
 
@@ -302,3 +307,7 @@ fn select_tests(
             .unwrap_or_default();
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/support/typecheck_reports.rs"]
+mod typecheck_tests;
