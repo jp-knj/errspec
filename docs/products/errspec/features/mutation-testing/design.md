@@ -80,8 +80,11 @@ Each request retains the 60-second deadline and 64 MiB transport limit. Syntax
 failures are independent request errors; malformed frames, wrong IDs, unexpected
 EOF and response overflow stop the process as communication failures. A changed
 engine remains an input error. Normal close ends stdin and joins the child;
-interruption, timeout or failed shutdown kills and reaps it. Existing worker
-process-group ownership also covers cancellation and supervisor recovery.
+driver-local interruption, timeout or failed shutdown kills and reaps it.
+Coordinator cancellation and supervisor recovery terminate the entire owned
+worker process group. On Linux, a terminated orphan can briefly remain a zombie
+until the OS reaper collects it; forced-group tests distinguish that state from
+a live process, while normal-close tests require the generator PID to disappear.
 
 Every emitted file is still parsed. A syntax failure takes the existing individual
 placement checks; input and protocol failures stop acquisition. Plugin callbacks,
