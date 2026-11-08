@@ -14,7 +14,11 @@ expression: reports
     "engine": {
       "coverageScope": "vitest_vite_workers",
       "node": null,
-      "rulesVersion": "1",
+      "parser": {
+        "name": "oxc",
+        "version": "0.157.0"
+      },
+      "rulesVersion": "2",
       "tsrsRevision": "1bfd1e65be95131f9242a03687d37006214a96f6",
       "typecheck": "not_run",
       "vitest": null
@@ -174,7 +178,11 @@ expression: reports
     "engine": {
       "coverageScope": "vitest_vite_workers",
       "node": null,
-      "rulesVersion": "1",
+      "parser": {
+        "name": "oxc",
+        "version": "0.157.0"
+      },
+      "rulesVersion": "2",
       "tsrsRevision": "1bfd1e65be95131f9242a03687d37006214a96f6",
       "typecheck": "not_run",
       "vitest": null
@@ -333,7 +341,11 @@ expression: reports
     "engine": {
       "coverageScope": "vitest_vite_workers",
       "node": null,
-      "rulesVersion": "1",
+      "parser": {
+        "name": "oxc",
+        "version": "0.157.0"
+      },
+      "rulesVersion": "2",
       "tsrsRevision": "1bfd1e65be95131f9242a03687d37006214a96f6",
       "typecheck": "not_run",
       "vitest": null
@@ -492,7 +504,11 @@ expression: reports
     "engine": {
       "coverageScope": "vitest_vite_workers",
       "node": null,
-      "rulesVersion": "1",
+      "parser": {
+        "name": "oxc",
+        "version": "0.157.0"
+      },
+      "rulesVersion": "2",
       "tsrsRevision": "1bfd1e65be95131f9242a03687d37006214a96f6",
       "typecheck": "not_run",
       "vitest": null
@@ -646,7 +662,11 @@ expression: reports
     "engine": {
       "coverageScope": "vitest_vite_workers",
       "node": null,
-      "rulesVersion": "1",
+      "parser": {
+        "name": "oxc",
+        "version": "0.157.0"
+      },
+      "rulesVersion": "2",
       "tsrsRevision": "1bfd1e65be95131f9242a03687d37006214a96f6",
       "typecheck": "complete",
       "vitest": null
@@ -809,7 +829,11 @@ expression: reports
     "engine": {
       "coverageScope": "vitest_vite_workers",
       "node": null,
-      "rulesVersion": "1",
+      "parser": {
+        "name": "oxc",
+        "version": "0.157.0"
+      },
+      "rulesVersion": "2",
       "tsrsRevision": "1bfd1e65be95131f9242a03687d37006214a96f6",
       "typecheck": "complete",
       "vitest": null

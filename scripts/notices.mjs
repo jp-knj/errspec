@@ -33,6 +33,15 @@ for (const pkg of metadata.packages
   .sort((a, b) => a.name.localeCompare(b.name))) {
   let dir = dirname(pkg.manifest_path);
   const files = [];
+  // These published crates omit the license text. Vendor the exact upstream revisions:
+  // https://github.com/oxc-project/oxc/blob/f799f174b5db10f1fa9e136594e53de82d4f4f83/LICENSE
+  // https://github.com/oxc-project/oxc-index-vec/blob/8e09fe324eb6df02f56e4eacdfac958930300380/LICENSE
+  let supplied;
+  if (pkg.name.startsWith("oxc_") && pkg.version === "0.157.0" && pkg.repository === "https://github.com/oxc-project/oxc")
+    supplied = "oxc-0.157.0-LICENSE.txt";
+  if (pkg.name === "oxc_index" && pkg.version === "5.0.0" && pkg.repository === "https://github.com/oxc-project/oxc-index-vec")
+    supplied = "oxc-index-5.0.0-LICENSE.txt";
+  if (supplied) files.push(fileURLToPath(new URL(`../docs/engineering/licenses/${supplied}`, import.meta.url)));
   if (pkg.license_file) files.push(join(dir, pkg.license_file));
   for (let depth = 0; depth < 5 && !files.length; depth++) {
     files.push(

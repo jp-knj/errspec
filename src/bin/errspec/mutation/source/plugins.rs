@@ -21,7 +21,7 @@ pub(super) struct Ignore {
 }
 
 pub(super) fn validate(
-    file: P<SourceFile>,
+    file: Node<'_>,
     names: &[String],
     edits: &[Edit],
     ignores: &[Ignore],
@@ -38,19 +38,23 @@ pub(super) fn validate(
             return Err(format!("Invalid or duplicate custom mutator name: {name}"));
         }
     }
-    let mut nodes = BTreeSet::new();
+    if edits.is_empty() && ignores.is_empty() {
+        return Ok(());
+    }
+    let nodes: BTreeSet<_> = file
+        .plugin_nodes()
+        .into_iter()
+        .map(|node| (node.start, node.end, node.kind))
+        .collect();
     let mut runtime_nodes = BTreeSet::new();
-    crate::tsrs_adapter::walk(file.as_node(), &mut |node| {
+    file.walk(&mut |node| {
         let anchor = (
-            tsrs_scanner::get_token_pos_of_node(node, file, false) as usize,
-            node.end().source_offset().unwrap_or(0) as usize,
+            node.start(),
+            node.end_offset(),
             format!("{:?}", node.kind()),
         );
-        nodes.insert(anchor.clone());
         if node.parent().is_some()
-            && (tsrs_ast::is_expression_node(node)
-                || node.kind() == Kind::Block
-                || runtime_statement(node))
+            && (node.is_expression() || node.kind() == Kind::Block || runtime_statement(node))
         {
             runtime_nodes.insert(anchor);
         }
@@ -96,7 +100,7 @@ pub(super) fn validate(
             edit.replacement,
             &file.text()[edit.end..]
         );
-        parse_source(file.file_name(), modified).map_err(|error| {
+        Graph::parse(file.file_name(), &modified, false).map_err(|error| {
             format!(
                 "Plugin mutator {} produced invalid syntax: {error}",
                 edit.mutator
@@ -115,7 +119,7 @@ pub(super) fn validate(
     Ok(())
 }
 
-pub(super) fn apply(rules: &mut Rules<'_>, node: P<Node>, owner: &str, path: &[usize]) {
+pub(super) fn apply<'a>(rules: &mut Rules<'a>, node: Node<'a>, owner: &str, path: &[usize]) {
     for (index, edit) in rules.plugin_edits.iter().enumerate() {
         if edit.anchor_start != rules.start(node)
             || edit.anchor_end != rules.end(node)
@@ -147,7 +151,7 @@ pub(super) fn apply(rules: &mut Rules<'_>, node: P<Node>, owner: &str, path: &[u
             );
             continue;
         }
-        if node.parent().is_some() && tsrs_ast::is_expression_node(node) {
+        if node.parent().is_some() && node.is_expression() {
             // Lift callee and reference edits to a complete runtime expression so
             // switches preserve receivers, optional calls and assignment references.
             let mut target = node;
@@ -169,12 +173,10 @@ pub(super) fn apply(rules: &mut Rules<'_>, node: P<Node>, owner: &str, path: &[u
                         Kind::PrefixUnaryExpression | Kind::PostfixUnaryExpression
                     ));
                 let lhs = parent.kind() == Kind::BinaryExpression
-                    && parent.as_binary_expression().left() == target
-                    && rules
-                        .raw(parent.as_binary_expression().operator_token())
-                        .ends_with('=')
+                    && parent.left() == target
+                    && rules.raw(parent.operator_token()).ends_with('=')
                     && !matches!(
-                        rules.raw(parent.as_binary_expression().operator_token()),
+                        rules.raw(parent.operator_token()),
                         "==" | "===" | "!=" | "!==" | "<=" | ">="
                     );
                 if reference || lhs {
@@ -186,23 +188,24 @@ pub(super) fn apply(rules: &mut Rules<'_>, node: P<Node>, owner: &str, path: &[u
             let value = rules.splice(target, node, &replacement);
             rules.expression(target, &edit.mutator, value, owner, path);
         } else if node.kind() == Kind::Block {
-            let body = node.parent().is_some_and(|parent| {
-                tsrs_ast::is_function_like(parent) && parent.body() == Some(node)
-            });
+            let body = node
+                .parent()
+                .is_some_and(|parent| parent.is_function() && parent.body() == Some(node));
             let ignored = if body {
-                let parsed = parse_source(
+                let parsed = Graph::parse(
                     "plugin-body.ts",
-                    format!("async function* __errspec__(){replacement}"),
+                    &format!("async function* __errspec__(){replacement}"),
+                    false,
                 );
-                let modified = parsed.ok().and_then(|file| {
-                    file.as_node()
+                parsed.ok().and_then(|graph| {
+                    graph
+                        .root()
                         .statements()
                         .first()
                         .and_then(|function| function.body())
-                });
-                modified
-                    .filter(|modified| directives(node) != directives(*modified))
-                    .map(|_| "Plugin body replacement would change a directive prologue".into())
+                        .filter(|modified| directives(node) != directives(*modified))
+                        .map(|_| "Plugin body replacement would change a directive prologue".into())
+                })
             } else {
                 None
             };
@@ -256,7 +259,7 @@ pub(super) fn apply(rules: &mut Rules<'_>, node: P<Node>, owner: &str, path: &[u
     }
 }
 
-fn directives(node: P<Node>) -> Vec<String> {
+fn directives(node: Node<'_>) -> Vec<String> {
     node.statements()
         .iter()
         .take_while(|statement| {
@@ -269,8 +272,8 @@ fn directives(node: P<Node>) -> Vec<String> {
         .collect()
 }
 
-fn runtime_statement(node: P<Node>) -> bool {
-    tsrs_ast::is_statement_but_not_declaration(node)
+fn runtime_statement(node: Node<'_>) -> bool {
+    node.is_runtime_statement()
         && !matches!(
             node.kind(),
             Kind::VariableStatement | Kind::NotEmittedStatement

@@ -248,3 +248,24 @@ test("Git selection ignores only managed cache artifacts and still validates its
   assert.equal(warm.cache.reused,cold.summary.killed);
   assert.deepEqual(warm.selection.changedFiles,["src/value.ts"]);assert.equal(warm.selection.fullRunReason,null);
 });
+
+test("parser migration rejects previous cache fingerprints and leaves old approvals stale", {timeout:60000}, t => {
+  const root=fixture(t),before=run(root,["--cache"]);
+  assert.deepEqual(before.engine.parser,{name:"oxc",version:"0.157.0"});
+  assert.equal(before.engine.rulesVersion,"2");
+  for(const name of ["results-v1.json","coverage-v1.json"]) {
+    const file=join(root,".errspec/mutation-cache",name);
+    const history=JSON.parse(readFileSync(file,"utf8"));
+    history.fingerprint="0".repeat(64);
+    writeFileSync(file,JSON.stringify(history));
+  }
+  const obsolete="0".repeat(64);
+  writeFileSync(join(root,"errspec.accepted.json"),JSON.stringify({[obsolete]:{reason:"Reviewed with the previous generator"}}));
+  const after=run(root,["--cache"]);
+  assert.equal(after.cache.reused,0);
+  assert.notEqual(after.cache.coverageReused,true);
+  assert.equal(after.testsExecuted,true);
+  assert.deepEqual(after.mutants.map(m=>[m.key,m.status]),before.mutants.map(m=>[m.key,m.status]));
+  assert.deepEqual(after.policy.acceptance.stale,[obsolete]);
+  assert(after.mutants.every(m=>!m.accepted));
+});

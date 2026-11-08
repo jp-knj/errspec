@@ -18,7 +18,7 @@ pub mod syntax;
 pub mod test_selection;
 pub mod typecheck;
 
-pub const RULES_VERSION: &str = "1";
+pub const RULES_VERSION: &str = "2";
 pub const MUTATORS: [&str; 18] = [
     "ArithmeticOperator",
     "ArrayDeclaration",
@@ -349,8 +349,15 @@ pub struct Mutant {
 }
 
 #[derive(Debug, Serialize)]
+pub struct Parser {
+    pub name: &'static str,
+    pub version: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Engine {
+    pub parser: Parser,
     pub tsrs_revision: &'static str,
     pub rules_version: &'static str,
     pub node: Option<String>,
@@ -453,6 +460,10 @@ impl Report {
             kind: "errspec/mutation",
             schema_version: 1,
             engine: Engine {
+                parser: Parser {
+                    name: "oxc",
+                    version: "0.157.0",
+                },
                 tsrs_revision: "1bfd1e65be95131f9242a03687d37006214a96f6",
                 rules_version: RULES_VERSION,
                 node: None,

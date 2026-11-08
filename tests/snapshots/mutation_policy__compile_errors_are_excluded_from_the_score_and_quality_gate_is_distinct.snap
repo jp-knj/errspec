@@ -1,13 +1,18 @@
 ---
 source: tests/mutation_policy.rs
+assertion_line: 111
 expression: report
 ---
 {
   "kind": "errspec/mutation",
   "schemaVersion": 1,
   "engine": {
+    "parser": {
+      "name": "oxc",
+      "version": "0.157.0"
+    },
     "tsrsRevision": "1bfd1e65be95131f9242a03687d37006214a96f6",
-    "rulesVersion": "1",
+    "rulesVersion": "2",
     "node": null,
     "vitest": null,
     "typecheck": "not_run",

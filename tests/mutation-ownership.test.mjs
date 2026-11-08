@@ -92,7 +92,11 @@ test('orphan cleanup preserves unexpected files inside its temporary directory',
 test('replacing the executable during configuration cannot mix native generation with old ownership evidence',{timeout:30000},async t=>{
  const root=fixture(t);writeFileSync(join(root,'finish'),'yes');mkdirSync(join(root,'engine'));
  const native=join(root,'engine/errspec'),saved=join(root,'engine/original');copyFileSync(binary,native);
- const wrapper=`#!${process.execPath}\nimport {readFileSync} from 'node:fs';import {spawnSync} from 'node:child_process';let input=readFileSync(0);if(process.argv[2]==='__mutation-source'){const data=JSON.parse(input);data.engineFingerprint='0'.repeat(64);input=JSON.stringify(data);}const result=spawnSync(${JSON.stringify(saved)},process.argv.slice(2),{input,encoding:'utf8'});process.stdout.write(result.stdout||'');process.stderr.write(result.stderr||'');process.exitCode=result.status;`;
+ const wrapper=`#!${process.execPath}\nimport {readFileSync} from 'node:fs';import {spawn,spawnSync} from 'node:child_process';import {createInterface} from 'node:readline';
+if(process.argv[2]==='__mutation-source-lines'){
+ const child=spawn(${JSON.stringify(saved)},process.argv.slice(2));child.stdout.pipe(process.stdout);child.stderr.pipe(process.stderr);child.on('close',code=>process.exitCode=code);
+ for await(const line of createInterface({input:process.stdin})){const frame=JSON.parse(line);frame.request.engineFingerprint='0'.repeat(64);child.stdin.write(JSON.stringify(frame)+'\\n');}child.stdin.end();
+}else{let input=readFileSync(0);if(process.argv[2]==='__mutation-source'){const data=JSON.parse(input);data.engineFingerprint='0'.repeat(64);input=JSON.stringify(data);}const result=spawnSync(${JSON.stringify(saved)},process.argv.slice(2),{input,encoding:'utf8'});process.stdout.write(result.stdout||'');process.stderr.write(result.stderr||'');process.exitCode=result.status;}`;
  writeFileSync(join(root,'vitest.config.mjs'),`import {existsSync,renameSync,writeFileSync} from 'node:fs';if(!existsSync(${JSON.stringify(saved)})){renameSync(${JSON.stringify(native)},${JSON.stringify(saved)});writeFileSync(${JSON.stringify(native)},${JSON.stringify(wrapper)},{mode:0o755});}export default {};`);
  const execution=start(root,native);t.after(()=>stop(execution));const result=await execution.done;
  assert.equal(result.code,2,result.stderr+result.stdout);const report=JSON.parse(result.stdout);

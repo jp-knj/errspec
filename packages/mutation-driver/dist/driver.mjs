@@ -2831,67 +2831,123 @@ export default {...original,...project(original),globalSetup:[original.globalSet
   } };
 }
 
-// native-source.mjs
-import { spawnSync } from "node:child_process";
-var MAX_BUFFER = 64 * 1024 * 1024;
-var MAX_INPUT = 1024 * 1024;
-function failure(code, message) {
-  return Object.assign(new Error(message), { code });
-}
-function invoke(binary, input, count = 1) {
-  const result = spawnSync(binary, ["__mutation-source"], {
-    input: JSON.stringify(input),
-    encoding: "utf8",
-    maxBuffer: MAX_BUFFER,
-    timeout: 60000 * count
-  });
-  if (result.error?.code === "ENOBUFS")
-    return;
-  if (result.status !== 0)
-    throw failure(result.stderr?.startsWith("EC_MUTATION_INPUT:") ? "EC_MUTATION_INPUT" : "EC_MUTATION_INSTRUMENTATION", result.stderr || result.error?.message || "Native parser failed");
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    throw failure("EC_MUTATION_PROTOCOL", "Invalid native generator response");
+// generator.mjs
+import { spawn as spawn2 } from "node:child_process";
+var LIMIT = 64 * 1024 * 1024;
+var failure = (message) => Object.assign(new Error(message), { code: "EC_MUTATION_PROTOCOL" });
+
+class Generator {
+  constructor(binary, { timeout = 60000, maxBuffer = LIMIT } = {}) {
+    this.timeout = timeout;
+    this.maxBuffer = maxBuffer;
+    this.id = 0;
+    this.pending = null;
+    this.buffer = Buffer.alloc(0);
+    this.stderrBytes = 0;
+    this.failure = null;
+    this.closing = false;
+    this.child = spawn2(binary, ["__mutation-source-lines"], {
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    this.exited = new Promise((resolve) => this.child.once("close", (code, signal) => {
+      if (!this.closing || this.pending || code !== 0)
+        this.fail(failure(`Generator exited (${code ?? signal})`));
+      resolve();
+    }));
+    this.child.on("error", (error) => this.fail(failure(`Generator start failed: ${error.message}`)));
+    this.child.stdin.on("error", (error) => this.fail(failure(`Generator input failed: ${error.message}`)));
+    this.child.stdout.on("error", (error) => this.fail(failure(`Generator output failed: ${error.message}`)));
+    this.child.stderr.on("error", (error) => this.fail(failure(`Generator stderr failed: ${error.message}`)));
+    this.child.stderr.on("data", (chunk) => {
+      this.stderrBytes += chunk.length;
+      if (this.stderrBytes > this.maxBuffer)
+        this.fail(failure("Generator stderr exceeds 64 MiB"));
+    });
+    this.child.stdout.on("data", (chunk) => this.receive(chunk));
   }
-}
-function nativeSource(binary, engineFingerprint, request) {
-  const result = invoke(binary, { ...request, engineFingerprint });
-  if (result === undefined)
-    throw failure("EC_MUTATION_INSTRUMENTATION", "Native parser response exceeded buffer limit");
-  return result;
-}
-function nativeSources(binary, engineFingerprint, requests) {
-  const results = [];
-  for (let start = 0;start < requests.length; ) {
-    let end = start, bytes = 0;
-    while (end < requests.length && end - start < 8) {
-      const size = Buffer.byteLength(JSON.stringify(requests[end]));
-      if (end > start && bytes + size > MAX_INPUT)
-        break;
-      bytes += size;
-      end++;
+  fail(error) {
+    this.failure ??= error;
+    if (this.pending) {
+      clearTimeout(this.pending.timer);
+      this.pending.reject(this.failure);
+      this.pending = null;
     }
-    const group = requests.slice(start, end);
-    let acquired;
-    if (group.length > 1)
-      acquired = invoke(binary, { requests: group, engineFingerprint }, group.length);
-    if (acquired === undefined)
-      acquired = group.map((request) => {
-        try {
-          return { Ok: nativeSource(binary, engineFingerprint, request) };
-        } catch (error) {
-          if (error.code === "EC_MUTATION_INPUT" || error.code === "EC_MUTATION_PROTOCOL")
-            throw error;
-          return { Err: error.message };
-        }
-      });
-    if (!Array.isArray(acquired) || acquired.length !== group.length || acquired.some((value) => !value || typeof value !== "object" || Object.keys(value).length !== 1 || !(typeof value.Err === "string" || value.Ok && Array.isArray(value.Ok.candidates))))
-      throw failure("EC_MUTATION_PROTOCOL", "Invalid native batch response");
-    results.push(...acquired);
-    start = end;
+    this.child.kill("SIGKILL");
   }
-  return results;
+  receive(chunk) {
+    if (this.failure)
+      return;
+    if (!this.pending) {
+      this.fail(failure("Unsolicited generator response"));
+      return;
+    }
+    if (this.buffer.length + chunk.length > this.maxBuffer) {
+      this.fail(failure("Generator response exceeds 64 MiB"));
+      return;
+    }
+    this.buffer = Buffer.concat([this.buffer, chunk]);
+    const end = this.buffer.indexOf(10);
+    if (end < 0)
+      return;
+    if (end !== this.buffer.length - 1) {
+      this.fail(failure("Multiple generator responses"));
+      return;
+    }
+    let frame;
+    try {
+      frame = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(this.buffer));
+    } catch {
+      this.fail(failure("Invalid generator JSON"));
+      return;
+    }
+    this.buffer = Buffer.alloc(0);
+    if (!frame || typeof frame !== "object" || Array.isArray(frame) || frame.version !== 1 || frame.id !== this.pending.id || !!frame.result === !!frame.error || frame.result && !Array.isArray(frame.result.candidates) || frame.error && (!["syntax", "input"].includes(frame.error.kind) || typeof frame.error.message !== "string")) {
+      this.fail(failure("Invalid generator response"));
+      return;
+    }
+    const pending = this.pending;
+    this.pending = null;
+    clearTimeout(pending.timer);
+    if (frame.error)
+      pending.reject(Object.assign(new Error(frame.error.message), {
+        code: frame.error.kind === "input" ? "EC_MUTATION_INPUT" : "EC_MUTATION_INSTRUMENTATION"
+      }));
+    else
+      pending.resolve(frame.result);
+  }
+  async call(request) {
+    if (this.failure)
+      throw this.failure;
+    if (this.closing || this.pending)
+      throw failure("Generator requires sequential requests");
+    const id = ++this.id, frame = JSON.stringify({ version: 1, id, request }) + `
+`;
+    if (Buffer.byteLength(frame) > this.maxBuffer)
+      throw failure("Generator request exceeds 64 MiB");
+    this.stderrBytes = 0;
+    try {
+      return await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => this.fail(failure("Generator deadline exceeded")), this.timeout);
+        this.pending = { id, resolve, reject, timer };
+        this.child.stdin.write(frame);
+      });
+    } catch (error) {
+      if (this.failure)
+        await this.close();
+      throw error;
+    }
+  }
+  async close() {
+    if (this.closePromise)
+      return this.closePromise;
+    this.closing = true;
+    if (this.pending)
+      this.fail(failure("Generator interrupted"));
+    this.child.stdin.end();
+    const timer = setTimeout(() => this.child.kill("SIGKILL"), 1000);
+    this.closePromise = this.exited.finally(() => clearTimeout(timer));
+    return this.closePromise;
+  }
 }
 
 // driver.mjs
@@ -2957,13 +3013,40 @@ function verifyInputs() {
 function sourceRequest(source, file, validateOnly = false, pluginInputs = {}, facts = false) {
   return { source, file, validateOnly, excludeMutators: options.excludeMutator, weakMutation: options.weakMutation, arid: options.arid, aridCallees: options.aridCallees, facts: !!(facts || options.since || options.cache && options.cacheScope || options.plugins?.length), customMutators: mutationPlugins?.names, pluginAridCallees: mutationPlugins?.aridCallees, ...pluginInputs };
 }
+var generator;
+async function nativeRequest(request) {
+  generator ??= new Generator(options.binary);
+  return generator.call({ ...request, engineFingerprint: options.engineFingerprint });
+}
 function native(...args) {
-  return nativeSource(options.binary, options.engineFingerprint, sourceRequest(...args));
+  return nativeRequest(sourceRequest(...args));
+}
+async function nativeSources(requests) {
+  const results = [];
+  for (const request of requests) {
+    try {
+      results.push({ Ok: await nativeRequest(request) });
+    } catch (error) {
+      if (error.code !== "EC_MUTATION_INSTRUMENTATION")
+        throw error;
+      results.push({ Err: error.message });
+    }
+  }
+  return results;
+}
+async function closeGenerator() {
+  if (!generator)
+    return;
+  const current = generator;
+  generator = undefined;
+  await current.close();
+  if (current.failure)
+    throw current.failure;
 }
 async function generateSource(source, file, base) {
   if (!options.plugins?.length)
     return base ?? native(source, file);
-  const acquired = base ?? native(source, file);
+  const acquired = base ?? await native(source, file);
   const edits = await mutationPlugins.edits(source, file, acquired.metadata);
   return native(source, file, false, edits);
 }
@@ -2973,7 +3056,7 @@ async function* preparedSources() {
     let group = entries.slice(start, start + 8), generationFailure;
     const missing = group.filter(([file, entry]) => !pendingGenerated.has(file) && !entry.generated);
     if (!options.plugins?.length) {
-      const generated = nativeSources(options.binary, options.engineFingerprint, missing.map(([file, entry]) => sourceRequest(entry.source, rel(file))));
+      const generated = await nativeSources(missing.map(([file, entry]) => sourceRequest(entry.source, rel(file))));
       for (let index = 0;index < missing.length; index++) {
         if ("Err" in generated[index]) {
           generationFailure = failure2("EC_MUTATION_INSTRUMENTATION", generated[index].Err);
@@ -2998,13 +3081,13 @@ async function* preparedSources() {
         }
       entry.emitted = instrument(entry.source, entry.candidates, file, runId);
     }
-    const validations = nativeSources(options.binary, options.engineFingerprint, group.map(([file, entry]) => sourceRequest(entry.emitted.code, rel(file), true)));
+    const validations = await nativeSources(group.map(([file, entry]) => sourceRequest(entry.emitted.code, rel(file), true)));
     for (let index = 0;index < group.length; index++) {
       const [file, entry] = group[index];
       if ("Err" in validations[index]) {
         for (const c of entry.candidates.filter((c) => !c.ignored)) {
           try {
-            native(instrument(entry.source, [c], file, runId).code, rel(file), true);
+            await native(instrument(entry.source, [c], file, runId).code, rel(file), true);
           } catch (error) {
             if (error.code !== "EC_MUTATION_INSTRUMENTATION")
               throw error;
@@ -3012,7 +3095,7 @@ async function* preparedSources() {
           }
         }
         entry.emitted = instrument(entry.source, entry.candidates, file, runId);
-        native(entry.emitted.code, rel(file), true);
+        await native(entry.emitted.code, rel(file), true);
       }
       const generated = entry.generated;
       delete entry.generated;
@@ -3059,7 +3142,7 @@ function plugin(phase) {
   } };
 }
 var childDependencies = new Map;
-function childProcessClosure(entries) {
+async function childProcessClosure(entries) {
   const pending = entries.map((file) => resolve5(root, file)), seen = new Set;
   while (pending.length) {
     const file = pending.pop();
@@ -3071,7 +3154,7 @@ function childProcessClosure(entries) {
     if (!dependencies) {
       dependencies = [];
       const source = inventory.get(file)?.source ?? readFileSync7(file, "utf8");
-      for (const specifier of native(source, rel(file), true, {}, true).metadata?.dependencies || []) {
+      for (const specifier of (await native(source, rel(file), true, {}, true)).metadata?.dependencies || []) {
         if (!specifier.startsWith("."))
           continue;
         const target = resolve5(dirname6(file), specifier);
@@ -3086,7 +3169,7 @@ function childProcessClosure(entries) {
   }
   return [...seen].map(rel).sort();
 }
-function childProcessEntries(fact) {
+async function childProcessEntries(fact) {
   const tokens = fact.method === "execSync" || fact.argv[1] === "-c" ? (fact.argv.at(-1).match(/(?:[^\s"'\\]|\\.|"[^"]*"|'[^']*')+/g) || []).map((v) => v.replace(/^(["'])([\s\S]*)\1$/, "$2").replace(/\\([\s"'])/g, "$1")) : fact.argv.slice(1);
   const entries = new Set;
   for (const arg of tokens) {
@@ -3101,14 +3184,21 @@ function childProcessEntries(fact) {
   }
   return childProcessClosure([...entries]);
 }
+var pendingChildProcesses = new WeakMap;
 function recordChildProcesses(execution, moduleFile, facts) {
-  for (const fact of facts) {
-    const entries = childProcessEntries(fact);
+  const pending = pendingChildProcesses.get(execution) || [];
+  pending.push(...facts.map((fact) => ({ moduleFile, fact })));
+  pendingChildProcesses.set(execution, pending);
+}
+async function acquireChildProcesses(execution) {
+  for (const { moduleFile, fact } of pendingChildProcesses.get(execution) || []) {
+    const entries = await childProcessEntries(fact);
     if (!entries.length)
       continue;
     const test = execution.tests.find((t) => t.file === moduleFile && t.taskId === fact.taskId && t.started)?.id || null;
     (execution.childProcesses ||= []).push({ test, file: moduleFile, executable: basename(fact.argv[0]), entries, method: fact.method });
   }
+  pendingChildProcesses.delete(execution);
 }
 function recordModule(module, execution, request) {
   const counts = new Map;
@@ -3201,6 +3291,7 @@ async function executeAdapter(phase, request) {
     return;
   }
   const result = await adapter.execute(phase, request, inventory, baseline);
+  await acquireChildProcesses(result.execution);
   verifyInputs();
   return result.execution;
 }
@@ -3421,6 +3512,7 @@ async function execute(phase, request) {
           if (file && !file.includes("/node_modules/") && !file.startsWith(options.temp) && existsSync6(file))
             remember(file);
         }
+    await acquireChildProcesses(execution);
     verifyInputs();
     execution.tests.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : 0);
     completed = true;
@@ -3449,7 +3541,7 @@ function cacheFacts() {
 async function acquireStaticImports(project) {
   const container = project.vite.environments?.__vitest__?.pluginContainer ?? project.vite.environments?.ssr?.pluginContainer;
   for (const [file, entry] of inventory) {
-    const generated = entry.generated ?? await generateSource(entry.source, rel(file), native(entry.source, rel(file)));
+    const generated = entry.generated ?? await generateSource(entry.source, rel(file), await native(entry.source, rel(file)));
     pendingGenerated.set(file, generated);
     for (const binding of generated.metadata?.imports || []) {
       binding.resolved = null;
@@ -3629,6 +3721,7 @@ async function handle(request) {
       if (saved.state.failure)
         throw saved.state.failure;
     }
+    await closeGenerator();
     verifyInputs();
     send(request, "done", { count: 0, ...options.cache ? { cacheFacts: cacheFacts() } : {} });
     return;
@@ -3650,27 +3743,37 @@ async function prepareProbe(request, count) {
   return;
 }
 var lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
-for await (const line of lines) {
-  let request;
-  try {
-    request = JSON.parse(line);
-    await handle(request);
-  } catch (error) {
+try {
+  for await (const line of lines) {
+    let request;
     try {
-      if (current)
-        await closeContext(current);
-      if (warmContext) {
-        const saved = warmContext;
-        warmContext = undefined;
-        await closeContext(saved.ctx);
-      }
-    } catch (cleanup) {
-      error = failure2(error.code || "EC_MUTATION_RUNNER", `${error.stack || error}
+      request = JSON.parse(line);
+      await handle(request);
+    } catch (error) {
+      try {
+        if (current)
+          await closeContext(current);
+        if (warmContext) {
+          const saved = warmContext;
+          warmContext = undefined;
+          await closeContext(saved.ctx);
+        }
+      } catch (cleanup) {
+        error = failure2(error.code || "EC_MUTATION_RUNNER", `${error.stack || error}
 Cleanup failed: ${cleanup.stack || cleanup}`);
+      }
+      try {
+        await closeGenerator();
+      } catch (cleanup) {
+        error = failure2(error.code || "EC_MUTATION_PROTOCOL", `${error.stack || error}
+Generator cleanup failed: ${cleanup.stack || cleanup}`);
+      }
+      send(request || { requestId: 0 }, "error", { code: error.code?.startsWith("EC_MUTATION_") ? error.code : "EC_MUTATION_RUNNER", message: error.stack || String(error) });
+      process.exitCode = 0;
     }
-    send(request || { requestId: 0 }, "error", { code: error.code?.startsWith("EC_MUTATION_") ? error.code : "EC_MUTATION_RUNNER", message: error.stack || String(error) });
-    process.exitCode = 0;
   }
+  if (warmContext)
+    await closeContext(warmContext.ctx);
+} finally {
+  await closeGenerator();
 }
-if (warmContext)
-  await closeContext(warmContext.ctx);

@@ -165,6 +165,7 @@ export interface MutationReport {
   kind: "errspec/mutation";
   schemaVersion: 1;
   engine: {
+    parser: { name: "oxc"; version: "0.157.0" };
     tsrsRevision: string; rulesVersion: string;
     node: string | null; vitest: string | null;
     runner?: "vite-plus" | "jest" | "playwright"; runnerVersion?: string;
