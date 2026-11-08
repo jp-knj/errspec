@@ -38,7 +38,14 @@ pub(super) fn validate(
             return Err(format!("Invalid or duplicate custom mutator name: {name}"));
         }
     }
-    let mut nodes = BTreeSet::new();
+    if edits.is_empty() && ignores.is_empty() {
+        return Ok(());
+    }
+    let nodes: BTreeSet<_> = file
+        .plugin_nodes()
+        .into_iter()
+        .map(|node| (node.start, node.end, node.kind))
+        .collect();
     let mut runtime_nodes = BTreeSet::new();
     file.walk(&mut |node| {
         let anchor = (
@@ -46,7 +53,6 @@ pub(super) fn validate(
             node.end_offset(),
             format!("{:?}", node.kind()),
         );
-        nodes.insert(anchor.clone());
         if node.parent().is_some()
             && (node.is_expression() || node.kind() == Kind::Block || runtime_statement(node))
         {

@@ -66,7 +66,11 @@ pub(crate) fn generate(request: SourceRequest) -> Result<SourceResult, String> {
             return Err(format!("Unknown mutator: {name}"));
         }
     }
-    let graph = Graph::parse(&request.file, &request.source, request.facts)?;
+    let graph = Graph::parse(
+        &request.file,
+        &request.source,
+        request.facts || !request.plugin_edits.is_empty() || !request.plugin_ignores.is_empty(),
+    )?;
     let file = graph.root();
     plugins::validate(
         file,

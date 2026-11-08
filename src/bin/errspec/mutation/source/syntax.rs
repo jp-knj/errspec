@@ -242,6 +242,21 @@ impl<'a> Visit<'a> for Builder<'_> {
         let mut e = self.graph.entries[index].clone();
         e.kind = kind(k);
         match k {
+            A::ImportDeclaration(n) => {
+                e.flags = u32::from(n.import_kind == ImportOrExportKind::Type)
+                    | n.phase.map_or(0, |phase| ((phase as u32) + 1) << 1);
+            }
+            A::ImportSpecifier(n) => e.flags = u32::from(n.import_kind == ImportOrExportKind::Type),
+            A::ExportNamedDeclaration(n) => {
+                e.flags = u32::from(n.export_kind == ImportOrExportKind::Type)
+            }
+            A::ExportFromDeclaration(n) => {
+                e.flags = u32::from(n.export_kind == ImportOrExportKind::Type)
+            }
+            A::ExportAllDeclaration(n) => {
+                e.flags = u32::from(n.export_kind == ImportOrExportKind::Type)
+            }
+            A::ExportSpecifier(n) => e.flags = u32::from(n.export_kind == ImportOrExportKind::Type),
             A::IdentifierName(n) => e.value = n.name.to_string(),
             A::IdentifierReference(n) => e.value = n.name.to_string(),
             A::BindingIdentifier(n) => e.value = n.name.to_string(),

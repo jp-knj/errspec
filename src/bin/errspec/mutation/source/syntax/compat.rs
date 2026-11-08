@@ -399,36 +399,87 @@ impl<'a> Visit<'a> for Projection<'_> {
             }
             A::TSClassImplements(_) => self.graph.entries[index].kind = Kind::TypeReference,
             A::ImportDeclaration(n) => {
-                if let Some(specifiers) = &n.specifiers
-                    && let (Some(first), Some(last)) = (specifiers.first(), specifiers.last())
-                {
-                    let start = graph_token(
+                if let Some(specifiers) = &n.specifiers {
+                    let named_spans: Vec<_> = specifiers
+                        .iter()
+                        .filter(|s| matches!(s, ImportDeclarationSpecifier::ImportSpecifier(_)))
+                        .map(GetSpan::span)
+                        .collect();
+                    let braces = graph_token(
                         &self.graph.source,
-                        n.span.start as usize,
-                        first.span().start as usize,
+                        n.span.start as usize + 6,
+                        named_spans.first().map_or(n.source.span.start, |s| s.start) as usize,
                         "{",
                     )
-                    .map_or(first.span().start, |s| s.start);
-                    let end = graph_token(
-                        &self.graph.source,
-                        last.span().end as usize,
-                        n.source.span.start as usize,
-                        "}",
-                    )
-                    .map_or(last.span().end, |s| s.end);
+                    .and_then(|start| {
+                        graph_token(
+                            &self.graph.source,
+                            named_spans.last().map_or(start.end, |s| s.end) as usize,
+                            n.source.span.start as usize,
+                            "}",
+                        )
+                        .map(|end| (start, end))
+                    });
+                    let start = specifiers
+                        .first()
+                        .map(|s| s.span().start)
+                        .into_iter()
+                        .chain(braces.map(|(start, _)| start.start))
+                        .min()
+                        .unwrap_or(n.source.span.start);
+                    let end = specifiers
+                        .last()
+                        .map(|s| s.span().end)
+                        .into_iter()
+                        .chain(braces.map(|(_, end)| end.end))
+                        .max()
+                        .unwrap_or(start);
+                    let modifier = if n.import_kind == ImportOrExportKind::Type {
+                        Some("type")
+                    } else {
+                        n.phase.map(|phase| match phase {
+                            ImportPhase::Source => "source",
+                            ImportPhase::Defer => "defer",
+                        })
+                    };
+                    let start = modifier
+                        .and_then(|modifier| {
+                            graph_token(
+                                &self.graph.source,
+                                n.span.start as usize + 6,
+                                start as usize,
+                                modifier,
+                            )
+                        })
+                        .map_or(start, |span| span.start);
                     let clause = self.wrap(
                         index,
                         Span::new(start, end),
                         Kind::ImportClause,
                         &specifiers.iter().map(id).collect::<Vec<_>>(),
                     );
-                    let named = specifiers
-                        .iter()
-                        .filter(|s| matches!(s, ImportDeclarationSpecifier::ImportSpecifier(_)))
-                        .map(id)
-                        .collect::<Vec<_>>();
-                    if !named.is_empty() {
-                        self.wrap(clause, Span::new(start, end), Kind::NamedImports, &named);
+                    let mut named = vec![];
+                    for specifier in specifiers {
+                        match specifier {
+                            ImportDeclarationSpecifier::ImportDefaultSpecifier(n) => {
+                                self.graph.entries[id(n.as_ref())].kind = Kind::Unknown;
+                                self.graph.entries[clause].name = Some(id(&n.local));
+                            }
+                            ImportDeclarationSpecifier::ImportNamespaceSpecifier(n) => {
+                                self.graph.entries[id(n.as_ref())].name = Some(id(&n.local));
+                            }
+                            ImportDeclarationSpecifier::ImportSpecifier(n) => {
+                                named.push(id(n.as_ref()))
+                            }
+                        }
+                    }
+                    if let Some((start, end)) = braces {
+                        self.wrap(
+                            clause,
+                            Span::new(start.start, end.end),
+                            Kind::NamedImports,
+                            &named,
+                        );
                     }
                 }
             }
