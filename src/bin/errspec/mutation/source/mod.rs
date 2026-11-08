@@ -11,7 +11,6 @@ use tsrs_ast::{Kind, is_type_node_kind};
 mod arid;
 mod callgraph;
 mod comments;
-mod dependencies;
 mod facts;
 mod plugins;
 

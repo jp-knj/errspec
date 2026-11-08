@@ -246,8 +246,8 @@ pub(super) fn collect(rules: &Rules<'_>) -> Metadata {
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect(),
         nodes,
-        dependencies: dependencies::collect(rules.file),
+        dependencies: rules.file.dependencies().to_vec(),
         calls: rules.calls.clone(),
-        imports: callgraph::imports(rules),
+        imports: rules.file.imports().to_vec(),
     }
 }

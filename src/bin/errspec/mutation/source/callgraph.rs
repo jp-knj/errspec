@@ -1,6 +1,5 @@
 //! Acquire source spelling and lexical owners, without inferring reachability.
 use super::*;
-use errspec::mutation::syntax::Import;
 
 pub(super) fn path(rules: &Rules<'_>, mut node: Node<'_>) -> Option<String> {
     while matches!(
@@ -22,7 +21,4 @@ pub(super) fn path(rules: &Rules<'_>, mut node: Node<'_>) -> Option<String> {
         )),
         _ => None,
     }
-}
-pub(super) fn imports(rules: &Rules<'_>) -> Vec<Import> {
-    rules.file.imports().to_vec()
 }
