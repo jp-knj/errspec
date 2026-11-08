@@ -841,19 +841,6 @@ impl<'a> Node<'a> {
         )
     }
 }
-macro_rules! aliases{($($name:ident),*)=>{impl<'a> Node<'a>{$ (pub fn $name(self)->Self{self})*}}}
-aliases!(
-    as_binary_expression,
-    as_heritage_clause,
-    as_prefix_unary_expression,
-    as_postfix_unary_expression,
-    as_if_statement,
-    as_for_statement,
-    as_type_reference_node,
-    as_literal_type_node,
-    as_type_operator_node,
-    as_type_predicate_node
-);
 pub(super) struct Conditional<'a>(Node<'a>);
 impl<'a> Node<'a> {
     pub fn as_conditional_expression(self) -> Conditional<'a> {

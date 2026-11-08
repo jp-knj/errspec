@@ -296,12 +296,10 @@ impl<'a> Rules<'a> {
         let mut unsafe_reason = None;
         if let Some(parent) = target.parent() {
             let lhs = parent.kind() == Kind::BinaryExpression
-                && parent.as_binary_expression().left() == target
-                && self
-                    .raw(parent.as_binary_expression().operator_token())
-                    .ends_with('=')
+                && parent.left() == target
+                && self.raw(parent.operator_token()).ends_with('=')
                 && !matches!(
-                    self.raw(parent.as_binary_expression().operator_token()),
+                    self.raw(parent.operator_token()),
                     "==" | "===" | "!=" | "!==" | "<=" | ">="
                 );
             if lhs
@@ -320,8 +318,7 @@ impl<'a> Rules<'a> {
             && target.kind() == Kind::BinaryExpression
             && matches!(family, "EqualityOperator" | "ArithmeticOperator")
         {
-            let binary = target.as_binary_expression();
-            let operator = binary.operator_token();
+            let operator = target.operator_token();
             let prefix = self.start(operator) - self.start(target);
             let suffix = self.end(target) - self.end(operator);
             value
@@ -331,8 +328,8 @@ impl<'a> Rules<'a> {
                 .map(|replacement| errspec::mutation::WeakBinary {
                     operator: self.raw(operator).into(),
                     replacement_operator: replacement.into(),
-                    left_end: self.end(binary.left()) as u32,
-                    right_start: self.start(binary.right()) as u32,
+                    left_end: self.end(target.left()) as u32,
+                    right_start: self.start(target.right()) as u32,
                 })
         } else {
             None
@@ -369,7 +366,7 @@ impl<'a> Rules<'a> {
         let runtime_heritage = kind == Kind::ExpressionWithTypeArguments
             && node.parent().is_some_and(|parent| {
                 parent.kind() == Kind::HeritageClause
-                    && parent.as_heritage_clause().token() == Kind::ExtendsKeyword
+                    && parent.token() == Kind::ExtendsKeyword
                     && parent.parent().is_some_and(|class| {
                         matches!(class.kind(), Kind::ClassDeclaration | Kind::ClassExpression)
                     })
@@ -463,15 +460,14 @@ impl<'a> Rules<'a> {
         let raw = self.raw(node).to_string();
         match node.kind() {
             Kind::BinaryExpression => {
-                let binary = node.as_binary_expression();
-                let op = self.raw(binary.operator_token()).to_string();
+                let op = self.raw(node.operator_token()).to_string();
                 let string = matches!(
-                    binary.left().kind(),
+                    node.left().kind(),
                     Kind::StringLiteral
                         | Kind::NoSubstitutionTemplateLiteral
                         | Kind::TemplateExpression
                 ) || matches!(
-                    binary.right().kind(),
+                    node.right().kind(),
                     Kind::StringLiteral
                         | Kind::NoSubstitutionTemplateLiteral
                         | Kind::TemplateExpression
@@ -490,7 +486,7 @@ impl<'a> Rules<'a> {
                     self.expression(
                         node,
                         "ArithmeticOperator",
-                        self.splice(node, binary.operator_token(), op),
+                        self.splice(node, node.operator_token(), op),
                         owner,
                         path,
                     );
@@ -516,7 +512,7 @@ impl<'a> Rules<'a> {
                     self.expression(
                         node,
                         "AssignmentOperator",
-                        self.splice(node, binary.operator_token(), value),
+                        self.splice(node, node.operator_token(), value),
                         owner,
                         path,
                     );
@@ -536,7 +532,7 @@ impl<'a> Rules<'a> {
                     self.expression(
                         node,
                         "EqualityOperator",
-                        self.splice(node, binary.operator_token(), op),
+                        self.splice(node, node.operator_token(), op),
                         owner,
                         path,
                     );
@@ -544,9 +540,9 @@ impl<'a> Rules<'a> {
                 if matches!(op.as_str(), "&&" | "||" | "??") {
                     let replacement = format!(
                         "({}) {} ({})",
-                        self.raw(binary.left()),
+                        self.raw(node.left()),
                         if op == "&&" { "||" } else { "&&" },
-                        self.raw(binary.right())
+                        self.raw(node.right())
                     );
                     self.expression(node, "LogicalOperator", replacement, owner, path);
                 }
@@ -600,9 +596,8 @@ impl<'a> Rules<'a> {
                 path,
             ),
             Kind::PrefixUnaryExpression => {
-                let unary = node.as_prefix_unary_expression();
-                let arg = self.raw(unary.operand());
-                let (family, value) = match unary.operator() {
+                let arg = self.raw(node.operand());
+                let (family, value) = match node.operator() {
                     Kind::ExclamationToken => ("BooleanLiteral", format!("({arg})")),
                     Kind::PlusToken => ("UnaryOperator", format!("- ({arg})")),
                     Kind::MinusToken => ("UnaryOperator", format!("+ ({arg})")),
@@ -614,14 +609,13 @@ impl<'a> Rules<'a> {
                 self.expression(node, family, value, owner, path);
             }
             Kind::PostfixUnaryExpression => {
-                let unary = node.as_postfix_unary_expression();
                 self.expression(
                     node,
                     "UpdateOperator",
                     format!(
                         "{}{}",
-                        self.raw(unary.operand()),
-                        if unary.operator() == Kind::PlusPlusToken {
+                        self.raw(node.operand()),
+                        if node.operator() == Kind::PlusPlusToken {
                             "--"
                         } else {
                             "++"
@@ -650,12 +644,7 @@ impl<'a> Rules<'a> {
                     );
                 }
             }
-            Kind::IfStatement => self.condition(
-                node.as_if_statement().expression().unwrap(),
-                false,
-                owner,
-                path,
-            ),
+            Kind::IfStatement => self.condition(node.expression().unwrap(), false, owner, path),
             Kind::ConditionalExpression => self.condition(
                 node.as_conditional_expression().condition(),
                 false,
@@ -668,21 +657,16 @@ impl<'a> Rules<'a> {
                 }
             }
             Kind::ForStatement => {
-                if let Some(test) = node.as_for_statement().condition() {
+                if let Some(test) = node.condition() {
                     self.condition(test, true, owner, path);
                 } else {
                     let start = node
-                        .as_for_statement()
                         .initializer()
                         .map(|n| self.end(n))
                         .unwrap_or(self.start(node));
-                    if let Some(offset) = graph_token(
-                        self.file.text(),
-                        start,
-                        self.start(node.as_for_statement().statement()),
-                        ";",
-                    )
-                    .map(|s| s.end as usize)
+                    if let Some(offset) =
+                        graph_token(self.file.text(), start, self.start(node.statement()), ";")
+                            .map(|s| s.end as usize)
                     {
                         let count = self.candidates.len();
                         self.add(
@@ -781,7 +765,7 @@ impl<'a> Rules<'a> {
                 break;
             }
             if p.kind() == Kind::ForStatement {
-                looping |= p.as_for_statement().condition() == Some(current);
+                looping |= p.condition() == Some(current);
                 break;
             }
             if !matches!(
@@ -947,7 +931,7 @@ impl<'a> Rules<'a> {
         }
         let is_async = node.is_async();
         let promise = if typ.kind() == Kind::TypeReference
-            && self.raw(typ.as_type_reference_node().type_name()) == "Promise"
+            && self.raw(typ.type_name()) == "Promise"
             && typ.type_arguments().len() == 1
         {
             Some(typ.type_arguments()[0])
@@ -1030,29 +1014,25 @@ impl<'a> Rules<'a> {
                 return result;
             }
             Kind::LiteralType => {
-                let literal = typ.as_literal_type_node().literal();
+                let literal = typ.literal();
                 return vec![if literal.kind() == Kind::StringLiteral {
                     serde_json::to_string(literal.text()).unwrap()
                 } else {
                     self.raw(literal).into()
                 }];
             }
-            Kind::TypeReference => match self.raw(typ.as_type_reference_node().type_name()) {
+            Kind::TypeReference => match self.raw(typ.type_name()) {
                 "Array" | "ReadonlyArray" => &["[]"],
                 "undefined" => &["undefined"],
                 _ => &[],
             },
-            Kind::TypeOperator
-                if typ.as_type_operator_node().operator() == Kind::ReadonlyKeyword =>
-            {
+            Kind::TypeOperator if typ.operator() == Kind::ReadonlyKeyword => {
                 return typ
                     .type_node()
                     .map(|n| self.type_values(n))
                     .unwrap_or_default();
             }
-            Kind::TypePredicate if typ.as_type_predicate_node().asserts_modifier().is_none() => {
-                &["true", "false"]
-            }
+            Kind::TypePredicate if typ.asserts_modifier().is_none() => &["true", "false"],
             _ => &[],
         };
         values.iter().map(|v| (*v).into()).collect()

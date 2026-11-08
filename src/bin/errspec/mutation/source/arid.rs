@@ -87,9 +87,8 @@ impl<'a> Arid<'a> {
                     && node.statements().iter().all(|child| self.statement(*child))
             }
             Kind::IfStatement => {
-                let branch = node.as_if_statement();
-                self.statement(branch.then_statement())
-                    && branch
+                self.statement(node.then_statement())
+                    && node
                         .else_statement()
                         .is_none_or(|child| self.statement(child))
             }

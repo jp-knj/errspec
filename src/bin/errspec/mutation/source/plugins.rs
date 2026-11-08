@@ -173,12 +173,10 @@ pub(super) fn apply<'a>(rules: &mut Rules<'a>, node: Node<'a>, owner: &str, path
                         Kind::PrefixUnaryExpression | Kind::PostfixUnaryExpression
                     ));
                 let lhs = parent.kind() == Kind::BinaryExpression
-                    && parent.as_binary_expression().left() == target
-                    && rules
-                        .raw(parent.as_binary_expression().operator_token())
-                        .ends_with('=')
+                    && parent.left() == target
+                    && rules.raw(parent.operator_token()).ends_with('=')
                     && !matches!(
-                        rules.raw(parent.as_binary_expression().operator_token()),
+                        rules.raw(parent.operator_token()),
                         "==" | "===" | "!=" | "!==" | "<=" | ">="
                     );
                 if reference || lhs {
